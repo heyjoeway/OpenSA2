@@ -1,0 +1,14 @@
+{
+    "file_format_version": "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_SA2_vkcap",
+        "type": "GLOBAL",
+        "library_path": "@LIBRARY@",
+        "api_version": "1.4.309",
+        "implementation_version": "1",
+        "description": "sa2-recomp R1: records the SPIR-V and specialization data handed to the driver (host/d3d9gpu/test/vkcap/vkcap.c)",
+        "functions": {
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+        }
+    }
+}

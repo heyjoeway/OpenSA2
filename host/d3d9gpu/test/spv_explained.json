@@ -1,0 +1,159 @@
+{
+ "schema": "sa2-d3d9gpu-spv-explained/v1",
+ "tool": "host/d3d9gpu/test/spv_canon.py",
+ "rule": "Every difference between DXVK's module and host 2's module for the same shader must be one of these classes, each a difference in how state reaches the shader or where a descriptor sits, never in what the shader computes. A class names the DXVK line and the host-2 line that cause it and the structural pattern spv_canon.py recognises; anything else is SPV_CANON_FAIL. The classes are spv_canon.py's only freedoms: removing one makes the modules it explains fail.",
+ "classes": [
+  {
+   "id": "spec_data",
+   "description": "Spec dword N: DXVK's graphics-pipeline-library variant reads it from member N of the spec-data uniform buffer at descriptor set 7, and its linked variant (the capture layer's, spv_canon.py --linked) has an OpSpecConstant with SpecId N, which the driver specialises with the pipeline's VkSpecializationInfo; host 2 reads member N (N < 7) of the state buffer. The GPL variant's reads and host 2's are lowerSpecConstantsToCbv's loads; against a linked module host 2's load is the same token as DXVK's constant, leaves the canonical stream (DXVK has no instruction there), and DXVK's SpecId decorations are this class's.",
+   "dxvk_source": "src/dxvk/dxvk_shader_ir.cpp:2076-2078 (ioPass.lowerSpecConstantsToCbv(SpecDataSet, 0u))",
+   "host2_source": "host/d3d9gpu/d9g_shader_abi.cpp lower_sdl_abi (lowerSpecConstantsToCbv(kStateSpace, 0u))",
+   "pattern": {
+    "dxvk": "OpLoad of OpAccessChain(Uniform variable with DescriptorSet 7, member N); linked: OpSpecConstant decorated SpecId N",
+    "host2": "OpLoad of OpAccessChain(the state buffer, member N), N < 7"
+   }
+  },
+  {
+   "id": "push_data",
+   "description": "A member of DXVK's D3D9 push blocks (fogColor, alphaRef, fogDistanceScale, fogDistanceEnd, fogDensity; cFSize, pointSize, pointSizeMin, pointSizeMax): DXVK reads it from push constants; host 2 reads the member of the same name and type from the state buffer.",
+   "dxvk_source": "src/d3d9/d3d9_shader.cpp:226-264 (setupSharedPushData, setupVsPushData), src/dxvk/dxvk_shader_ir.cpp:136-147 (mapPushData)",
+   "host2_source": "host/d3d9gpu/d9g_shader_abi.cpp lower_sdl_abi (push data into the state buffer)",
+   "pattern": {
+    "dxvk": "OpLoad of OpInBoundsAccessChain(PushConstant variable, member named M)",
+    "host2": "OpLoad of OpAccessChain(the state buffer, member named M), at or after member 7"
+   }
+  },
+  {
+   "id": "sampler_descriptor",
+   "description": "The sampler of D3D9 register N: DXVK indexes its global sampler heap with a 16-bit index from push data (member sN_*); host 2 loads the sampler variable of register N, bound at SDL's compacted slot.",
+   "dxvk_source": "src/dxvk/dxvk_shader_ir.cpp:960-1072 (loadConstantSamplerIndex, rewriteSampler, declareSamplerHeap)",
+   "host2_source": "host/d3d9gpu/d9g_shader_abi.cpp SdlResourceMapping::mapDescriptor (eSampler)",
+   "pattern": {
+    "dxvk": "OpLoad of OpAccessChain(the sampler heap OpTypeRuntimeArray variable, OpUConvert(OpLoad of push member sN_*))",
+    "host2": "OpLoad of the UniformConstant sampler variable sN_*"
+   }
+  },
+  {
+   "id": "set_binding",
+   "description": "A descriptor's DescriptorSet and Binding decorations: DXVK's sets (sampler 0, uniform 1, image 2, spec data 7) and D3D9 binding indices in its dump, wherever the pipeline's layout puts them in a module the capture layer recorded (its roles read by name from DXVK's dump of the same shader); SDL_gpu's sets (vertex textures 0, vertex uniforms 1, fragment textures 2, fragment uniforms 3) and slots. The descriptor's role and type must agree.",
+   "dxvk_source": "src/dxvk/dxvk_shader_ir.cpp:149-158 (setIndexForType), src/d3d9/d3d9_shader.h:53-70 (CbvIndex, computeTextureBinding)",
+   "host2_source": "host/d3d9gpu/d9g_shader.h UniformSlot, d9g_shader_abi.cpp SdlResourceMapping",
+   "pattern": {
+    "dxvk": "OpDecorate DescriptorSet/Binding on a descriptor variable",
+    "host2": "the same, on the descriptor variable of the same role"
+   }
+  },
+  {
+   "id": "dynamic_cf_length",
+   "description": "The dynamically indexed float constant buffer: DXVK declares its count plus one zero element (257 vectors for 256); host 2 declares 256, SDL's 4 KiB window. The declaration is all the class explains, and the identical SPIR-V leaves the device two obligations at the draw (R2-draws): DXVK clamps every dynamic index to the pushed count cFSize (d3d9_shader.cpp:378-390, the UMin) and writes a zero vector at index cFSize (\"Over-allocate buffer by one constant\", d3d9_device.cpp:6080-6083), so a clamped read past the pushed constants reads zeros; host 2's upload must hold zeros at index cFSize as well, and a draw whose count is 256 (whose clamped index would read the 257th element, which host 2 does not declare) is unmapped.",
+   "dxvk_source": "src/d3d9/d3d9_shader.cpp:328-343 (setupDynamicCbv); src/d3d9/d3d9_shader.cpp:378-390 (the clamp to cFSize), src/d3d9/d3d9_device.cpp:6080-6083 (the zero element)",
+   "host2_source": "host/d3d9gpu/d9g_shader_abi.cpp lower_sdl_abi (the dynamic float buffer at SDL's window)",
+   "pattern": {
+    "dxvk": "OpTypeArray of v4f32 with length 257 in the dynamic buffer's block",
+    "host2": "OpTypeArray of v4f32 with length 256 in the same role"
+   }
+  },
+  {
+   "id": "state_layout",
+   "description": "The blocks that carry state: DXVK's push-constant block and spec block; host 2's state buffer (seven spec dwords, then the push members). Their place differs; their layout does not: every member's Offset and type is held to the table below, on each side, by name, so a state buffer whose members sit anywhere else fails even when every load is labelled the same. A module the capture layer recorded has its push groups where its pipeline's push ranges put them: each group may start anywhere, but every member of it must sit at the group's one base plus its offset in DXVK's struct.",
+   "dxvk_source": "src/d3d9/d3d9_state.h:35-58 (D3D9SharedPushData, D3D9VsPushData), src/d3d9/d3d9_shader.cpp:226-264 (setupSharedPushData, setupVsPushData), src/dxvk/dxvk_shader_ir.cpp:135-145 (mapPushData: data of one stage at DxvkLimits::MaxSharedPushDataSize, src/dxvk/dxvk_limits.h:23), :2076-2078 (lowerSpecConstantsToCbv: spec dword N at member N)",
+   "host2_source": "host/d3d9gpu/d9g_shader.h (kStateSharedPushOffset 28, kStateVsPushOffset 44, kStateBytesVs 52, kStateBytesPs 44)",
+   "pattern": {
+    "dxvk": "types, decorations and variables of the PushConstant block and the set-7 block",
+    "host2": "types, decorations and variables of the state buffer"
+   },
+   "layout": {
+    "spec": {
+     "host2_dwords": 7,
+     "stride": 4,
+     "type": "Int(32,0)"
+    },
+    "dxvk_sampler_index_base": 32,
+    "groups": {
+     "shared": {
+      "dxvk_base": 0,
+      "host2_base": 28,
+      "stages": [
+       "Vertex",
+       "Fragment"
+      ],
+      "members": {
+       "fogColor": [
+        0,
+        "Vector(Int(8,0),3)"
+       ],
+       "alphaRef": [
+        3,
+        "Int(8,0)"
+       ],
+       "fogDistanceScale": [
+        4,
+        "Float(32)"
+       ],
+       "fogDistanceEnd": [
+        8,
+        "Float(32)"
+       ],
+       "fogDensity": [
+        12,
+        "Float(32)"
+       ]
+      }
+     },
+     "vs": {
+      "dxvk_base": 32,
+      "host2_base": 44,
+      "stages": [
+       "Vertex"
+      ],
+      "members": {
+       "cFSize": [
+        0,
+        "Int(16,0)"
+       ],
+       "pointSize": [
+        2,
+        "Int(16,0)"
+       ],
+       "pointSizeMin": [
+        4,
+        "Int(16,0)"
+       ],
+       "pointSizeMax": [
+        6,
+        "Int(16,0)"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "heap_capabilities",
+   "description": "Capabilities only one side's state fetch needs: DXVK's sampler heap (RuntimeDescriptorArray) and its 16-bit sampler indices and push members (Int16, Int8); host 2's sub-dword state members (Int8, Int16).",
+   "dxvk_source": "src/dxvk/dxvk_shader_ir.cpp:770-822 (declareSamplerHeap, declareSamplerPushData)",
+   "host2_source": "host/d3d9gpu/d9g_shader_abi.cpp (shared_push_type, vs_push_type)",
+   "pattern": {
+    "dxvk_only": [
+     "RuntimeDescriptorArray",
+     "Int16",
+     "Int8"
+    ],
+    "host2_only": [
+     "Int8",
+     "Int16"
+    ]
+   }
+  },
+  {
+   "id": "bgra_input_swizzle",
+   "description": "A D3DCOLOR vertex input in the variant's BGRA mask: host 2 reads component 2 - c for c < 3 (.zyxw), because SDL_gpu delivers the bytes B, G, R, A as RGBA8; DXVK gets the same values from VK_FORMAT_B8G8R8A8_UNORM.",
+   "dxvk_source": "src/d3d9/d3d9_device.cpp:7666-7750 (BindInputLayout, the D3DDECLTYPE_D3DCOLOR format)",
+   "host2_source": "host/d3d9gpu/d9g_shader.cpp apply_bgra",
+   "pattern": {
+    "host2": "OpLoad of OpAccessChain(Input variable at a location in the mask, component 2 - c)",
+    "dxvk": "the same load at component c"
+   }
+  }
+ ]
+}

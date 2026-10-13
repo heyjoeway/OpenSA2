@@ -1,0 +1,178 @@
+{
+  "schema": "sa2-recomp-refusal-reasons/v2",
+  "about": [
+    "Design 3.5 classifies imports into OS services, presentation, Steam and DRM.",
+    "S4's work list says presentation stubs are 'no-ops that record calls'. So a",
+    "presentation import that refuses -- traps for want of a stub, or answers with",
+    "failure by policy -- is a nonconformance unless a reason is recorded here.",
+    "",
+    "'Not implemented yet' is not a reason. A reason says why the refusal exists and",
+    "carries a falsifier: the observation that would make the reason wrong.",
+    "",
+    "Every entry names the native outcome of its import (the user's M4 ruling,",
+    "Documentation/decisions/2026-09-23-M4-refusal-native-outcome.md): native.outcome",
+    "is an outcome id in Documentation/receipts/s4-native-outcomes-v1.json, or null when",
+    "that receipt has no outcome for the import (the why may cite other native evidence,",
+    "such as a probe trace, but only a receipt outcome can back a claim to reproduce),",
+    "and native.reproduces says whether the",
+    "runtime's answer, in the configuration the retained replays run (the reach",
+    "receipt's environment), is that outcome. An entry that does not reproduce is",
+    "recorded as such, not excused: M4 does not count its import as implemented. An",
+    "entry with a null outcome may only say false. native.switches names the switches",
+    "that turn on the answer that would reproduce it, and native.requires_unset the",
+    "variables whose presence would change the runtime's answer. An entry may claim to",
+    "reproduce only when every switch is on and every such variable is unset in that",
+    "configuration, and, because a refusal answers failure, it may claim to reproduce",
+    "an outcome whose answer class is success only through a switch. A no-stub or",
+    "null-impl entry may only say false: its refusal is a trap, which answers nothing.",
+    "",
+    "kind: no-stub (an import slot with no stub), null-impl (a dynamic name with a NULL",
+    "implementation) or policy (a stub that answers with failure; or with a success whose",
+    "answer -- the value returned, the data written back, or the callbacks the call answers",
+    "through -- carries none of native's; or that traps on arguments a replay's native side",
+    "passes, marked before the trap; from the first sa2_import_refused marker in",
+    "runtime/*.c, exactly the marked imports). Not policy: RaiseException's return for the",
+    "SetThreadName code, which the G1 decision specifies",
+    "(Documentation/decisions/2026-09-19-G1-lifter-eh-threads.md, section 2 step 1) and",
+    "whose dispatch it leaves to M5's measurement; the caller resumes where native's",
+    "handler resumes it.",
+    "",
+    "Retired: the nine policy refusals recorded on 2026-09-26 as not reproducing native",
+    "(EnumSystemLocalesA's TRUE with no callback, GetEnvironmentStringsW's empty block, the",
+    "refusals of GetLocaleInfoA and W, IsValidLocale and IsValidCodePage, and the traps of",
+    "code page 936's GetCPInfo, MultiByteToWideChar and WideCharToMultiByte). The runtime",
+    "answers each as native does (runtime/sa2_imports.c, \"The locale\",",
+    "GetEnvironmentStringsW and \"code pages and locale\"; runtime/sa2_locale.h), marks",
+    "none, and tools/s4/locale_check.py holds every answer to the native traces: tables",
+    "offline, and run on a re-taken boot capture's own device profile, whose result, with",
+    "its inputs and every check, is Documentation/receipts/s4-locale-check-v1.json",
+    "(written by locale_check.py run --write at the landing after the re-take).",
+    "",
+    "Read by tools/s4/refusal_audit.py and tools/s4/import_status.py, and gated by",
+    "Documentation/scripts/check_refused_presentation.py."
+  ],
+  "reasons": [
+    {
+      "dll": "DINPUT8.dll",
+      "name": "DirectInput8Create",
+      "class": "presentation",
+      "subclass": "input",
+      "kind": "policy",
+      "recorded": "2026-09-24",
+      "why": "With SA2_DINPUT_DEVICE on, as the replay configuration has it (tools/s4/reach_receipt.py ENV, which switches DEVICES on for every run), DirectInput8Create answers what native answers: success and an IDirectInput8A from the recording DirectInput8 device (runtime/sa2_dinput.h), which answers the rest as native did and holds nothing -- one IDirectInputDevice8A per CreateDevice, with the system devices' CreateDevice answers and the game-controller enumeration read from the run's device profile. Native answers success (native-outcomes receipt, outcome dinput8-create, two traced boots): the game's DirectInput8Create is followed by CreateDevice through the interface it returned, which the game reaches only past the pointer test at 0x00864d42, and outcomes dinput8-devices and dinput8-enumeration show the rest: the system keyboard and mouse created, given their formats, acquired and read on every tick, and the game-controller enumeration. The reach run, in the replay configuration, calls it and its runtime never refuses it (Documentation/receipts/s4-run-reach-v1.json, the import table it names), so the answer reproduces the native outcome and M4 counts the import (Documentation/decisions/2026-09-23-M4-refusal-native-outcome.md). With the switch off, the runtime still answers E_FAIL, writes a null interface pointer and marks the answer refused (runtime/sa2_imports.c, imp_DirectInput8Create). The guest survives that -- 0x00864d3c clears the pointer and 0x00864d45 skips the whole input set-up, the XInput scan with it -- but surviving is not the native outcome, and a run that loads a capture's device profile with the switch off is refused at configuration (runtime/sa2_dinput.c, sa2_dinput_config_from_env), so the refusal answers only runs on the default profile.",
+      "falsifier": "A traced native boot in which the game's DirectInput8Create is followed by no call through the interface it returned would make failure native's answer, and the device's success not native's. A reach run in the replay configuration whose import table counts a refusal of DirectInput8Create, or no call of it, would show the switch does not replace the refusal, and the claim rule (Documentation/scripts/check_refused_presentation.py) then refuses this entry's claim.",
+      "owner_stage": "S4",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcomes dinput8-create, dinput8-devices and dinput8-enumeration; Documentation/receipts/s4-run-reach-v1.json, the reach run's import table; tools/s4/reach_receipt.py, ENV and DEVICES; runtime/sa2_imports.c, imp_DirectInput8Create; runtime/sa2_dinput.h; runtime/sa2_dinput.c, sa2_dinput_config_from_env",
+      "native": {
+        "outcome": "dinput8-create",
+        "reproduces": true,
+        "switches": ["SA2_DINPUT_DEVICE"]
+      }
+    },
+    {
+      "dll": "KERNEL32.dll",
+      "name": "LoadLibraryA",
+      "class": "os-service",
+      "subclass": "process",
+      "kind": "policy",
+      "recorded": "2026-09-24",
+      "why": "With SA2_DDRAW_DEVICE on, as the replay configuration has it (tools/s4/reach_receipt.py ENV, which switches DEVICES on for every run), LoadLibraryA('ddraw.dll') admits the module and runtime/sa2_ddraw.c answers both entry points and the methods the game calls: the device list and GetAvailableVidMem from the device profile, DirectDrawCreate and QueryInterface with interfaces it builds, and Release with the count of the guest's own references. That is native's outcome: the native-outcomes receipt (outcome ddraw-enumeration, two traced boots) shows ddraw.dll loading on the game thread at the request from 0x00865d4a, then DirectDrawEnumerateExA through the guest's callback 0x00865c20, DirectDrawCreate on the device the callback kept, QueryInterface for IDirectDraw7 and GetAvailableVidMem, whose total the game keeps in megabytes at +0x48 of its device wrapper (0x00865e2f). The reach run, in the replay configuration, calls LoadLibraryA and its runtime never refuses it, and its run record lists no module in loadlibrary_refused (Documentation/receipts/s4-run-reach-v1.json, the import table and run record it names), so the answer reproduces the native outcome and M4 counts the import (Documentation/decisions/2026-09-23-M4-refusal-native-outcome.md). DirectDrawCreate and DirectDrawEnumerateExA are not refusals of their own: their dynamic-table rows have implementations. With the switch off, LoadLibraryA('ddraw.dll') still answers 0 with ERROR_MOD_NOT_FOUND and the runtime marks that answer refused (runtime/sa2_imports.c, imp_LoadLibraryA); the guest then takes the je at 0x00865d54 and keeps 0 at +0x48. The absence is legal only on the default profile, since a capture's profile with SA2_DDRAW_DEVICE unset is refused at configuration (runtime/sa2_ddraw.c, sa2_ddraw_config_from_env).",
+      "falsifier": "A traced native boot in which ddraw.dll does not load at the request from 0x00865d4a, or in which DirectDrawEnumerateExA is not called with the callback 0x00865c20, would make the absence native's answer on that host; a run whose record lists ddraw.dll in loadlibrary_refused while its import table counts no refusal of LoadLibraryA would show the marker does not record the absence, and a replay with SA2_DDRAW_DEVICE=1 whose run record shows this marker firing would show the switch does not reach the refusal.",
+      "owner_stage": "S4",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcome ddraw-enumeration; Documentation/receipts/s4-run-reach-v1.json, the reach run's import table, and the run record it names (run_json), whose loadlibrary_refused lists no module; tools/s4/reach_receipt.py, ENV and DEVICES; runtime/sa2_imports.c, imp_LoadLibraryA and the g_os_modules comment; runtime/sa2_ddraw.h; runtime/sa2_ddraw.c, sa2_ddraw_config_from_env",
+      "native": {
+        "outcome": "ddraw-enumeration",
+        "reproduces": true,
+        "switches": ["SA2_DDRAW_DEVICE"]
+      }
+    },
+    {
+      "dll": "ole32.dll",
+      "name": "CoCreateInstance",
+      "class": "os-service",
+      "subclass": "com",
+      "kind": "policy",
+      "recorded": "2026-09-24",
+      "why": "With both devices on, as the replay configuration has them (tools/s4/reach_receipt.py ENV, which switches DEVICES on for every run), each class the native game asks for is answered as native answered it: the XAudio2 2.6 engine {00000000-0000-0000-0000-000000000000} by the recording XAudio2 engine (SA2_XAUDIO2_DEVICE, runtime/sa2_xaudio2.h), which the game initialises and streams through from a thread of its own, and the WMI locator {00000000-0000-0000-0000-000000000000} by a recording WMI locator (runtime/sa2_wbem.h), reached only through the recording DirectInput device's enumeration (SA2_DINPUT_DEVICE), whose enumerator returns the device profile's Win32_PNPEntity entities; each answers as native did and holds nothing. The native game asks for both classes and gets both (native-outcomes receipt, outcome cocreateinstance): the WMI locator from IsXInputDevice at 0x008646db, which it then connects to root\\cimv2 and scans (outcome wbem-scan), and the XAudio2 engine from 0x00784103, which it initialises and streams through (outcome xaudio2-stream). The reach run, in the replay configuration, calls CoCreateInstance and its runtime never refuses it (Documentation/receipts/s4-run-reach-v1.json, the import table it names). The reach run is on the boot replay's device profile (tools/s4/reach_receipt.py --replay boot, as tools/s4/tick_replay.py requires of the receipt its hooked run is held to), which enumerates one game controller: there the game asks for both classes, and the table shows CoCreateInstance called twice and never refused, the WMI locator created once. On the default profile, which enumerates none, the game calls IsXInputDevice for no device and asks for the XAudio2 class alone. So the answer reproduces the native outcome, and M4 counts the import (Documentation/decisions/2026-09-23-M4-refusal-native-outcome.md). With neither device on, the runtime still answers REGDB_E_CLASSNOTREG for every class, writes a null object pointer and marks the answer refused (runtime/sa2_imports.c, imp_CoCreateInstance, and runtime/sa2_xaudio2.c for the XAudio2 class), because it has no COM registry and no in-process server; the guest survives it -- 0x008646e3 and 0x0078410b take the failure branches -- but the lifted build then never runs the XAudio2 stream the native game runs.",
+      "falsifier": "A traced native boot in which CoCreateInstance for the WMI locator is followed by no ConnectServer, or CoCreateInstance for XAudio2 2.6 by no Initialize, would make REGDB_E_CLASSNOTREG native's answer for that class. A reach run in the replay configuration whose import table counts a refusal of CoCreateInstance, or no call of it, would show the switches do not replace the refusal, and the claim rule (Documentation/scripts/check_refused_presentation.py) then refuses this entry's claim; a run on a capture's profile that enumerates a game controller and counts a refusal of CoCreateInstance would show the WMI class still refused.",
+      "owner_stage": "S4",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcomes cocreateinstance, wbem-scan and xaudio2-stream; Documentation/receipts/s4-run-reach-v1.json, the reach run's import table; tools/s4/reach_receipt.py, ENV and DEVICES; runtime/sa2_imports.c, imp_CoCreateInstance; runtime/sa2_xaudio2.c; runtime/sa2_wbem.h",
+      "native": {
+        "outcome": "cocreateinstance",
+        "reproduces": true,
+        "switches": ["SA2_DINPUT_DEVICE", "SA2_XAUDIO2_DEVICE"]
+      }
+    },
+    {
+      "dll": "d3dx9_42.dll",
+      "name": "D3DXGetShaderConstantTable",
+      "class": "presentation",
+      "subclass": "graphics-d3dx",
+      "kind": "policy",
+      "recorded": "2026-09-24",
+      "why": "With SA2_D3DX_CONSTANT_TABLE on and the d3d9 device on (SA2_D3D9_DEVICE), D3DXGetShaderConstantTable answers what native answers: D3D_OK and an ID3DXConstantTable the runtime builds (runtime/sa2_d3d9.c, sa2_d3d9_d3dx_get_shader_constant_table), for a vertex or pixel shader's bytecode that carries a well-formed CTAB comment, found the way the oracle's D3DXFindShaderComment finds it. Any other bytecode is refused by name, since native answers it otherwise: a version token that is not a vertex or pixel shader's with D3D_OK and a null table, a missing or malformed comment with D3DXERR_INVALIDDATA. The table answers QueryInterface, AddRef and Release as COM requires -- its count starts at one, QueryInterface answers the table itself for IUnknown, ID3DXBuffer and d3dx9_42's ID3DXConstantTable and E_NOINTERFACE for any other interface, with the null *ppv COM requires where the oracle's QueryInterface leaves *ppv unwritten (0x1002e4fe in its d3dx9_42.dll), and its final Release destroys it -- and refuses every other method by name, because native calls none of them (the ID3DXConstantTable comment in runtime/sa2_d3d9.c; harness/d3dx_table_probe.c drives each through the vtable). Since the user's ruling of 2026-10-09 (item 1) the device's world is closed: QueryInterface and AddRef are off the M7 list (runtime/sa2_d3d9_m7_list.h), so in a gate or an automated run either traps by name before the table's handler answers; live play logs it and answers as above, and a unit build compiled with SA2_D3D9_OPEN_WORLD_UNIT_BUILD (as harness/d3dx_table_probe.c is) answers it silently. Native answers success (native-outcomes receipt, outcome d3dx-constant-table): in two traced vanilla-oracle boots every call is forwarded to D3DXGetShaderConstantTableEx, which finds the shader's CTAB comment and prints the table's header, one per call, and through boot, the title and the City Escape attract demo's gameplay no ID3DXConstantTable method is called on any table, not even Release. With the switch on, and every recording device on as the replay configuration has them, the lifted boot replay's run on the boot capture's device profile, the attract-demo run on its capture's profile for as long as that capture holds (boot and the title) and the synthetic Metal Harbor run each build one table per call, whose headers are the native trace's call for call, call nothing on any table but its one final Release -- made by the two release methods, 0x00866020 and 0x00866060, in the game's exit path, after the run's last Present -- and match the same build's switch-off run's tick capture and stage trace on every row (Documentation/receipts/s4-d3dx-table-v1.json, written by tools/s4/d3dx_table_check.py). No run calls QueryInterface, so the *ppv difference is not reached. So the answer reproduces the outcome, and M4 counts the import. With the switch off the import still refuses: it writes a null table, answers E_FAIL and marks the answer refused (runtime/sa2_imports.c, imp_D3DXGetShaderConstantTable); the guest stores that null at [object+50h] untested (0x00866338, 0x00866398), and six of the eight virtual methods that use a stored table (0x008673d0, and 0x00867240 through 0x00867380) call through it with no null test, while the two release methods test it and skip the Release.",
+      "falsifier": "A lifted run with SA2_D3DX_CONSTANT_TABLE on that calls anything on an ID3DXConstantTable but its one final Release -- another slot, QueryInterface, AddRef, or a Release that destroys nothing -- or that stops on one of the table's refusals or on the entry point's refusal of a shader's bytecode, makes 'native's answer and nothing more' wrong for that path: the game then needs something native was not measured answering. So does a traced native boot with WINEDEBUG=+d3dx that has an ID3DXConstantTableImpl_ line on any thread before the game's exit path, since native would then use a table in the measured span. A call with no table header after it, or a warn, err or fixme line from D3DXGetShaderConstantTable or its Ex function, would make an answer other than a table native's for that shader -- a failure, or D3D_OK with a null table for bytecode that is not a vertex or pixel shader's -- where the switch refuses it by name.",
+      "owner_stage": "S5",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcome d3dx-constant-table; runtime/sa2_d3d9.c, the ID3DXConstantTable comment and sa2_d3d9_d3dx_get_shader_constant_table; runtime/sa2_imports.c, imp_D3DXGetShaderConstantTable; harness/d3dx_table_probe.c; Documentation/receipts/s4-d3dx-table-v1.json, written by tools/s4/d3dx_table_check.py",
+      "native": {
+        "outcome": "d3dx-constant-table",
+        "reproduces": true,
+        "switches": ["SA2_D3D9_DEVICE", "SA2_D3DX_CONSTANT_TABLE"]
+      }
+    },
+    {
+      "dll": "XINPUT1_3.dll",
+      "name": "Ordinal#2",
+      "class": "presentation",
+      "subclass": "input",
+      "kind": "policy",
+      "recorded": "2026-09-23",
+      "conventional_name": "XInputGetState",
+      "why": "Called on neither side, and unreachable while every XInputGetCapabilities call answers ERROR_DEVICE_NOT_CONNECTED: XInputGetState's callers (0x00863d8c, 0x00863e19) and XInputSetState's (0x0086396b, 0x008639c2) are methods of the pad object (vtable 0x008fffe0, slots 7, 5, 17 and 16; nothing else references those methods), which the game builds only at 0x00864e53, past the test at 0x00864e2e and the jne at 0x00864e30, when the start-up scan's XInputGetCapabilities returns 0; the rescan's 0 answer (0x00864a2c/0x00864a2e) builds only a 12-byte object with vtable 0x008fff54 (0x00864a44), whose methods call neither. The traced native boot calls neither on any thread (native-outcomes receipt, outcome xinput-not-connected), so the native game built no pad object. The lifted build answers every XInput call from the capture's device profile, slot by slot (runtime/sa2_iface.c, sa2_xinput, through sa2_dp_xinput_caps_hr): ERROR_DEVICE_NOT_CONNECTED (1167) in slots 0 to 3, the only answer the profile's readers accept (runtime/sa2_devprofile.c and tools/s4/device_profile.py refuse a profile that records a pad, because a pad's input is part of no recording) and the default profile's. So the lifted game builds none either, and a connected pad fabricated here would make it build a pad object the native game never had. SA2_XINPUT_PAD=1 fabricates a connected pad for the falsifier; the runtime refuses it at configuration while a capture's device profile is loaded, the replay tools strip it from the environment they pass (tools/s4/reach_receipt.py clean_environ, over tools/s4/device_profile.py's), and this entry claims reproduction only while the replay configuration leaves it unset (native.requires_unset, held by Documentation/scripts/check_refused_presentation.py).",
+      "falsifier": "A native capture whose device profile records an XInputGetCapabilities answer other than 1167 for any slot, or a traced native boot with an XInputGetState or XInputSetState line on any thread, makes 1167 the wrong answer for that host; the device-profile readers refuse such a profile instead of answering 1167 for it. A replay run that answered with SA2_XINPUT_PAD set while a capture's profile was loaded would show the refusal does not reach the run.",
+      "owner_stage": "S5",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcome xinput-not-connected; runtime/sa2_iface.c, sa2_xinput; runtime/sa2_devprofile.h, sa2_dp_xinput_caps_hr; runtime/sa2_imports.c, imp_xinput",
+      "native": {
+        "outcome": "xinput-not-connected",
+        "reproduces": true,
+        "requires_unset": ["SA2_XINPUT_PAD"]
+      }
+    },
+    {
+      "dll": "XINPUT1_3.dll",
+      "name": "Ordinal#3",
+      "class": "presentation",
+      "subclass": "input",
+      "kind": "policy",
+      "recorded": "2026-09-23",
+      "conventional_name": "XInputSetState",
+      "why": "Called on neither side, and unreachable while every XInputGetCapabilities call answers ERROR_DEVICE_NOT_CONNECTED: XInputSetState's callers (0x0086396b, 0x008639c2) and XInputGetState's (0x00863d8c, 0x00863e19) are methods of the pad object (vtable 0x008fffe0, slots 7, 5, 17 and 16; nothing else references those methods), which the game builds only at 0x00864e53, past the test at 0x00864e2e and the jne at 0x00864e30, when the start-up scan's XInputGetCapabilities returns 0; the rescan's 0 answer (0x00864a2c/0x00864a2e) builds only a 12-byte object with vtable 0x008fff54 (0x00864a44), whose methods call neither. The traced native boot calls neither on any thread (native-outcomes receipt, outcome xinput-not-connected), so the native game built no pad object. The lifted build answers every XInput call from the capture's device profile, slot by slot (runtime/sa2_iface.c, sa2_xinput, through sa2_dp_xinput_caps_hr): ERROR_DEVICE_NOT_CONNECTED (1167) in slots 0 to 3, the only answer the profile's readers accept (runtime/sa2_devprofile.c and tools/s4/device_profile.py refuse a profile that records a pad, because a pad's input is part of no recording) and the default profile's. So the lifted game builds none either, and a connected pad fabricated here would make it build a pad object the native game never had. SA2_XINPUT_PAD=1 fabricates a connected pad for the falsifier; the runtime refuses it at configuration while a capture's device profile is loaded, the replay tools strip it from the environment they pass (tools/s4/reach_receipt.py clean_environ, over tools/s4/device_profile.py's), and this entry claims reproduction only while the replay configuration leaves it unset (native.requires_unset, held by Documentation/scripts/check_refused_presentation.py).",
+      "falsifier": "A native capture whose device profile records an XInputGetCapabilities answer other than 1167 for any slot, or a traced native boot with an XInputGetState or XInputSetState line on any thread, makes 1167 the wrong answer for that host; the device-profile readers refuse such a profile instead of answering 1167 for it. A replay run that answered with SA2_XINPUT_PAD set while a capture's profile was loaded would show the refusal does not reach the run.",
+      "owner_stage": "S5",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcome xinput-not-connected; runtime/sa2_iface.c, sa2_xinput; runtime/sa2_devprofile.h, sa2_dp_xinput_caps_hr; runtime/sa2_imports.c, imp_xinput",
+      "native": {
+        "outcome": "xinput-not-connected",
+        "reproduces": true,
+        "requires_unset": ["SA2_XINPUT_PAD"]
+      }
+    },
+    {
+      "dll": "XINPUT1_3.dll",
+      "name": "Ordinal#4",
+      "class": "presentation",
+      "subclass": "input",
+      "kind": "policy",
+      "recorded": "2026-09-23",
+      "conventional_name": "XInputGetCapabilities",
+      "why": "XInputGetCapabilities answers 'not connected' natively on the recording host, where no pad is attached. The native-outcomes receipt (outcome xinput-not-connected) counts the game thread's XInputGetCapabilities calls in a traced native boot and finds no XInputGetState or XInputSetState call on any thread. Those two are called only from methods of the pad object (vtable 0x008fffe0, slots 7, 5, 17 and 16; nothing else references those methods), which the game builds only at 0x00864e53, past the test at 0x00864e2e and the jne at 0x00864e30, when the start-up scan's XInputGetCapabilities returns 0; the rescan's 0 answer (0x00864a2c/0x00864a2e) builds only a 12-byte object with vtable 0x008fff54 (0x00864a44), whose methods call neither. So none of the start-up scan's calls returned 0. That absence does not show the rescan's answers; the capture's device profile records every slot's answer at the Mod Loader's Init, and no pad is attached on the recording host. The lifted build answers every XInput call from the capture's device profile, slot by slot (runtime/sa2_iface.c, sa2_xinput, through sa2_dp_xinput_caps_hr): ERROR_DEVICE_NOT_CONNECTED (1167) in slots 0 to 3, the only answer the profile's readers accept (runtime/sa2_devprofile.c and tools/s4/device_profile.py refuse a profile that records a pad, because a pad's input is part of no recording) and the default profile's. The stub records each call and zeroes the caller's buffer, so no caller reads its own stack back; native XInput leaves the buffer unwritten on 1167, and the game reads it only after a 0 answer. S4's input enters through neither XInput nor DirectInput's device state: the replays write ControllersRaw (0x01A52918) after UpdateControllers (0x0077E780), natively in harness/replay/native_input_probe.c and lifted in harness/replay/wrap_input_replay.c. SA2_XINPUT_PAD=1 fabricates a connected pad for the falsifier; the runtime refuses it at configuration while a capture's device profile is loaded, the replay tools strip it from the environment they pass (tools/s4/reach_receipt.py clean_environ, over tools/s4/device_profile.py's), and this entry claims reproduction only while the replay configuration leaves it unset (native.requires_unset, held by Documentation/scripts/check_refused_presentation.py).",
+      "falsifier": "A native capture whose device profile records an XInputGetCapabilities answer other than 1167 for any slot, or a traced native boot with an XInputGetState or XInputSetState line on any thread, makes 1167 the wrong answer for that host; the device-profile readers refuse such a profile instead of answering 1167 for it. A replay run that answered with SA2_XINPUT_PAD set while a capture's profile was loaded would show the refusal does not reach the run.",
+      "owner_stage": "S5",
+      "evidence": "Documentation/receipts/s4-native-outcomes-v1.json, outcome xinput-not-connected; runtime/sa2_iface.c, sa2_xinput; runtime/sa2_devprofile.h, sa2_dp_xinput_caps_hr; runtime/sa2_imports.c, imp_xinput",
+      "native": {
+        "outcome": "xinput-not-connected",
+        "reproduces": true,
+        "requires_unset": ["SA2_XINPUT_PAD"]
+      }
+    }
+  ]
+}

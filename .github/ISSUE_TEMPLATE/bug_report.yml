@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible failure in a development build or source tool.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Review the [known limitations](https://github.com/kittycache9/OpenSA2/blob/main/docs/status.md) first. This repository is an experimental source preview.
+        Share text diagnostics and reproduction steps. Do not attach game files, generated game code, or captures that contain game data. Remove personal paths and identifiers from logs.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux x86-64
+        - Windows x86-64
+        - Android arm64
+        - Linux arm64
+        - Other or source tooling
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Revision or build version
+      description: Identify the public revision or local development build you tested.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Hardware and software
+      description: Include the OS, CPU, GPU, driver, and renderer. For Android, include the device and Android version.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the game mode, stage or event, input device, and the shortest sequence that reproduces the problem.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant text diagnostics
+      description: Paste the error or missing-block address. Keep the output short and remove personal information.
+      render: text
+  - type: checkboxes
+    id: source_only
+    attributes:
+      label: Repository boundary
+      options:
+        - label: This report contains no game files, translated game code, or captures with game data.
+          required: true

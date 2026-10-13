@@ -1,0 +1,692 @@
+sa2-recomp local patch 0001 to SDL 3.4.16: border addressing and depth clamp
+
+    NOT FROM THE SDL PROJECT. This patch belongs to the SA2 Recompiled
+    project and was written for it by an AI agent (Claude). It is not
+    submitted to SDL and is not meant for submission: the user's rulings of
+    2026-10-04 (Documentation/decisions/2026-10-04-S5-user-rulings.md,
+    ruling 3, as amended by
+    Documentation/decisions/2026-10-04-S5-user-rulings-2.md) keep it in the
+    project, which applies it at every build.
+
+    Target: SDL release 3.4.16 (tag release-3.4.16), commit
+    fa2c02bb6e21974a89ea9824bc53c9932abe5f9c, the commit the release
+    tarball records in its own .git-hash file (its REVISION.txt reads
+    "release-3.4.16-0-gfa2c02bb6"). The tarball is SDL3-3.4.16.tar.gz,
+    sha256 7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68.
+
+    What it changes:
+
+    - Border addressing. A fourth sampler address mode,
+      SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER (value 3), with the border
+      color chosen through
+      SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER: transparent
+      black (the default), opaque black or opaque white.
+    - Depth clamp. SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN
+      clamps depth to the viewport's depth range while depth clip stays
+      enabled, as Direct3D does.
+    - Two device properties report support:
+      SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN and
+      SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN.
+
+    Every new property lives in a local namespace ("SDL.gpu.*.sa2recomp.*").
+    A stock or system SDL3 never sets them, so they read false there, and
+    that is how a build on stock SDL takes its shader fallback. Address
+    mode 3 means CLAMP_TO_BORDER only where the border property reads true.
+    No struct layout changes and no new functions.
+
+    Per backend:
+
+    - Vulkan: CLAMP_TO_BORDER and the three float border colors are core
+      1.0. Depth clamp with clip enables VK_EXT_depth_clip_enable, and its
+      depthClipEnable feature, only when the device reports the feature and
+      depth clamping is requested, and then chains
+      VkPipelineRasterizationDepthClipStateCreateInfoEXT.
+    - D3D12: D3D12_TEXTURE_ADDRESS_MODE_BORDER with BorderColor. D3D12
+      already clamps depth with DepthClipEnable on, so the pipeline needs
+      no change and the clip-and-clamp property is always true.
+    - Metal: MTLSamplerAddressModeClampToBorderColor on macOS only.
+      MTLDepthClipMode is clip or clamp, never both, so Metal reports no
+      depth clamp with clip and refuses the pipeline property.
+
+    In debug mode SDL_CreateGPUSampler checks the address modes and the
+    border color, and both creation functions refuse a feature the device
+    does not report.
+
+    Marked as modified (zlib licence, clause 2): the build configures SDL
+    with -DSDL_VENDOR_INFO="sa2-recomp sdl3-patches <id>", so
+    SDL_GetRevision() reads
+    "SDL-release-3.4.16-0-gfa2c02bb6 (sa2-recomp sdl3-patches <id>)".
+    <id> is the first 12 hex digits of the sha256 of L, where L is, for
+    each patch file in order, its sha256 as 64 lowercase hex digits
+    followed by one newline byte (0x0a). With this patch alone:
+
+      printf '%s\n' "$(sha256sum 0001-*.patch | cut -c1-64)" | sha256sum | cut -c1-12
+
+    How to apply it: strictly, in the top directory of the extracted
+    tarball, with GNU patch in the C locale,
+
+      LC_ALL=C patch -p1 --fuzz=0 --forward --batch < 0001-gpu-clamp-to-border-and-depth-clamp-with-clip.patch
+
+    and refuse the result if patch reports any hunk "succeeded at ...
+    (offset ...)": --fuzz=0 still lets GNU patch place a hunk at an offset,
+    and this patch, made against the pinned tarball, never needs one. The
+    project's build does exactly this (tools/s5/sdl3_patches.py) and also
+    refuses an apply that leaves a file it names unchanged. git apply is
+    not an equal alternative: it places a hunk at an offset without saying
+    so. Check the result as well as the exit status: afterwards
+    include/SDL3/SDL_gpu.h defines
+    SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN.
+
+  include/SDL3/SDL_gpu.h                  |  76 ++++++++++++++++-
+  src/gpu/SDL_gpu.c                       |  28 +++++++
+  src/gpu/SDL_sysgpu.h                    |   2 +
+  src/gpu/d3d12/SDL_gpu_d3d12.c           |  28 +++++--
+  src/gpu/metal/SDL_gpu_metal.m           |  57 ++++++++++++-
+  src/gpu/vulkan/SDL_gpu_vulkan.c         | 103 ++++++++++++++++++++++--
+  src/gpu/vulkan/SDL_gpu_vulkan_vkfuncs.h |   2 +
+  7 files changed, 278 insertions(+), 18 deletions(-)
+
+diff --git a/include/SDL3/SDL_gpu.h b/include/SDL3/SDL_gpu.h
+index 2236cb7..a46cf64 100644
+--- a/include/SDL3/SDL_gpu.h
++++ b/include/SDL3/SDL_gpu.h
+@@ -1295,17 +1295,42 @@ typedef enum SDL_GPUSamplerMipmapMode
+  * Specifies behavior of texture sampling when the coordinates exceed the 0-1
+  * range.
+  *
++ * SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER is not supported on every
++ * device. Check SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN in
++ * SDL_GetGPUDeviceProperties() before using it.
++ *
+  * \since This enum is available since SDL 3.2.0.
+  *
+  * \sa SDL_CreateGPUSampler
++ * \sa SDL_GPUSamplerBorderColor
+  */
+ typedef enum SDL_GPUSamplerAddressMode
+ {
+     SDL_GPU_SAMPLERADDRESSMODE_REPEAT,           /**< Specifies that the coordinates will wrap around. */
+     SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT,  /**< Specifies that the coordinates will wrap around mirrored. */
+-    SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE     /**< Specifies that the coordinates will clamp to the 0-1 range. */
++    SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,    /**< Specifies that the coordinates will clamp to the 0-1 range. */
++    SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER   /**< Specifies that texels outside the 0-1 range read the sampler's border color. (Local patch: sa2-recomp, not from the SDL project.) */
+ } SDL_GPUSamplerAddressMode;
+ 
++/**
++ * Specifies the color a sampler returns for texels outside the 0-1 range when
++ * its address mode is SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER.
++ *
++ * The border color is given to SDL_CreateGPUSampler() with
++ * SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER.
++ *
++ * \since This enum is a local patch (sa2-recomp), not part of any SDL release.
++ *
++ * \sa SDL_CreateGPUSampler
++ * \sa SDL_GPUSamplerAddressMode
++ */
++typedef enum SDL_GPUSamplerBorderColor
++{
++    SDL_GPU_SAMPLERBORDERCOLOR_TRANSPARENT_BLACK,  /**< (0, 0, 0, 0). The default. */
++    SDL_GPU_SAMPLERBORDERCOLOR_OPAQUE_BLACK,       /**< (0, 0, 0, 1). */
++    SDL_GPU_SAMPLERBORDERCOLOR_OPAQUE_WHITE        /**< (1, 1, 1, 1). */
++} SDL_GPUSamplerBorderColor;
++
+ /**
+  * Specifies the timing that will be used to present swapchain textures to the
+  * OS.
+@@ -1833,9 +1858,13 @@ typedef struct SDL_GPUTransferBufferCreateInfo
+  * For those devices, the fill mode will automatically fall back to FILL.
+  *
+  * Also note that the D3D12 driver will enable depth clamping even if
+- * enable_depth_clip is true. If you need this clamp+clip behavior, consider
++ * enable_depth_clip is true. To get this clamp+clip behavior on every device
++ * that supports it, set enable_depth_clip to true and pass
++ * SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN to
++ * SDL_CreateGPUGraphicsPipeline(). Where
++ * SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN is false, consider
+  * enabling depth clip and then manually clamping depth in your fragment
+- * shaders on Metal and Vulkan.
++ * shaders.
+  *
+  * \since This struct is available since SDL 3.2.0.
+  *
+@@ -1850,7 +1879,7 @@ typedef struct SDL_GPURasterizerState
+     float depth_bias_clamp;            /**< The maximum depth bias of a fragment. */
+     float depth_bias_slope_factor;     /**< A scalar factor applied to a fragment's slope in depth calculations. */
+     bool enable_depth_bias;            /**< true to bias fragment depth values. */
+-    bool enable_depth_clip;            /**< true to enable depth clip, false to enable depth clamp. */
++    bool enable_depth_clip;            /**< true to enable depth clip, false to enable depth clamp. See SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN for both. */
+     Uint8 padding1;
+     Uint8 padding2;
+ } SDL_GPURasterizerState;
+@@ -2579,6 +2608,25 @@ extern SDL_DECLSPEC SDL_GPUShaderFormat SDLCALL SDL_GetGPUShaderFormats(SDL_GPUD
+  * Driver Branch: promo490_3_Google
+  * ```
+  *
++ * `SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN`: true if
++ * samplers can be created with SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER and a
++ * border color: always on Vulkan and D3D12, on Metal only on macOS. Absent on
++ * an SDL without the sa2-recomp patch, which is how code tells the two apart;
++ * only where it reads true does address mode value 3 mean CLAMP_TO_BORDER.
++ * (Local patch: sa2-recomp, not from the SDL project.)
++ *
++ * `SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN`: true if
++ * graphics pipelines can be created with
++ * SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN, which
++ * clamps depth while depth clip is enabled. On Vulkan it is true only when the
++ * device was created with depth clamping
++ * (SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, true by default)
++ * and supports VK_EXT_depth_clip_enable's depthClipEnable. D3D12 always
++ * reports true, because it already clamps depth with depth clip on; it does
++ * not read the depth-clamping feature. Metal always reports false. Absent on an
++ * SDL without the sa2-recomp patch. (Local patch: sa2-recomp, not from the SDL
++ * project.)
++ *
+  * \param device a GPU context to query.
+  * \returns a valid property ID on success or 0 on failure; call
+  *          SDL_GetError() for more information.
+@@ -2593,6 +2641,8 @@ extern SDL_DECLSPEC SDL_PropertiesID SDLCALL SDL_GetGPUDeviceProperties(SDL_GPUD
+ #define SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING        "SDL.gpu.device.driver_name"
+ #define SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING     "SDL.gpu.device.driver_version"
+ #define SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING        "SDL.gpu.device.driver_info"
++#define SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN "SDL.gpu.device.sa2recomp.sampler_clamp_to_border"
++#define SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN    "SDL.gpu.device.sa2recomp.depth_clip_and_clamp"
+ 
+ 
+ /* State Creation */
+@@ -2656,6 +2706,17 @@ extern SDL_DECLSPEC SDL_GPUComputePipeline * SDLCALL SDL_CreateGPUComputePipelin
+  *
+  * - `SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_NAME_STRING`: a name that can be
+  *   displayed in debugging tools.
++ * - `SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN`: true
++ *   to clamp fragment depth to the viewport's depth range while
++ *   `rasterizer_state.enable_depth_clip` is true, so that primitives are
++ *   clipped against the near and far planes and depth is also clamped.
++ *   Defaults to false. On a device whose
++ *   SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN is true it
++ *   changes nothing when enable_depth_clip is false, which already clamps
++ *   without clipping. On a device whose property is false (every Metal device,
++ *   and Vulkan devices without the extension), pipeline creation fails while
++ *   this property is true, whatever enable_depth_clip is. (Local patch:
++ *   sa2-recomp, not from the SDL project.)
+  *
+  * \param device a GPU Context.
+  * \param createinfo a struct describing the state of the graphics pipeline to
+@@ -2674,6 +2735,7 @@ extern SDL_DECLSPEC SDL_GPUGraphicsPipeline * SDLCALL SDL_CreateGPUGraphicsPipel
+     const SDL_GPUGraphicsPipelineCreateInfo *createinfo);
+ 
+ #define SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_NAME_STRING "SDL.gpu.graphicspipeline.create.name"
++#define SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN "SDL.gpu.graphicspipeline.create.sa2recomp.depth_clamp"
+ 
+ /**
+  * Creates a sampler object to be used when binding textures in a graphics
+@@ -2684,6 +2746,11 @@ extern SDL_DECLSPEC SDL_GPUGraphicsPipeline * SDLCALL SDL_CreateGPUGraphicsPipel
+  *
+  * - `SDL_PROP_GPU_SAMPLER_CREATE_NAME_STRING`: a name that can be displayed
+  *   in debugging tools.
++ * - `SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER`: an
++ *   SDL_GPUSamplerBorderColor value, the color read for texels outside the 0-1
++ *   range on axes whose address mode is
++ *   SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER. Defaults to
++ *   SDL_GPU_SAMPLERBORDERCOLOR_TRANSPARENT_BLACK. (Local patch: sa2-recomp, not from the SDL project.)
+  *
+  * \param device a GPU Context.
+  * \param createinfo a struct describing the state of the sampler to create.
+@@ -2701,6 +2768,7 @@ extern SDL_DECLSPEC SDL_GPUSampler * SDLCALL SDL_CreateGPUSampler(
+     const SDL_GPUSamplerCreateInfo *createinfo);
+ 
+ #define SDL_PROP_GPU_SAMPLER_CREATE_NAME_STRING "SDL.gpu.sampler.create.name"
++#define SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER "SDL.gpu.sampler.create.sa2recomp.border_color"
+ 
+ /**
+  * Creates a shader to be used when creating a graphics pipeline.
+diff --git a/src/gpu/SDL_gpu.c b/src/gpu/SDL_gpu.c
+index 70a8656..0822c97 100644
+--- a/src/gpu/SDL_gpu.c
++++ b/src/gpu/SDL_gpu.c
+@@ -173,6 +173,12 @@
+         return retval;                                     \
+     }
+ 
++#define CHECK_SAMPLERADDRESSMODE_ENUM_INVALID(enumval, retval)    \
++    if ((int)enumval < 0 || enumval >= SDL_GPU_SAMPLERADDRESSMODE_MAX_ENUM_VALUE) { \
++        SDL_assert_release(!"Invalid sampler address mode enum!"); \
++        return retval;                                             \
++    }
++
+ #define COMMAND_BUFFER_DEVICE \
+     ((CommandBufferCommonHeader *)command_buffer)->device
+ 
+@@ -1152,6 +1158,11 @@ SDL_GPUGraphicsPipeline *SDL_CreateGPUGraphicsPipeline(
+             SDL_assert_release(!"Rasterizer state enable_depth_clip must be set to true (FEATURE_DEPTH_CLAMPING disabled)");
+             return NULL;
+         }
++        if (SDL_GetBooleanProperty(graphicsPipelineCreateInfo->props, SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN, false) &&
++            !SDL_GetBooleanProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN, false)) {
++            SDL_assert_release(!"DEPTH_CLAMP requires SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN");
++            return NULL;
++        }
+     }
+ 
+     return device->CreateGraphicsPipeline(
+@@ -1176,6 +1187,23 @@ SDL_GPUSampler *SDL_CreateGPUSampler(
+             SDL_assert_release(!"enable_anisotropy must be set to false (FEATURE_ANISOTROPY disabled)");
+             return NULL;
+         }
++        CHECK_SAMPLERADDRESSMODE_ENUM_INVALID(createinfo->address_mode_u, NULL)
++        CHECK_SAMPLERADDRESSMODE_ENUM_INVALID(createinfo->address_mode_v, NULL)
++        CHECK_SAMPLERADDRESSMODE_ENUM_INVALID(createinfo->address_mode_w, NULL)
++        if ((createinfo->address_mode_u == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER ||
++             createinfo->address_mode_v == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER ||
++             createinfo->address_mode_w == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER) &&
++            !SDL_GetBooleanProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN, false)) {
++            SDL_assert_release(!"CLAMP_TO_BORDER requires SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN");
++            return NULL;
++        }
++        if (SDL_HasProperty(createinfo->props, SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER)) {
++            Sint64 border_color = SDL_GetNumberProperty(createinfo->props, SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER, 0);
++            if (border_color < 0 || border_color >= SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE) {
++                SDL_assert_release(!"Invalid sampler border color enum!");
++                return NULL;
++            }
++        }
+     }
+ 
+     return device->CreateSampler(
+diff --git a/src/gpu/SDL_sysgpu.h b/src/gpu/SDL_sysgpu.h
+index 8e0e349..eba872a 100644
+--- a/src/gpu/SDL_sysgpu.h
++++ b/src/gpu/SDL_sysgpu.h
+@@ -151,6 +151,8 @@ typedef struct BlitPipelineCacheEntry
+ #define SDL_GPU_BLENDFACTOR_MAX_ENUM_VALUE          (SDL_GPU_BLENDFACTOR_SRC_ALPHA_SATURATE + 1)
+ #define SDL_GPU_SWAPCHAINCOMPOSITION_MAX_ENUM_VALUE (SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084 + 1)
+ #define SDL_GPU_PRESENTMODE_MAX_ENUM_VALUE          (SDL_GPU_PRESENTMODE_MAILBOX + 1)
++#define SDL_GPU_SAMPLERADDRESSMODE_MAX_ENUM_VALUE   (SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER + 1)
++#define SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE   (SDL_GPU_SAMPLERBORDERCOLOR_OPAQUE_WHITE + 1)
+ 
+ static inline Sint32 Texture_GetBlockWidth(
+     SDL_GPUTextureFormat format)
+diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
+index 43015c8..1029fba 100644
+--- a/src/gpu/d3d12/SDL_gpu_d3d12.c
++++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
+@@ -694,8 +694,17 @@ static D3D12_PRIMITIVE_TOPOLOGY_TYPE SDLToD3D12_PrimitiveTopologyType[] = {
+ static D3D12_TEXTURE_ADDRESS_MODE SDLToD3D12_SamplerAddressMode[] = {
+     D3D12_TEXTURE_ADDRESS_MODE_WRAP,   // REPEAT
+     D3D12_TEXTURE_ADDRESS_MODE_MIRROR, // MIRRORED_REPEAT
+-    D3D12_TEXTURE_ADDRESS_MODE_CLAMP   // CLAMP_TO_EDGE
++    D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // CLAMP_TO_EDGE
++    D3D12_TEXTURE_ADDRESS_MODE_BORDER  // CLAMP_TO_BORDER
+ };
++SDL_COMPILE_TIME_ASSERT(SDLToD3D12_SamplerAddressMode, SDL_arraysize(SDLToD3D12_SamplerAddressMode) == SDL_GPU_SAMPLERADDRESSMODE_MAX_ENUM_VALUE);
++
++static const float SDLToD3D12_SamplerBorderColor[][4] = {
++    { 0.0f, 0.0f, 0.0f, 0.0f }, // TRANSPARENT_BLACK
++    { 0.0f, 0.0f, 0.0f, 1.0f }, // OPAQUE_BLACK
++    { 1.0f, 1.0f, 1.0f, 1.0f }  // OPAQUE_WHITE
++};
++SDL_COMPILE_TIME_ASSERT(SDLToD3D12_SamplerBorderColor, SDL_arraysize(SDLToD3D12_SamplerBorderColor) == SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE);
+ 
+ static D3D12_FILTER SDLToD3D12_Filter(
+     SDL_GPUFilter minFilter,
+@@ -3324,6 +3333,10 @@ static SDL_GPUSampler *D3D12_CreateSampler(
+     const SDL_GPUSamplerCreateInfo *createinfo)
+ {
+     D3D12Renderer *renderer = (D3D12Renderer *)driverData;
++    Sint64 borderColor = SDL_GetNumberProperty(createinfo->props, SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER, SDL_GPU_SAMPLERBORDERCOLOR_TRANSPARENT_BLACK);
++    if (borderColor < 0 || borderColor >= SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE) {
++        SET_STRING_ERROR_AND_RETURN("Invalid sampler border color", NULL);
++    }
+     D3D12Sampler *sampler = (D3D12Sampler *)SDL_calloc(1, sizeof(D3D12Sampler));
+     if (!sampler) {
+         return NULL;
+@@ -3344,10 +3357,10 @@ static SDL_GPUSampler *D3D12_CreateSampler(
+     samplerDesc.MinLOD = createinfo->min_lod;
+     samplerDesc.MaxLOD = createinfo->max_lod;
+     samplerDesc.MipLODBias = createinfo->mip_lod_bias;
+-    samplerDesc.BorderColor[0] = 0;
+-    samplerDesc.BorderColor[1] = 0;
+-    samplerDesc.BorderColor[2] = 0;
+-    samplerDesc.BorderColor[3] = 0;
++    samplerDesc.BorderColor[0] = SDLToD3D12_SamplerBorderColor[borderColor][0];
++    samplerDesc.BorderColor[1] = SDLToD3D12_SamplerBorderColor[borderColor][1];
++    samplerDesc.BorderColor[2] = SDLToD3D12_SamplerBorderColor[borderColor][2];
++    samplerDesc.BorderColor[3] = SDLToD3D12_SamplerBorderColor[borderColor][3];
+ 
+     D3D12_INTERNAL_AssignStagingDescriptorHandle(
+         renderer,
+@@ -9083,6 +9096,11 @@ static SDL_GPUDevice *D3D12_CreateDevice(bool debugMode, bool preferLowPower, SD
+         SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "SDL_GPU Driver: D3D12");
+     }
+ 
++    // D3D12_TEXTURE_ADDRESS_MODE_BORDER is core, and D3D12 always clamps depth to the viewport's
++    // range, with or without DepthClipEnable
++    SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN, true);
++    SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN, true);
++
+     // Record device name
+     char *deviceName = SDL_iconv_wchar_utf8(&adapterDesc.Description[0]);
+     SDL_SetStringProperty(
+diff --git a/src/gpu/metal/SDL_gpu_metal.m b/src/gpu/metal/SDL_gpu_metal.m
+index 3a02f8f..74b69cd 100644
+--- a/src/gpu/metal/SDL_gpu_metal.m
++++ b/src/gpu/metal/SDL_gpu_metal.m
+@@ -328,8 +328,28 @@ static MTLSamplerAddressMode SDLToMetal_SamplerAddressMode[] = {
+     MTLSamplerAddressModeRepeat,       // REPEAT
+     MTLSamplerAddressModeMirrorRepeat, // MIRRORED_REPEAT
+     MTLSamplerAddressModeClampToEdge   // CLAMP_TO_EDGE
++    // CLAMP_TO_BORDER is mapped by METAL_INTERNAL_SamplerAddressMode, macOS only
+ };
+ 
++#ifdef SDL_PLATFORM_MACOS
++static MTLSamplerBorderColor SDLToMetal_SamplerBorderColor[] = {
++    MTLSamplerBorderColorTransparentBlack, // TRANSPARENT_BLACK
++    MTLSamplerBorderColorOpaqueBlack,      // OPAQUE_BLACK
++    MTLSamplerBorderColorOpaqueWhite       // OPAQUE_WHITE
++};
++SDL_COMPILE_TIME_ASSERT(SDLToMetal_SamplerBorderColor, SDL_arraysize(SDLToMetal_SamplerBorderColor) == SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE);
++#endif
++
++static MTLSamplerAddressMode METAL_INTERNAL_SamplerAddressMode(SDL_GPUSamplerAddressMode mode)
++{
++#ifdef SDL_PLATFORM_MACOS
++    if (mode == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER) {
++        return MTLSamplerAddressModeClampToBorderColor;
++    }
++#endif
++    return SDLToMetal_SamplerAddressMode[mode];
++}
++
+ static MTLSamplerMinMagFilter SDLToMetal_MinMagFilter[] = {
+     MTLSamplerMinMagFilterNearest, // NEAREST
+     MTLSamplerMinMagFilterLinear,  // LINEAR
+@@ -1111,6 +1131,10 @@ static SDL_GPUGraphicsPipeline *METAL_CreateGraphicsPipeline(
+         NSError *error = NULL;
+         MetalGraphicsPipeline *result = NULL;
+ 
++        if (SDL_GetBooleanProperty(createinfo->props, SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN, false)) {
++            SET_STRING_ERROR_AND_RETURN("Depth clamp with depth clip is not supported by this device", NULL);
++        }
++
+         if (renderer->debugMode) {
+             if (vertexShader->stage != SDL_GPU_SHADERSTAGE_VERTEX) {
+                 SDL_assert_release(!"CreateGraphicsPipeline was passed a fragment shader for the vertex stage");
+@@ -1361,13 +1385,29 @@ static SDL_GPUSampler *METAL_CreateSampler(
+ {
+     @autoreleasepool {
+         MetalRenderer *renderer = (MetalRenderer *)driverData;
+-        MTLSamplerDescriptor *samplerDesc = [MTLSamplerDescriptor new];
++        MTLSamplerDescriptor *samplerDesc;
+         id<MTLSamplerState> sampler;
+         MetalSampler *metalSampler;
++        Sint64 borderColor = SDL_GetNumberProperty(createinfo->props, SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER, SDL_GPU_SAMPLERBORDERCOLOR_TRANSPARENT_BLACK);
+ 
+-        samplerDesc.sAddressMode = SDLToMetal_SamplerAddressMode[createinfo->address_mode_u];
+-        samplerDesc.tAddressMode = SDLToMetal_SamplerAddressMode[createinfo->address_mode_v];
+-        samplerDesc.rAddressMode = SDLToMetal_SamplerAddressMode[createinfo->address_mode_w];
++        if (borderColor < 0 || borderColor >= SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE) {
++            SET_STRING_ERROR_AND_RETURN("Invalid sampler border color", NULL);
++        }
++#ifndef SDL_PLATFORM_MACOS
++        if (createinfo->address_mode_u == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER ||
++            createinfo->address_mode_v == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER ||
++            createinfo->address_mode_w == SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_BORDER) {
++            SET_STRING_ERROR_AND_RETURN("CLAMP_TO_BORDER is not supported by this device", NULL);
++        }
++#endif
++
++        samplerDesc = [MTLSamplerDescriptor new];
++        samplerDesc.sAddressMode = METAL_INTERNAL_SamplerAddressMode(createinfo->address_mode_u);
++        samplerDesc.tAddressMode = METAL_INTERNAL_SamplerAddressMode(createinfo->address_mode_v);
++        samplerDesc.rAddressMode = METAL_INTERNAL_SamplerAddressMode(createinfo->address_mode_w);
++#ifdef SDL_PLATFORM_MACOS
++        samplerDesc.borderColor = SDLToMetal_SamplerBorderColor[borderColor];
++#endif
+         samplerDesc.minFilter = SDLToMetal_MinMagFilter[createinfo->min_filter];
+         samplerDesc.magFilter = SDLToMetal_MinMagFilter[createinfo->mag_filter];
+         samplerDesc.mipFilter = SDLToMetal_MipFilter[createinfo->mipmap_mode]; // FIXME: Is this right with non-mipmapped samplers?
+@@ -4583,6 +4623,15 @@ static SDL_GPUDevice *METAL_CreateDevice(bool debugMode, bool preferLowPower, SD
+             SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "SDL_GPU Driver: Metal");
+         }
+ 
++        // MTLSamplerAddressModeClampToBorderColor is used on macOS only. MTLDepthClipMode is either
++        // clip or clamp, never both, so depth clamp with depth clip is not offered.
++#ifdef SDL_PLATFORM_MACOS
++        SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN, true);
++#else
++        SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN, false);
++#endif
++        SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN, false);
++
+         // Record device name
+         const char *deviceName = [device.name UTF8String];
+         SDL_SetStringProperty(
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index 330bb1a..ca2a3ea 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -61,6 +61,8 @@ typedef struct VulkanExtensions
+     Uint8 MSFT_layered_driver;
+     // Only required for decoding HDR ASTC textures
+     Uint8 EXT_texture_compression_astc_hdr;
++    // Only required for depth clip and depth clamp at once
++    Uint8 EXT_depth_clip_enable;
+ } VulkanExtensions;
+ 
+ // Defines
+@@ -427,8 +429,17 @@ static VkSamplerMipmapMode SDLToVK_SamplerMipmapMode[] = {
+ static VkSamplerAddressMode SDLToVK_SamplerAddressMode[] = {
+     VK_SAMPLER_ADDRESS_MODE_REPEAT,
+     VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+-    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
++    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+ };
++SDL_COMPILE_TIME_ASSERT(SDLToVK_SamplerAddressMode, SDL_arraysize(SDLToVK_SamplerAddressMode) == SDL_GPU_SAMPLERADDRESSMODE_MAX_ENUM_VALUE);
++
++static VkBorderColor SDLToVK_SamplerBorderColor[] = {
++    VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
++    VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
++    VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
++};
++SDL_COMPILE_TIME_ASSERT(SDLToVK_SamplerBorderColor, SDL_arraysize(SDLToVK_SamplerBorderColor) == SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE);
+ 
+ // Structures
+ 
+@@ -1139,6 +1150,7 @@ struct VulkanRenderer
+     bool supportsPortabilityEnumeration;
+     bool supportsFillModeNonSolid;
+     bool supportsMultiDrawIndirect;
++    bool supportsDepthClipAndClamp;
+ 
+     VulkanMemoryAllocator *memoryAllocator;
+     VkPhysicalDeviceMemoryProperties memoryProperties;
+@@ -6379,8 +6391,18 @@ static SDL_GPUGraphicsPipeline *VULKAN_CreateGraphicsPipeline(
+         VK_DYNAMIC_STATE_STENCIL_REFERENCE
+     };
+     VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo;
++    VkPipelineRasterizationDepthClipStateCreateInfoEXT depthClipStateCreateInfo;
+ 
+     VulkanRenderer *renderer = (VulkanRenderer *)driverData;
++    const bool clampWithClip = SDL_GetBooleanProperty(createinfo->props, SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_SA2RECOMP_DEPTH_CLAMP_BOOLEAN, false);
++
++    if (clampWithClip && !renderer->supportsDepthClipAndClamp) {
++        SDL_stack_free(vertexInputBindingDescriptions);
++        SDL_stack_free(vertexInputAttributeDescriptions);
++        SDL_stack_free(colorBlendAttachmentStates);
++        SDL_free(graphicsPipeline);
++        SET_STRING_ERROR_AND_RETURN("Depth clamp with depth clip is not supported by this device", NULL);
++    }
+ 
+     // Create a "compatible" render pass
+ 
+@@ -6481,6 +6503,15 @@ static SDL_GPUGraphicsPipeline *VULKAN_CreateGraphicsPipeline(
+     rasterizationStateCreateInfo.pNext = NULL;
+     rasterizationStateCreateInfo.flags = 0;
+     rasterizationStateCreateInfo.depthClampEnable = !createinfo->rasterizer_state.enable_depth_clip;
++    if (createinfo->rasterizer_state.enable_depth_clip && clampWithClip) {
++        // Clip against the near and far planes and clamp depth to the viewport's range, as D3D does
++        depthClipStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT;
++        depthClipStateCreateInfo.pNext = NULL;
++        depthClipStateCreateInfo.flags = 0;
++        depthClipStateCreateInfo.depthClipEnable = VK_TRUE;
++        rasterizationStateCreateInfo.pNext = &depthClipStateCreateInfo;
++        rasterizationStateCreateInfo.depthClampEnable = VK_TRUE;
++    }
+     rasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+     rasterizationStateCreateInfo.polygonMode = SDLToVK_PolygonMode(
+         renderer,
+@@ -6804,8 +6835,18 @@ static SDL_GPUSampler *VULKAN_CreateSampler(
+     const SDL_GPUSamplerCreateInfo *createinfo)
+ {
+     VulkanRenderer *renderer = (VulkanRenderer *)driverData;
+-    VulkanSampler *vulkanSampler = SDL_malloc(sizeof(VulkanSampler));
++    VulkanSampler *vulkanSampler;
+     VkResult vulkanResult;
++    Sint64 borderColor = SDL_GetNumberProperty(createinfo->props, SDL_PROP_GPU_SAMPLER_CREATE_SA2RECOMP_BORDER_COLOR_NUMBER, SDL_GPU_SAMPLERBORDERCOLOR_TRANSPARENT_BLACK);
++
++    if (borderColor < 0 || borderColor >= SDL_GPU_SAMPLERBORDERCOLOR_MAX_ENUM_VALUE) {
++        SET_STRING_ERROR_AND_RETURN("Invalid sampler border color", NULL);
++    }
++
++    vulkanSampler = SDL_malloc(sizeof(VulkanSampler));
++    if (!vulkanSampler) {
++        return NULL;
++    }
+ 
+     VkSamplerCreateInfo vkSamplerCreateInfo;
+     vkSamplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+@@ -6824,7 +6865,7 @@ static SDL_GPUSampler *VULKAN_CreateSampler(
+     vkSamplerCreateInfo.compareOp = SDLToVK_CompareOp[createinfo->compare_op];
+     vkSamplerCreateInfo.minLod = createinfo->min_lod;
+     vkSamplerCreateInfo.maxLod = createinfo->max_lod;
+-    vkSamplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK; // arbitrary, unused
++    vkSamplerCreateInfo.borderColor = SDLToVK_SamplerBorderColor[borderColor];
+     vkSamplerCreateInfo.unnormalizedCoordinates = VK_FALSE;
+ 
+     vulkanResult = renderer->vkCreateSampler(
+@@ -11279,7 +11320,7 @@ static inline Uint8 CheckDeviceExtensions(
+         supports->ext = 1;                   \
+     }
+         CHECK(KHR_swapchain)
+-        else CHECK(KHR_maintenance1) else CHECK(KHR_driver_properties) else CHECK(KHR_portability_subset) else CHECK(MSFT_layered_driver) else CHECK(EXT_texture_compression_astc_hdr)
++        else CHECK(KHR_maintenance1) else CHECK(KHR_driver_properties) else CHECK(KHR_portability_subset) else CHECK(MSFT_layered_driver) else CHECK(EXT_texture_compression_astc_hdr) else CHECK(EXT_depth_clip_enable)
+ #undef CHECK
+     }
+ 
+@@ -11295,7 +11336,8 @@ static inline Uint32 GetDeviceExtensionCount(VulkanExtensions *supports)
+         supports->KHR_driver_properties +
+         supports->KHR_portability_subset +
+         supports->MSFT_layered_driver +
+-        supports->EXT_texture_compression_astc_hdr);
++        supports->EXT_texture_compression_astc_hdr +
++        supports->EXT_depth_clip_enable);
+ }
+ 
+ static inline void CreateDeviceExtensionArray(
+@@ -11313,6 +11355,7 @@ static inline void CreateDeviceExtensionArray(
+     CHECK(KHR_portability_subset)
+     CHECK(MSFT_layered_driver)
+     CHECK(EXT_texture_compression_astc_hdr)
++    CHECK(EXT_depth_clip_enable)
+ #undef CHECK
+ }
+ 
+@@ -12487,6 +12530,39 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
+     return 1;
+ }
+ 
++static bool VULKAN_INTERNAL_SupportsDepthClipEnable(
++    VulkanRenderer *renderer,
++    VulkanFeatures *features)
++{
++    PFN_vkGetPhysicalDeviceFeatures2 getFeatures2 = NULL;
++    VkPhysicalDeviceDepthClipEnableFeaturesEXT depthClipFeatures;
++    VkPhysicalDeviceFeatures2 featureList;
++
++    if (!renderer->supports.EXT_depth_clip_enable || !features->desiredVulkan10DeviceFeatures.depthClamp) {
++        return false;
++    }
++
++    // vkGetPhysicalDeviceFeatures2 is core only on a 1.1 instance; a 1.0 instance needs the KHR alias
++    if (features->usesCustomVulkanOptions && VK_API_VERSION_MINOR(features->desiredApiVersion) > 0 &&
++        VK_API_VERSION_MINOR(renderer->physicalDeviceProperties.properties.apiVersion) > 0) {
++        getFeatures2 = renderer->vkGetPhysicalDeviceFeatures2;
++    } else if (renderer->supportsPhysicalDeviceProperties2) {
++        getFeatures2 = renderer->vkGetPhysicalDeviceFeatures2KHR;
++    }
++    if (getFeatures2 == NULL) {
++        return false;
++    }
++
++    SDL_zero(depthClipFeatures);
++    depthClipFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT;
++    SDL_zero(featureList);
++    featureList.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
++    featureList.pNext = &depthClipFeatures;
++    getFeatures2(renderer->physicalDevice, &featureList);
++
++    return featureList.features.depthClamp && depthClipFeatures.depthClipEnable;
++}
++
+ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+     VulkanRenderer *renderer,
+     VulkanFeatures *features)
+@@ -12495,6 +12571,7 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+     VkDeviceCreateInfo deviceCreateInfo;
+     VkPhysicalDeviceFeatures haveDeviceFeatures;
+     VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilityFeatures;
++    VkPhysicalDeviceDepthClipEnableFeaturesEXT depthClipFeatures;
+     const char **deviceExtensions;
+ 
+     VkDeviceQueueCreateInfo queueCreateInfo;
+@@ -12526,6 +12603,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+         renderer->supportsMultiDrawIndirect = true;
+     }
+ 
++    // EXT_depth_clip_enable is enabled only where it is used: depthClamp requested and depthClipEnable supported
++    renderer->supportsDepthClipAndClamp = VULKAN_INTERNAL_SupportsDepthClipEnable(renderer, features);
++    renderer->supports.EXT_depth_clip_enable = renderer->supportsDepthClipAndClamp ? 1 : 0;
++
+     // creating the logical device
+ 
+     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+@@ -12625,6 +12706,14 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+         deviceCreateInfo.pEnabledFeatures = &features->desiredVulkan10DeviceFeatures;
+     }
+ 
++    if (renderer->supportsDepthClipAndClamp) {
++        SDL_zero(depthClipFeatures);
++        depthClipFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT;
++        depthClipFeatures.pNext = (void *)deviceCreateInfo.pNext;
++        depthClipFeatures.depthClipEnable = VK_TRUE;
++        deviceCreateInfo.pNext = &depthClipFeatures;
++    }
++
+     vulkanResult = renderer->vkCreateDevice(
+         renderer->physicalDevice,
+         &deviceCreateInfo,
+@@ -12908,6 +12997,10 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
+         return NULL;
+     }
+ 
++    // CLAMP_TO_BORDER with the three standard border colors is core Vulkan 1.0
++    SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN, true);
++    SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN, renderer->supportsDepthClipAndClamp);
++
+     // FIXME: just move this into this function
+     result = (SDL_GPUDevice *)SDL_calloc(1, sizeof(SDL_GPUDevice));
+     ASSIGN_DRIVER(VULKAN)
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan_vkfuncs.h b/src/gpu/vulkan/SDL_gpu_vulkan_vkfuncs.h
+index a56beff..ce46dbb 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan_vkfuncs.h
++++ b/src/gpu/vulkan/SDL_gpu_vulkan_vkfuncs.h
+@@ -56,6 +56,8 @@ VULKAN_INSTANCE_FUNCTION(vkGetPhysicalDeviceFeatures2)
+ 
+ // VK_KHR_get_physical_device_properties2, needed for KHR_driver_properties
+ VULKAN_INSTANCE_FUNCTION(vkGetPhysicalDeviceProperties2KHR)
++// VK_KHR_get_physical_device_properties2, needed to query EXT_depth_clip_enable on a 1.0 instance
++VULKAN_INSTANCE_FUNCTION(vkGetPhysicalDeviceFeatures2KHR)
+ 
+ // VK_KHR_surface
+ VULKAN_INSTANCE_FUNCTION(vkDestroySurfaceKHR)

@@ -1,0 +1,90 @@
+{
+ "schema": "sa2-recomp-dispatch-exceptions/v2",
+ "about": [
+  "Named dispatch exceptions for tools/s4/mb_edges.py: one guest address per",
+  "entry, each with the reason it was reviewed and allowed.",
+  "",
+  "They were passed as --allow-target VA=reason arguments and lived only in the",
+  "generated mb_edges.<tag>.c, which is gitignored. On 2026-09-21 an ordinary",
+  "regeneration dropped the 0x00826f60 entry -- its row went from allow=1 with a",
+  "reason to allow=0 with none -- and the driven run fell from 369 WinMain",
+  "iterations to 1. Nothing failed; the gates all passed. A reviewed exception's",
+  "reason has to outlive the output it is compiled into, or the review is a",
+  "shell-history artefact.",
+  "",
+  "Adding an entry is a review: it says this edge may dispatch although it is not",
+  "a jmp, and why that is safe. Removing one changes what the guest can execute.",
+  "",
+  "**The `decoded` block is generated, not written.** Schema v1's prose evidence",
+  "said the reaching instruction was int3 padding; it is `push esp`, and",
+  "mb_edges' own comment on the same generated row said so while the reason",
+  "beside it did not. check_dispatch_exceptions.py now re-decodes both addresses",
+  "out of the shipped executable and fails on any field that disagrees, so a",
+  "described byte cannot contradict the byte."
+ ],
+ "exceptions": [
+  {
+   "va": "0x007a5929",
+   "tag": "next+allarms",
+   "reviewed": "2026-09-22",
+   "why": "0x007a5929 is FUN_007a5929, a function-table entry the map made in the middle of the C++ library's _Atexit walker (0x007a590f..0x007a5934), and the fall-through that makes the edge table refuse it is linear decoding past a jmp. The map module thunk_FUN_007a5929 at 0x007a590f is `jmp short 0x007a5929` followed by the loop body; remill's trace from 0x007a590f never reaches that body, but mb_edges decodes the module's range linearly and takes the body's call at 0x007a5922 as falling through into 0x007a5929, and the strictest kind wins. The edge remill actually lifts there is the jmp, a tail call into a function-table entry, which is what the policy dispatches.",
+   "evidence": "tools/s3/arms/cost.py's walk_detail -- the descent S3 validated against remill's own IR -- from 0x007a590f over [0x007a590f, 0x007a5929) visits only 0x007a590f and exits at 0x007a5929. The loop body's own call now returns inside a module: the extra 0x007a5911 is lifted over the whole loop to its ret (0x007a5934), and the same walk over it contains 0x007a5929 and exits only at 0x007a5933. The run that found it: the reach at the 1300-poll budget, on the exit path after the host's WM_QUIT, stopping at 0x007a5929 with the note naming the table's fall-through source even after the relift, because the table records one source per target.",
+   "falsifier": "Remove this entry and regenerate the edge table: the reach run at the 1300-poll budget stops at 0x007a5929 (`no lifted block ... reached by fall-through at 0x007a5922`) instead of continuing through the atexit handlers. For the reasoning rather than the effect: if the body were reachable from 0x007a590f's trace, walk_detail over the thunk's range would include 0x007a5922; it does not.",
+   "decoded": {
+    "source_va": "0x007a5922",
+    "source_byte": "0xff",
+    "source_mnemonic": "call dword [eax*4+175178Ch]",
+    "source_flow_control": "INDIRECT_CALL",
+    "target_bytes": "a1 64 70 91 00",
+    "target_mnemonic": "mov eax,[917064h]",
+    "target_flow_control": "NEXT",
+    "first_padding_va": "0x007a592e",
+    "first_padding_byte": "0x83"
+   }
+  },
+  {
+   "va": "0x007a78a6",
+   "tag": "next+allarms",
+   "reviewed": "2026-09-23",
+   "why": "0x007a78a6 is the second entry point of the C runtime's hand-written strchr: FUN_007a78a0 (xor eax,eax; mov al,[esp+8]) loads the character and runs straight on into 0x007a78a6, the label strstr also enters at, and the function map made each entry its own function. The fall-through from 0x007a78a2 is the program's own control flow, not a decoding artefact, and its target is a function-table entry lifted as a whole module, so dispatching it is executing on from the same state, which is what a tail call into that entry does.",
+   "evidence": "tools/s3/arms/cost.py's walk_detail -- the descent S3 validated against remill's IR -- from 0x007a78a0 over [0x007a78a0, 0x007a78a6) visits 0x007a78a0 and 0x007a78a2 and exits only at 0x007a78a6. The run that found it: the Metal Harbor test-spawn stage run (tools/s4/stage_run.py, driven by tools/s4/reach_extend.py --stage metalharbor), stopping at tick 117 with `no lifted block at 0x007a78a6 ... reached by fall-through at 0x007a78a2`. And strstr enters the same label by a real jump: 0x007a8444 is `jmp 0x007A78A6`, so the address is a tail-call target in the program's own code, not only a fall-through. (`first_padding_va` below is the byte after the target, which here is `mov ebx,eax`, not padding.)",
+   "falsifier": "Remove this entry and regenerate the edge table: the Metal Harbor stage run stops at 0x007a78a6 again. For the reasoning: if FUN_007a78a0 ended in a ret or jmp, walk_detail would not exit at 0x007a78a6; it exits nowhere else.",
+   "decoded": {
+    "target_mnemonic": "push ebx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "53",
+    "source_va": "0x007a78a2",
+    "source_byte": "0x8a",
+    "source_mnemonic": "mov al,[esp+8]",
+    "source_flow_control": "NEXT",
+    "first_padding_va": "0x007a78a7",
+    "first_padding_byte": "0x8b"
+   }
+  }
+ ],
+ "retired": [
+  {
+   "va": "0x00826f60",
+   "tag": "next+allarms",
+   "reviewed": "2026-09-21",
+   "recovered": "2026-09-21, out of the surviving good object's .rodata.str1.1 after the regeneration dropped it",
+   "corrected": "2026-09-22: the reason said the reaching instruction was int3 padding above the thunk. It is 0x54, `push esp`, flow control NEXT, and the int3 padding is at 0x00826f65 and below. The substance was right and the detail was wrong.",
+   "why": "0x00826f60 is a five-byte MSVC jmp thunk that is lifted as its own module, and the edge into it is not control flow the guest authored: it is a fall-through invented by decoding data linearly as instructions.",
+   "evidence": "The sixteen bytes at 0x00826f50 are 51 51 51 51 51 51 51 51 52 52 53 52 54 54 55 54 -- a run of ascending small values with the shape of a byte lookup table, which a linear decode turns into sixteen single-byte push instructions. The last of them, 0x54 `push esp` at 0x00826f5f, falls through into the thunk. mb_edges records the reaching instruction as `fall-through: push esp in 0x00823410`, a module Ghidra puts in the `cri` region, which is consistent with the thunk's neighbour being cft_sse_Ycc420plnToArgb8888Int1smp. Allowing the dispatch lets execution continue into the thunk, which is a real five-byte jmp with its own separate edge row {0x008158c0, 0x00826f60, jmp}.",
+   "falsifier": "Remove this entry, regenerate the edge table and re-run the driven loop: the run stops at 0x00826f60 with 13611 import calls instead of 165551, and 1 WinMain iteration instead of 369. That is the experiment that produced this file. A second falsifier for the reasoning rather than the effect: if 0x00826f50..0x00826f5f were really code, some instruction elsewhere would branch into it; nothing does, and the only edge into the region is this fall-through.",
+   "decoded": {
+    "source_va": "0x00826f5f",
+    "source_byte": "0x54",
+    "source_mnemonic": "push esp",
+    "source_flow_control": "NEXT",
+    "target_bytes": "e9 5b e9 fe ff",
+    "target_mnemonic": "jmp 008158C0h",
+    "target_flow_control": "UNCONDITIONAL_BRANCH",
+    "first_padding_va": "0x00826f65",
+    "first_padding_byte": "0xcc"
+   },
+   "retired": "2026-09-23",
+   "retired_why": "tools/s4/mb_edges.py now records edges only from code reachable within its range from a lifted entry (fixed-point liveness), so the fall-through invented by decoding the data before this thunk is no longer recorded and the row is the real `jmp` from 0x0080E645, which dispatches without an exception. Kept here as history; mb_edges applies only `exceptions`."
+  }
+ ]
+}

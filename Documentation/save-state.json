@@ -1,0 +1,18 @@
+{
+ "schema": "sa2-save-state/v1",
+ "directory": "resource/gd_PC/SAVEDATA",
+ "files": {
+  "SONIC2B__ALF": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "digest": "e4ac454bb534667fd0744f7b421308bb97359c55c0eab53fde8359d24eb3fd60",
+ "state": "before the Light Dash pickup",
+ "why": "SONIC2B__ALF alone, an empty file: what every install-before snapshot shows and what every run whose receipt records its start saves started from. In a Metal Harbor test-spawn run the game writes its save directory only at the Light Dash upgrade: it looks for SONIC2B__S01, finds none, and creates it. The only state from after the pickup ever recorded is that file as the game created it, empty, in the native recording and in the lifted replay, so there is no save from after the pickup to start from but the one a run makes itself. A run that found an S01 already there would differ from every recorded run from that first look on; what the game then does is not measured. Starting before the pickup keeps the pickup and the save it writes inside the run, where its replays are compared.",
+ "evidence": [
+  "All 156 install-before snapshots in private/generated/oracle/snapshots, taken 2026-09-21 to 2026-09-24, hold resource/gd_PC/SAVEDATA as SONIC2B__ALF alone with the sha256 above. So does every receipt that records session.saves.at_start. A snapshot shows the installation, which was the game's save directory until the mirror got one of its own on the evening of 2026-09-23, between the user's first recording and its replays; that recording and both replays record no start saves, and the second replay ran on the mirror after the first had passed the pickup, with no record of what it found there.",
+  "private/generated/oracle/snapshots/mh-record-20260923-212428-install-after.json holds one file more, SONIC2B__S01, which the user's first recording created, with the empty file's sha256. The other 154 install-after snapshots hold SONIC2B__ALF alone. The recording's native replays saved into the mirror's own save directory, which the runner resets before each run; the one removal recorded (mh-preflight-20260924-001127, undone_before_run) names the file and not its bytes.",
+  "The lifted replay of that recording created SONIC2B__S01 in its write overlay (agents-journals/s4/2026-09-23-recording-session.md, The lifted build saved too). The review of the recording session's changes (reviewer B, W5) read its run record and the overlay: it looked for SONIC2B__S01 twice, found none, and created it just before it opened ITEM_GET.ADX, resolutions 139 to 141, and the file was empty. A later run of the same name has since overwritten that run record. The overlay, private/generated/s4/vfsroot, still showed it on 2026-09-24: its resource and resource/gd_PC directories are dated 2026-09-23 21:46:38 (-0500), during the exploratory lifted replay whose result private/generated/s4/mh-replay/result.json was written at 21:58:09, and resource/gd_PC/SAVEDATA is dated 22:29:28, when the file was removed by hand; it has held nothing since."
+ ],
+ "ruled": "The user, 2026-09-24: the save file is a recorded input, restored to a fixed starting state before every native and lifted replay, with its hash in each capture's receipt.",
+ "check": ".venv/bin/python tools/oracle/save_state.py check",
+ "restore": ".venv/bin/python tools/oracle/save_state.py restore"
+}

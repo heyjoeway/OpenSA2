@@ -1,0 +1,584 @@
+{
+  "schema": "sa2-recomp-pins/v1",
+  "executables": {
+    "sonic2app.exe": {
+      "sha256": "4b1e09d782a2d919cbed2324ba2c0c78ef5fbe1677d400edab39608191f12c16",
+      "role": "shipped Steam build; provenance only, CEG-wrapped"
+    },
+    "sonic2app-unpacked.exe": {
+      "sha256": "c97b116fbd1d64108cbc8ec403b4a59ba6f815159b9a0ad896668d6c19c1bfe9",
+      "role": "Steamless-unpacked copy; the lifter's input (design decision 7)"
+    }
+  },
+  "tools": {
+    "ghidra": {
+      "version": "12.1.3_PUBLIC",
+      "build": "20260817",
+      "path": "private/predecessor-tools/ghidra/ghidra_12.1.3_PUBLIC"
+    },
+    "java": {
+      "version": "Temurin 21.0.12.1+1",
+      "path": "private/predecessor-tools/temurin21/jdk-21.0.12.1+1"
+    },
+    "zig": {
+      "version": "0.15.2",
+      "clang": "20.1.2",
+      "path": "private/predecessor-tools/zig/zig-x86_64-linux-0.15.2/zig"
+    },
+    "gcc": {
+      "version": "14.2.0",
+      "path": "/usr/bin/gcc"
+    },
+    "cmake": {
+      "version": "3.31.6",
+      "path": "/usr/bin/cmake"
+    },
+    "ninja": {
+      "version": "1.12.1",
+      "path": "/usr/bin/ninja"
+    },
+    "objdump": {
+      "version": "GNU Binutils 2.44",
+      "path": "/usr/bin/objdump"
+    },
+    "python": {
+      "version": "3.13.5",
+      "path": ".venv/bin/python"
+    },
+    "pefile": {
+      "version": "2024.8.26"
+    },
+    "iced-x86": {
+      "version": "1.21.0"
+    },
+    "pytest": {
+      "version": "9.1.1"
+    },
+    "sdl2": {
+      "version": "2.32.4+dfsg-1 (libsdl2-2.0-0, runtime only; headers not installed)"
+    },
+    "meson": {
+      "version": "1.7.0",
+      "path": "/usr/bin/meson",
+      "use": "configures DXVK Native in tools/s5/build_host_deps.sh (Debian package meson 1.7.0-1)"
+    },
+    "pkg-config": {
+      "version": "1.8.1",
+      "path": "/usr/bin/pkg-config",
+      "use": "finds SDL3 for DXVK Native's configure in tools/s5/build_host_deps.sh (pkgconf 1.8.1, Debian package pkgconf 1.8.1-4)"
+    },
+    "patch": {
+      "version": "GNU patch 2.8",
+      "path": "/usr/bin/patch",
+      "use": "applies the project's SDL3 patches (patches/sdl3) with no fuzz, through tools/s5/sdl3_patches.py, in tools/s5/build_host_deps.sh and host/d3d9gpu/test/extract_refs.py; sdl3_patches.py reads its messages in the C locale to refuse a hunk placed at an offset, so the version that writes them is pinned"
+    },
+    "dxvk": {
+      "version": "3.1.1",
+      "tag": "v3.1.1",
+      "commit": "b1a1c99ab52b687cf950d62c88bc2fa316b41663",
+      "url": "https://github.com/doitsujin/dxvk.git",
+      "path": "private/s5-tools/src/dxvk-3.1.1",
+      "library": "private/s5-tools/install/lib/x86_64-linux-gnu/libdxvk_d3d9.so.0",
+      "library_sha256": "ad6d32c23ef5c3813fabc9514f74c63fc30e830b162c7e69fc469e7d3f539beb",
+      "use": "S5's first host: DXVK Native's d3d9 with the SDL3 window system, built d3d9-only by tools/s5/build_host_deps.sh. \"library\" is libdxvk_d3d9.so.0, DXVK's SONAME and so the link the loader follows; the gate hashes the file it reaches. The checkout holds six submodule checkouts from five repositories, at the commits b1a1c99 records. Downloaded under the user's approval of 2026-09-29 (Documentation/decisions/2026-09-29-S5-host-downloads.md). \"dxbc_spirv_archive\" is R1's U1: the dxbc-spirv objects of DXVK's own build (its thin archive \"dxbc_spirv_build\"), copied by tools/s5/build_host_deps.sh into a deterministic archive (ar rcsD) that host 2's shader translator links, so it runs the machine code DXVK runs; the gate holds it to its hash, to a regular (not thin) archive, and to the build's members while the build is on disk",
+      "dxbc_spirv_archive": "private/s5-tools/install/lib/libdxbc_spv.a",
+      "dxbc_spirv_archive_sha256": "2c411941ec7ef1b063f63a63c0315015a2d6b4369c18a58aba09e117cf06c683",
+      "dxbc_spirv_build": "private/s5-tools/build/dxvk/subprojects/dxbc-spirv/libdxbc_spv.a"
+    },
+    "sdl3": {
+      "version": "3.4.16",
+      "commit": "fa2c02bb6e21974a89ea9824bc53c9932abe5f9c",
+      "path": "private/s5-tools/dl/SDL3-3.4.16.tar.gz",
+      "sha256": "7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68",
+      "url": "https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-3.4.16.tar.gz",
+      "library": "private/s5-tools/install/lib/libSDL3.so.0",
+      "library_sha256": "dcd594042e637353307b34f5876a66a3b86f86eccf5c7bf378893bf3b69f01ff",
+      "patches": [
+        {
+          "path": "patches/sdl3/0001-gpu-clamp-to-border-and-depth-clamp-with-clip.patch",
+          "sha256": "653660ac0b15698fbed86c3deee6bdc032aa03ecf864f25377ddb2122c9e8734"
+        }
+      ],
+      "vendor_info": "sa2-recomp sdl3-patches f7d5f0abeaa4",
+      "use": "S5's platform layer and DXVK Native's window system, built by tools/s5/build_host_deps.sh in its patched configuration (the default): the pinned tarball, which records \"commit\" in its .git-hash, with the project's own patches (\"patches\", under patches/sdl3: border addressing and depth clamp; not from the SDL project, and nothing is submitted to SDL, per the user's second rulings of 2026-10-04, Documentation/decisions/2026-10-04-S5-user-rulings-2.md) applied strictly, and SDL_VENDOR_INFO \"vendor_info\", the patches' identity, so the library's revision is marked as altered (zlib licence, clause 2). The stock build is sdl3-stock. \"library\" is libSDL3.so.0, the name DXVK dlopens (src/wsi/sdl3/wsi_platform_sdl3.cpp) and SDL3's SONAME; the gate hashes the file it reaches. X screensaver and XTest are configured off, because SDL's configure refuses them without their development packages, which are absent. Dynamic ALSA uses freshly extracted pinned Debian headers and the pinned installed libasound.so.2. PulseAudio, PipeWire, JACK and sndio are explicitly off. Off for want of development packages: libdecor (window decorations under Wayland on GNOME and Weston), D-Bus, IBus, libudev, KMSDRM, liburing and HIDAPI's libusb. The SDL source was downloaded under the user's approval of 2026-09-29 (Documentation/decisions/2026-09-29-S5-host-downloads.md); the ALSA headers package, fetched from deb.debian.org on 2026-10-01 outside that approval, was ratified by the user on 2026-10-02 (Documentation/decisions/2026-10-02-S5-alsa-headers-download.md)",
+      "alsa_headers": {
+        "path": "private/s5-tools/dl/libasound2-dev_1.2.14-1+deb13u1_amd64.deb",
+        "url": "https://deb.debian.org/debian/pool/main/a/alsa-lib/libasound2-dev_1.2.14-1+deb13u1_amd64.deb",
+        "bytes": 120152,
+        "sha256": "dfa8e8a133ef8704093d03464d86a3e86d26232baf1e3827aa030cb68c437e1c",
+        "package": "libasound2-dev",
+        "version": "1.2.14-1+deb13u1",
+        "architecture": "amd64",
+        "depends": "libasound2t64 (= 1.2.14-1+deb13u1)",
+        "headers_manifest_sha256": "7a420b449c5a2541a9d8728c886b2329ddff5c89b3da86097c0f09650a627450",
+        "runtime_path": "/usr/lib/x86_64-linux-gnu/libasound.so.2",
+        "runtime_realpath": "/usr/lib/x86_64-linux-gnu/libasound.so.2.0.0",
+        "runtime_sha256": "0faa79c7a37189b9efcd9bff5874cd1af1c05b0cc66831733087d84cbe87e811"
+      }
+    },
+    "sdl3-stock": {
+      "version": "3.4.16",
+      "prefix": "private/s5-tools/install-sdl3-stock",
+      "library": "private/s5-tools/install-sdl3-stock/lib/libSDL3.so.0",
+      "library_sha256": "7213eeb3b65e814de21edbf80b639bc6f8244766e6cfaeb6afa1dbc931075679",
+      "dxvk_library": "private/s5-tools/install-sdl3-stock/lib/x86_64-linux-gnu/libdxvk_d3d9.so.0",
+      "glslang_binary": "private/s5-tools/install-sdl3-stock/bin/glslang",
+      "dxbc_spirv_archive": "private/s5-tools/install-sdl3-stock/lib/libdxbc_spv.a",
+      "dxbc_spirv_build": "private/s5-tools/build-sdl3-stock/dxvk/subprojects/dxbc-spirv/libdxbc_spv.a",
+      "use": "The stock SDL3 configuration (tools/s5/build_host_deps.sh --sdl3=stock), in its own prefix: sdl3's pinned tarball with no patch and no vendor string, and the glslang, DXVK Native and dxbc-spirv archive built against it, which are the patched configuration's bytes and so are held to the glslang and dxvk pins (one pin per distinct file: a stock build of them that differed would fail here and need its own). Its SDL reports neither of the patch's device properties; host 2 detects that at run time and reports the shader-emulation fallback as owed (the fallback itself is phase B's work, not built yet). The user's second rulings of 2026-10-04 (Documentation/decisions/2026-10-04-S5-user-rulings-2.md) hold it to running the replays with only the named BORDER and DEPTH_CLAMP residues, which can bite once host 2 draws; until then the gates hold this build (here) and its SDL reporting neither property (Documentation/scripts/tests/test_s5_sdl3_patch.py), and patches/sdl3/README.md lists what is owed. A system SDL3 (--sdl3=system) is not pinned, has no gate, and no player is built on it"
+    },
+    "glslang": {
+      "version": "16.6.0",
+      "path": "private/s5-tools/dl/glslang-16.6.0.tar.gz",
+      "sha256": "9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2",
+      "url": "https://github.com/KhronosGroup/glslang/archive/refs/tags/16.6.0.tar.gz",
+      "binary": "private/s5-tools/install/bin/glslang",
+      "binary_sha256": "527696e58a84a64a98423e48f77e15bd80a98c9ba9fa0dd9297ca27e3660a93a",
+      "use": "DXVK Native's shader compiler at build time, built by tools/s5/build_host_deps.sh. The archive is the one GitHub generates for the tag, and GitHub does not promise to keep those bytes: the copy under private/s5-tools/dl is the source of truth, and a refetch that hashes differently fails closed. Downloaded under the user's approval of 2026-09-29 (Documentation/decisions/2026-09-29-S5-host-downloads.md)"
+    },
+    "proton": {
+      "version": "Proton - Experimental",
+      "prefix_version": "11.0-100",
+      "path": "private/proton-prefix"
+    },
+    "steamless": {
+      "version": "3.1.0.5",
+      "path": "private/predecessor-tools/steamless"
+    },
+    "sa2-mod-loader": {
+      "commit": "611d686f123e39ee843acea5ceb8d0561233ffea",
+      "date": "2026-08-08",
+      "path": "private/predecessor-tools/sa2-mod-loader",
+      "use": "community name source; cited, not vendored (licence check done: Documentation/receipts/modloader-licence-v1.json)"
+    },
+    "sa-tools": {
+      "version": "774",
+      "version_source": "satoolsver.txt in the install directory",
+      "path": "private/predecessor-tools/SA.Tools.x64",
+      "use": "asset extraction (S5)"
+    },
+    "unity": {
+      "version": "1.0.0-beta.8",
+      "version_source": "unity --version",
+      "path": "/home/user/.local/bin/unity",
+      "use": "host (S5)"
+    },
+    "retdec": {
+      "version": "5.0",
+      "commit": "53e55b4b26e9b843787f0e06d867441e32b1604e",
+      "tarball_sha256": "e5a7dd82987ff52b8c714892277d0b1d0190ab778c03036d01eb69c7658ab1a5",
+      "url": "https://github.com/avast/retdec/releases/download/v5.0/RetDec-v5.0-Linux-Release.tar.xz",
+      "path": "private/lifters/retdec",
+      "use": "S1 lifter spike; 0/10 on fixtures, not adopted"
+    },
+    "remill": {
+      "version": "5.0.7",
+      "commit": "c0f90b9e4a251615288ed4b65ead81cea617da8c",
+      "tarball_sha256": "2a63aba1dbbc625f4a43894ffccd5e08b4fc14c4e8070a7fe9c9f39d5af7b2ab",
+      "url": "https://github.com/lifting-bits/remill/releases/download/v5.0.7/remill_ubuntu-20.04_packages.zip",
+      "path": "private/lifters/remill",
+      "use": "S1 lifter spike; remill adopted at G1 with the PC24 post-lift pass"
+    },
+    "spirv-headers": {
+      "version": "09913f088a1197aba4aefd300a876b2ebbaa3391",
+      "commit": "09913f088a1197aba4aefd300a876b2ebbaa3391",
+      "tree": "d379c3afab7521f3323fc718cffe2b9bbb5ce499",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "path": "private/s5-tools/src/shader-tools/SPIRV-Headers",
+      "use": "SPIR-V's grammar headers, which SPIRV-Tools and the validation layers build against (asked for by name and approved, 2026-10-04). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "spirv-tools": {
+      "version": "vulkan-sdk-1.4.309.0",
+      "commit": "f289d047f49fb60488301ec62bafab85573668cc",
+      "tree": "786e95a4f45dfc076ad0818cca804b05d7b2bc90",
+      "url": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+      "path": "private/s5-tools/src/shader-tools/SPIRV-Tools",
+      "binary": "private/s5-tools/install-shader-tools/bin/spirv-val",
+      "binary_sha256": "2ca3eeadc51d6a06986df57d0501da302383a74fc0a5b5bfe5a81c1159ee3378",
+      "disassembler": "private/s5-tools/install-shader-tools/bin/spirv-dis",
+      "disassembler_sha256": "e5ad6b417427f07409eb7ee4470086ac240ed82670a753f40aa32fecaf0cff60",
+      "assembler": "private/s5-tools/install-shader-tools/bin/spirv-as",
+      "assembler_sha256": "cbfba4c3d67bba352d9da96a880aa884439789359bc3cd30b1114baa88f579ee",
+      "optimizer": "private/s5-tools/install-shader-tools/bin/spirv-opt",
+      "optimizer_sha256": "3cd490b474fb9b182e91d2c6eb9db1332616bca6855b7fb27dc0415ffe7bf0dc",
+      "use": "spirv-val, the independent validity check of every SPIR-V module host 2 creates; spirv-as and spirv-dis for the comparer's test pairs; spirv-opt as the comparer's instrument on DXVK's side of C3's linked half, folding DXVK's linked pixel shader at the sampler-mode word its pipeline gives (host/d3d9gpu/test/spv_freeze.py; never linked into host 2). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "spirv-cross": {
+      "version": "1a6169566c73d3da552748fc372fe2bbb856e46e",
+      "commit": "1a6169566c73d3da552748fc372fe2bbb856e46e",
+      "tree": "bd189817098a38626b322d0e54a39a2b974c1b61",
+      "url": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+      "path": "private/s5-tools/src/shader-tools/SPIRV-Cross",
+      "library": "private/s5-tools/install-shader-tools/lib/libspirv-cross-c-shared.so.0",
+      "library_sha256": "a43040f1f7f4bca0433b35d2af2fa55cce2ad4b02a9b7d842af554405d08beee",
+      "binary": "private/s5-tools/install-shader-tools/bin/spirv-cross",
+      "binary_sha256": "132948ff44f0bcacec4b6289a72f781c453e12dc817f7d3f901812026bcc2553",
+      "use": "SPIR-V to the Metal shading language, under SDL_shadercross and as its own command line (spirv-cross --msl --msl-version 20300): the Metal-conversion check of ruling 2 (the commit SDL_shadercross records for its submodule; host/d3d9gpu/test/metal_check.py). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "sdl-shadercross": {
+      "version": "1ff05bec573988a98ef9e0260b4da44f512b8367",
+      "commit": "1ff05bec573988a98ef9e0260b4da44f512b8367",
+      "tree": "90069581299580ef2a9c11cd57b871397c76bc39",
+      "url": "https://github.com/libsdl-org/SDL_shadercross.git",
+      "path": "private/s5-tools/src/shader-tools/SDL_shadercross",
+      "binary": "private/s5-tools/install-shader-tools/bin/shadercross",
+      "binary_sha256": "184ea0dda79461dd8413c27b914cf1f0b86121e217593e218b252d95eb8c7e2f",
+      "library": "private/s5-tools/install-shader-tools/lib/libSDL3_shadercross.so.0",
+      "library_sha256": "e99335e7b1a57c56e658466975a94c249344a2f290f7107985bddba257943f7f",
+      "use": "SDL's shader tool, built with DirectXShaderCompiler off: the Metal-conversion check of ruling 2 (no release tags exist, so pinned by commit). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "vulkan-utility-libraries": {
+      "version": "50563f48368d75281bc2fb1c3407dc531ce28910",
+      "commit": "50563f48368d75281bc2fb1c3407dc531ce28910",
+      "tree": "e27ad76fbed2ac700ceef7b57498bdd983f3de74",
+      "url": "https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git",
+      "path": "private/s5-tools/src/shader-tools/Vulkan-Utility-Libraries",
+      "use": "a build dependency of the validation layers (asked for by name and approved, 2026-10-04). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "robin-hood-hashing": {
+      "version": "3.11.5",
+      "commit": "9145f963d80d6a02f0f96a47758050a89184a3ed",
+      "tree": "112118933fdbd31387018c1e176db284fe7e14d7",
+      "url": "https://github.com/martinus/robin-hood-hashing.git",
+      "path": "private/s5-tools/src/shader-tools/robin-hood-hashing",
+      "use": "a build dependency of the validation layers (asked for by name and approved, 2026-10-04). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "vulkan-validation-layers": {
+      "version": "vulkan-sdk-1.4.309.0",
+      "commit": "3ba0e590a2e76475b3eef4043355b498fb64e752",
+      "tree": "62a4ac3b85361016d5e178e09fb897597157b175",
+      "url": "https://github.com/KhronosGroup/Vulkan-ValidationLayers.git",
+      "path": "private/s5-tools/src/shader-tools/Vulkan-ValidationLayers",
+      "library": "private/s5-tools/install-shader-tools/lib/libVkLayer_khronos_validation.so",
+      "library_sha256": "e8cf29f346d5163b18824a37f8944288573b6f9eca19bd52a5a4e304b5be9d47",
+      "manifest": "private/s5-tools/install-shader-tools/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json",
+      "manifest_sha256": "b8b48ce0b6971af875f67cc8bf2634c71e2b7742ed6dc4b9f5ebc20046ed2c08",
+      "use": "the Khronos validation layer host 2's debug runs load and fail on (the user's second rulings of 2026-10-04: Vulkan misuse a desktop driver tolerates is what breaks on phones). Built by tools/s5/build_shader_tools.sh into private/s5-tools/install-shader-tools from a shallow checkout at \"commit\" (tree \"tree\"); downloaded under the user's approval by name of 2026-10-04 (Documentation/decisions/2026-10-04-S5-shader-tool-downloads.md)"
+    },
+    "validation-350-vulkan-headers": {
+      "version": "v1.4.350",
+      "commit": "8864cdc896bbc2a9b6eb36b3218fc9ef57908d77",
+      "tree": "25b446994cd7956846e2d07e9958724d78c7ae3d",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "path": "private/s5-tools/validation-350/sources/Vulkan-Headers",
+      "prefix": "private/s5-tools/validation-350/runs/r350-adopt-01/install",
+      "installed_files": {
+        "include/vk_video/vulkan_video_codec_av1std_decode.h": "f03abf49fcaf2bd179d48d768164f9494264b58401b98899e8860ba297a1e7aa",
+        "include/vk_video/vulkan_video_codec_av1std.h": "9b4ebcef0d6844b226803fa91b4c4c8bf9eb941aa31b19cea48ded0886a8f9e2",
+        "include/vk_video/vulkan_video_codec_h264std.h": "f6691f82e4637adda20e56d56951c673cc1ecdf2fa77e09cc8eba4b1f45118c1",
+        "include/vk_video/vulkan_video_codec_h264std_encode.h": "75cc54e489b1ec7e3c635680cabaf7c9c2ddd4071a485440e5368e76ede30a85",
+        "include/vk_video/vulkan_video_codec_vp9std.h": "e18e20b197945929d5871836bfde923e38b350b09e1cbe430f1bd802d9eda34e",
+        "include/vk_video/vulkan_video_codec_vp9std_decode.h": "c3929bbdd0ab79128c7f9bfb9641c9a017b3983529315b771caaafc74fdbb89a",
+        "include/vk_video/vulkan_video_codec_h265std_encode.h": "8a56e0c78496affa84eca39ec0f5636df681c04623dd0291aeeadd012df324be",
+        "include/vk_video/vulkan_video_codec_h265std_decode.h": "926a24d94afed2b1ab030e81c3b9e2e6730cca530f7a5a5bd821e7b896b93a41",
+        "include/vk_video/vulkan_video_codec_av1std_encode.h": "40f84c98d0341246ead3e864e1378df47d861505c5c139da5ed85c352d5e2300",
+        "include/vk_video/vulkan_video_codec_h265std.h": "01b5f3d0fd9d273a68ed90f898ba94c05c0305280a753bf95fab60d60727c22e",
+        "include/vk_video/vulkan_video_codecs_common.h": "be6d2495d19e96aca6aa5c11e5c418d1cd72beac23fe19eb9169c06e2843f0af",
+        "include/vk_video/vulkan_video_codec_h264std_decode.h": "8c4682860954d6bfc603e200d9e12586bc57265bd37b73a12b1ecf0c1ad42721",
+        "include/vulkan/vulkan_format_traits.hpp": "76378fe720b69a20cf5e16c5bcee55ca2996b339537159595974817f56d38506",
+        "include/vulkan/vulkan_hash.hpp": "5635319ef18657d5a61431419f0336052910a7a6296e99d8bf5cc29b64d86c79",
+        "include/vulkan/vulkan_win32.h": "0b11442e7efa0d5b6732b9964edf6dbdf3f6cf1dd58afe7572cc9b7f6de24317",
+        "include/vulkan/vk_platform.h": "949d517bb83e1d88fd4f1cef02bd3cb9ab50d44e8354cc68227cf2dccfdd3307",
+        "include/vulkan/vulkan_macos.h": "00f532e9b7229488ac9932c2b391d74e9e8566ed91d0dbbad10e15dc356c9293",
+        "include/vulkan/vulkan_vi.h": "8caacbb6eccae5946fb367145ba5222b85d4747a3f8b30632fdfca0503f0c339",
+        "include/vulkan/vk_icd.h": "15d092840ca6d45fca3ccdc50cf021943e6c88aefe2a730c391f26d60bba9018",
+        "include/vulkan/vulkan_enums.hpp": "e361df490f95b604f18cb2d95c4a224852e71e148a19947e5716756896328e51",
+        "include/vulkan/vulkan.cppm": "a5043f8dd3b8eb54e366789b41569e8b46e3849a94d343f8d960225560ac1157",
+        "include/vulkan/vulkan_core.h": "6d2ba4755774b1d129da6b8e661268b494d2d609df6217c6b6485acf7666b6c2",
+        "include/vulkan/vk_layer.h": "bfe6804d3f527138fcfebb0845c1c0077c5718725bf338be09b0f9be3e8dede5",
+        "include/vulkan/vulkan_video.hpp": "9623e6bc5c379d2b1477daf5bb5b3b167e90deb074aa9db79785269c86cb2244",
+        "include/vulkan/vulkan_metal.h": "8f84536896b8d3c6c49883ce34242f8922840617d0b184b338c0f83da5bfaaaa",
+        "include/vulkan/vulkan_raii.hpp": "9656c60be2a6c1a0f748663c5ec9d8acc3f6a3b040b8bd43c19d33bf89b3a493",
+        "include/vulkan/vulkan_funcs.hpp": "594ce95bbbfa5be0d2da7ed1e4679510f3e10b4df88cd2289416c14830354d7b",
+        "include/vulkan/vulkan_xlib_xrandr.h": "da5d5311bcffa49c614e9f397784e44668466890aeaf4e54c2e0064c20259089",
+        "include/vulkan/vulkan_structs.hpp": "441cba7aa11a86f8f1d7cdc8a99c7ee9f74718ab8a24e3e7b8be39e7eeda5fac",
+        "include/vulkan/vulkan.h": "72b952cc6de70ee12d118d3095e80346b42ff01cfc6f2bbb37ec01800eab1da6",
+        "include/vulkan/vulkan_xlib.h": "82346aaa80a5c984b6a26f55c7c363c65be43029da539ba0fbdfea9840051cca",
+        "include/vulkan/vulkan_handles.hpp": "bdc41e67b90992b36755433b133ab4dc4c34d0a384af26b1b8c5831bc28abd90",
+        "include/vulkan/vulkan_screen.h": "ffe2e63fbea5f0a9a7948a998eb7e1085e1f7cd5fd55b3d9a0146fe1aa8307bd",
+        "include/vulkan/vulkan_to_string.hpp": "2c93019fba3587eb40e5546cdb88c2f262a8615268a61b7aa634a860e4ac2a51",
+        "include/vulkan/vulkan_extension_inspection.hpp": "1d1dea982ce68b5402ad8f80a46c50c987d53aac2cb46d82d0f34f500a380ede",
+        "include/vulkan/vulkan_xcb.h": "1e1525fc64826ab3ea9e8a6ee6a618ef14db3e27397fcf8fb070bb1ddaf00c0b",
+        "include/vulkan/vulkan_shared.hpp": "e9f2c04760d403d10dbf637fb6ca993ab08923af654b36b6963d48804780424a",
+        "include/vulkan/vulkan_wayland.h": "d43ca1c45cd4b2e1119c168b780e2864205ad8119e5f42d9d99aa29d2654a3f2",
+        "include/vulkan/vulkan_video.cppm": "3d5a0f2cb74537c9718fa555e96f2a5cc553ce7158ca0f4ecd993efb40c072c7",
+        "include/vulkan/vulkan_directfb.h": "4c6be34ee27f2fce4870c4046304b0c53f1fe62b13a4c21da8d537ec4cf8b965",
+        "include/vulkan/vulkan_fuchsia.h": "8a7a0c52e8c1ab41ede66bdabc32057255a7b385441d67dd4023121de5801194",
+        "include/vulkan/vulkan_ggp.h": "97cb1776742a4d8aae9f258ce908da76d0466da8864a5036aaca834af5f62e8d",
+        "include/vulkan/vulkan_ohos.h": "9da9b4f1a23adc0b705450ce4b5c934dff2fd1eb8cdf4ac3273465420fc9475a",
+        "include/vulkan/vulkan_static_assertions.hpp": "cb7aa93063cda42bd87c3d01bc002d9017d420410d193391e97a630f472ee07e",
+        "include/vulkan/vulkan_ios.h": "8bb052cc162b4086c0f1cd29a5ed11ccf921b8ee83551194394b86efd249c572",
+        "include/vulkan/vulkan_hpp_macros.hpp": "a02c8af0e04006a8ef8001ac6589ba419c50558aee95dbb0b2d1325292de1650",
+        "include/vulkan/vulkan_beta.h": "0c8306cc75db2a51fe5c29654afde8587f44fc84c2d123eaadf538e86dd0541c",
+        "include/vulkan/vulkan.hpp": "7f0305da4116eddeb8d459eaf1f676d8ad0a6d18fee24996fe10690e38236ba7",
+        "include/vulkan/vulkan_android.h": "49cd5e53156cb9e36fa03d81a5f1b8c1e93428e3499698309398d66dc3872948",
+        "share/vulkan/registry/apiconventions.py": "824026aeb6762ee9758bd2a6d6c3a31b7e9d8ca094ddd62faae129c34a196f69",
+        "share/vulkan/registry/stripAPI.py": "9c268bde5a1e05e51af01f2e18a6c59684842b861936e7eda7384f778197cafa",
+        "share/vulkan/registry/vkconventions.py": "1c96faf15214221884f273b4f71065023791093513a84ea7e948d403ceb7d7f1",
+        "share/vulkan/registry/validusage.json": "d7a5a718c10ca04ae9f65fb7a598ec76c0f2cae3099d874f0f8af8cea05a4c16",
+        "share/vulkan/registry/generator.py": "ba06ff286e42af55bc7ab780dc4adb1598a18664c94d0fa4f9520773e6771f51",
+        "share/vulkan/registry/cgenerator.py": "01161f153fb8319cb1a228d5f184436179bc070c0d139107229b1bbe0fb8e6c0",
+        "share/vulkan/registry/vk.xml": "50bd8c0f316eabf73d1c5fe3add2d89eaa480dbda9282c12c289e80e9d081e08",
+        "share/vulkan/registry/reg.py": "6ea8cac4b807c5e344ed479b4c4ed86a04b6db5c345932f25c721e189b54ebae",
+        "share/vulkan/registry/vulkan_object.py": "551c9ceeb549fc1e72da39bb9b760a5c5a5919cb5f43ae6a699d3207328bc8f1",
+        "share/vulkan/registry/parse_dependency.py": "00489a3b2ec34cbe21045de37c91ead429e0c1189469f0e2cfb3d2878dd929b1",
+        "share/vulkan/registry/profiles/VP_KHR_roadmap.json": "f880067297f7d91943905b2938b885b2b6060a8e5c3d1a8f31847b2027d65990",
+        "share/vulkan/registry/video.xml": "4480ab87c8ee6d561376fa83820af1071f85ff7fa1a26b21f521717fa04d5809",
+        "share/vulkan/registry/spec_tools/conventions.py": "f76baccf558969c483993d399f24a8e63559e701b9df5cf921bb3e91ca0c5977",
+        "share/vulkan/registry/spec_tools/util.py": "6386baa0b90ce32088b7d0fcc4500c5689f30469fc4a5dde0addba104de81388",
+        "share/vulkan/registry/base_generator.py": "6f65ff00182d1771d35d5527d309ac05f508dcdae99a4336d878c91ee213aadd",
+        "share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake": "a9dcde7dbc47870f4209a94eeff059928fa68e3c51a906a6f249241635d02ccc",
+        "share/cmake/VulkanHeaders/VulkanHeadersConfigVersion.cmake": "4e98dd10eaa6a5e3c4b7a87e7b7e92f36937f187bd804e74906e7393273ac51f"
+      },
+      "roles": {
+        "vulkan_header": "include/vulkan/vulkan_core.h",
+        "package_config": "share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake"
+      }
+    },
+    "validation-350-vulkan-utility-libraries": {
+      "version": "a96bd4933c6adfc21329d15e9999791a0153bbf3",
+      "commit": "a96bd4933c6adfc21329d15e9999791a0153bbf3",
+      "tree": "d6e0f063e9c9a5be4d152fd2114160f7131f5e83",
+      "url": "https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git",
+      "path": "private/s5-tools/validation-350/sources/Vulkan-Utility-Libraries",
+      "prefix": "private/s5-tools/validation-350/runs/r350-adopt-01/install",
+      "installed_files": {
+        "include/vulkan/utility/vk_safe_struct.hpp": "df35181fbf38aa35478f5bcd21fa011fcf400df79cbd76427c6027c21f69775e",
+        "include/vulkan/utility/vk_small_containers.hpp": "8a7752668228b254fafb3a5b13d139bf0155e95a2c8da40a5727cc797b5ea134",
+        "include/vulkan/utility/vk_format_utils.h": "e25ea5171c39c45e95476c3b3d4de4e968a3be8efc1c5afff5ed57ce31f53fda",
+        "include/vulkan/utility/vk_struct_helper.hpp": "0cf50c5490e1e107b2771bdff7d83644290cc3ab9303e6e5ccfc102719b1255d",
+        "include/vulkan/utility/vk_concurrent_unordered_map.hpp": "1f7e600ebe38f833fb99c5441cd40d54ad146c84ebc9b3c926f131c750a0e8fd",
+        "include/vulkan/utility/vk_dispatch_table.h": "efb15ff7b99fd77fa5f85b2e8539e73b1f8a7471a8e883be8aa354b6c3d1c10c",
+        "include/vulkan/utility/vk_sparse_range_map.hpp": "e391c16df50cd12780a428b5ecd05b7690d86c1c41df6ac0ebfc0595c4742ed8",
+        "include/vulkan/utility/vk_safe_struct_utils.hpp": "f0a9841c556ccdd5773aa6ca935c24ce0ad2cca9cad323b56c27e9a41f8e6160",
+        "include/vulkan/vk_enum_string_helper.h": "b6153ca324936bd56cb6e6b65f4a4cf2a4a75e109dcb861b5666ac678840df12",
+        "include/vulkan/layer/vk_layer_settings.h": "437c864cdb447de492b7425da26d610770a090199e792df9fb93299bec387d79",
+        "include/vulkan/layer/vk_layer_settings.hpp": "86f60019bdeab581480fe4717efb3f029e405cf1cb40a3aef6ace5751764e9c1",
+        "lib/libVulkanLayerSettings.a": "1a2a1fd655eecaa15c971b84831b3237b17c07d12cd9d23c30b8372165f5b792",
+        "lib/libVulkanSafeStruct.a": "2f951f13fa177a66275895b783cae634436fcf5818ed5af033aabb2629abddbb",
+        "lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibraries-targets.cmake": "9998644f2513c3f995af26df8041611df4c147a5508d2610cc083fd15f36099e",
+        "lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibraries-targets-release.cmake": "00a49ae654bd9c4186fbbc05e2979eac20e3e0fb3a7c64f78835a1ae9225b9b3",
+        "lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibrariesConfig.cmake": "d7ecae47f08833a55f0c29689975a0c721ab568740f43336934566f8789347f0",
+        "lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibrariesConfigVersion.cmake": "6f13c6010293e1ce79c21a5e778b8cb67b258e0e5cbef8ec4c85e76b865da76c"
+      },
+      "roles": {
+        "utility_header": "include/vulkan/utility/vk_safe_struct.hpp",
+        "layer_settings_library": "lib/libVulkanLayerSettings.a",
+        "safe_struct_library": "lib/libVulkanSafeStruct.a",
+        "package_config": "lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibrariesConfig.cmake"
+      }
+    },
+    "validation-350-spirv-headers": {
+      "version": "ad9184e76a66b1001c29db9b0a3e87f646c64de0",
+      "commit": "ad9184e76a66b1001c29db9b0a3e87f646c64de0",
+      "tree": "6b1305cbbfd740b666825553638cec177d4c0b85",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "path": "private/s5-tools/validation-350/sources/SPIRV-Headers",
+      "prefix": "private/s5-tools/validation-350/runs/r350-adopt-01/install",
+      "installed_files": {
+        "include/spirv/1.1/spirv.hpp": "f531520cbf97005793a8af7e168b66197cf17c25aabedd8330816b2d271f8db4",
+        "include/spirv/1.1/spirv.h": "2b88e5b757bad01ccfb796cd45ae46615a88a76acebed6f3aa33ab033115d03f",
+        "include/spirv/1.1/spirv.lua": "2846adc9c2d1b1da8094db40512a264a1473fc07d293761ea385dd93b77f9bf4",
+        "include/spirv/1.1/OpenCL.std.h": "ac8a686d215962253915ec76e34709d6bcf96f7136c75cd10dfcc90c7b3904a3",
+        "include/spirv/1.1/extinst.opencl.std.100.grammar.json": "2a12bd815cd988639a716c96d2fa5a43dc4cc14fa0d91121c8ef9d53ff62ed98",
+        "include/spirv/1.1/spirv.json": "b61f458257db6c51d6f5d21972e15f8c8eb93024d6366b28554ba9ae5c3c7d2f",
+        "include/spirv/1.1/GLSL.std.450.h": "dbbeafbec24d7d44e3b14969328f85c9fb94bf578f008b5aad1b347c34aa3471",
+        "include/spirv/1.1/spirv.cs": "a2f967b0a5b8955ecda384ac98d6824d803063450e8de93d4f269b7a24041ee3",
+        "include/spirv/1.1/spirv.py": "6536e543679feeb146c503e58b80f07e64e886775c98c986e82da677280f45dd",
+        "include/spirv/1.1/spirv.core.grammar.json": "5433e9a301f190d6b473364a1cb3152523f5653a99fecde67a8a08f9664abca5",
+        "include/spirv/1.1/spirv.hpp11": "fee95d2849b5bf55cabe938c91a86056f3e273a6c596d4e3eb044af0c55124b4",
+        "include/spirv/1.1/extinst.glsl.std.450.grammar.json": "e23de69b26e1a1529ecb2c78f559b2168623f35f423fb28ea2baf2ed1a905e9e",
+        "include/spirv/1.2/spirv.hpp": "25c328ad50132ba22437fe7ed2898de79509285c3402762c6ffea17ac9f748a9",
+        "include/spirv/1.2/spirv.h": "d0580351b4164bfa938e8e374fb0205811966e0f4cf4fb80f72e8655a45e0343",
+        "include/spirv/1.2/spirv.lua": "98d386749f7b255290af81d4b25c488c1af9f44a64cb5715dfd6fa7a8118dc32",
+        "include/spirv/1.2/OpenCL.std.h": "ac8a686d215962253915ec76e34709d6bcf96f7136c75cd10dfcc90c7b3904a3",
+        "include/spirv/1.2/extinst.opencl.std.100.grammar.json": "313808d270e099397d70fb93699c3dea05f6eab8191cb1d06627788996e96403",
+        "include/spirv/1.2/spirv.json": "dd6c543d7eea72f81b1cfe7dbec06530aa9c7f89a27a68f6c18827cb7992e5ea",
+        "include/spirv/1.2/GLSL.std.450.h": "dbbeafbec24d7d44e3b14969328f85c9fb94bf578f008b5aad1b347c34aa3471",
+        "include/spirv/1.2/spirv.cs": "d1193d3c947c9a891e77d5dc547ba631302a5b235516a16698ea242572eacc6c",
+        "include/spirv/1.2/spirv.py": "6e9023b8266e418272b593704e5cc9c2b0f300941981b2b3843e67090641988b",
+        "include/spirv/1.2/spirv.core.grammar.json": "f25068d6d372c8fd61e529f53db8cfd6ec9182a0f9321748c5b132a9c9b548bf",
+        "include/spirv/1.2/spirv.hpp11": "33f9b5a3ea90429e38e479970b51f125fa24aec48101239b163e2b80b1591ee8",
+        "include/spirv/1.2/extinst.glsl.std.450.grammar.json": "e23de69b26e1a1529ecb2c78f559b2168623f35f423fb28ea2baf2ed1a905e9e",
+        "include/spirv/spir-v.xml": "745dec220297c962db9076ae9d077363c61944aa94e2dda49cf93350b8e3ab44",
+        "include/spirv/unified1/extinst.tosa.001000.1.grammar.json": "fb028a301e201afb61387b331a664b30790ffb2d2d2ecf81e09f2b63301e607c",
+        "include/spirv/unified1/TOSA.001000.1.h": "f500c3d501aba42b3ae921d1d0c8f94e8d5037329050f73fd7e85e22597b7f25",
+        "include/spirv/unified1/extinst.opencl.debuginfo.100.grammar.json": "a0e0d510c7206ae98fc76b42756009991d56d2caa84f151165002806cdc9b222",
+        "include/spirv/unified1/spirv.hpp": "2ea0dd70e12e289c77a0347dfe88b5e1b6481a70e1804fab1557423394120f9f",
+        "include/spirv/unified1/AMD_shader_trinary_minmax.h": "c82e0dfec563a319c73951ca0a12709286bd75ef4fd567543a526420761bc557",
+        "include/spirv/unified1/extinst.spv-amd-shader-trinary-minmax.grammar.json": "7702f8d593e435f4f294d7a98cd9672b13efaa433a34a037698a285adfd84158",
+        "include/spirv/unified1/extinst.debuginfo.grammar.json": "3f6b26f7e930ebf27524991c15366a278d7f0a73a8eb70b9e9503375c4a341b6",
+        "include/spirv/unified1/spirv.h": "62e24e3f287d612b47163350a04aa0b49822c1437be407fbe10e488b9e4adf3a",
+        "include/spirv/unified1/extinst.nonsemantic.shader.debuginfo.100.grammar.json": "a057349c3902dce992c6f70a685812e84b019a823efbbaf8d81c276e86a12de7",
+        "include/spirv/unified1/spirv.lua": "77c520e3c61339b1b2bc07a8117efc4ffee6f926df147bb6abc32b043b3d6481",
+        "include/spirv/unified1/OpenCL.std.h": "7cf7a4aa83fef2e12580783c8b5f2b1be0babf1cc4cce8199540ec2c3c3182d3",
+        "include/spirv/unified1/spirv.bf": "abf8b6a244dbaa067ec88d6c022f6d17f94c5a63685cc110f276b453ca533c2f",
+        "include/spirv/unified1/extinst.nonsemantic.debugbreak.grammar.json": "1d30fb3a054592f8d749dff42ad4aa4f695bd5f0d4a9cadc70694a1d0cafe23b",
+        "include/spirv/unified1/extinst.arm.motion-engine.100.grammar.json": "86fb7c418bc660338068ebe43409371e10cb78ecca83f9347c601b0b68ab8695",
+        "include/spirv/unified1/extinst.opencl.std.100.grammar.json": "44b752999f78f8161ee52a9d305b14576ad7ed0a81a10d28870b7cd0ba5788a4",
+        "include/spirv/unified1/AMD_gcn_shader.h": "fedf1db1c6b0910a624d849c2b92d29576105887b9b216ad2b1a60e053ffa6e6",
+        "include/spirv/unified1/spirv.json": "fd6e3e3df7d06d95862ee2d6c822ebdf2d636da286a1c78eaf9dbfd5792b9073",
+        "include/spirv/unified1/extinst.nonsemantic.clspvreflection.grammar.json": "425414766ed0b387f05e30a57b74cfcc6288d07b23d61b86befa118c1d73d4d8",
+        "include/spirv/unified1/ArmMotionEngine.100.h": "788c1811b9b06542c57b9e74670455c964440b6a12c7afab0934a70b48417b3c",
+        "include/spirv/unified1/extinst.spv-amd-gcn-shader.grammar.json": "ffb7b0f755f774c1fefd92ffc46a4790ac5bce3b1bc366676637186fd1ddfeb6",
+        "include/spirv/unified1/DebugInfo.h": "38ce5d069c4d81adc919def9503999944685af322a430a0696445f7adeb31780",
+        "include/spirv/unified1/extinst.nonsemantic.debugprintf.grammar.json": "e23844cf66431dcd1d50d23b84cd45a07b16c4cdb0262ed9b32f7b9331131a89",
+        "include/spirv/unified1/NonSemanticShaderDebugInfo100.h": "40252eae16fc59bce038042083598efba5461611a372acb791a8b69614701fad",
+        "include/spirv/unified1/GLSL.std.450.h": "d18a932ee97c268a57e33134651d554dbe71a5654b975e89e9e9487fa59ac9df",
+        "include/spirv/unified1/AMD_shader_explicit_vertex_parameter.h": "b716d0a212c2897ca4cbf23d642f490cd8e82e6f557ea4cf60c500a69aaeddaa",
+        "include/spirv/unified1/NonSemanticDebugBreak.h": "51a75260843872e4f1bcf0558407c2de839663b67ae694354c68689f608363a4",
+        "include/spirv/unified1/AMD_shader_ballot.h": "15aa9f9c36086713985c832238061f64be4cd4eb4f8bf7bd08e7c61ef5161355",
+        "include/spirv/unified1/NonSemanticShaderDebugInfo.h": "d4fb08eac0c9e5c8f732ec541151e94b5fb245d021e07eb77e3951e78f117af2",
+        "include/spirv/unified1/spirv.cs": "6c2975b16ec021ae7270bdfd0676e536771d1631f4f39100c1f23742320aad76",
+        "include/spirv/unified1/spirv.py": "9a0fd51b5d114e6eb0a7f20144cc6ca72f73538904743af4ec87d88ad939ca21",
+        "include/spirv/unified1/extinst.nonsemantic.vkspreflection.grammar.json": "5479df05d87a80d84031fe8837908fb66b02b8f07f5cdb43b06005534d749200",
+        "include/spirv/unified1/spirv.core.grammar.json": "9ad40b3fd08acfc9c2e6c7ba05a21a263c1367d5a7fea0f720b7fff429af5822",
+        "include/spirv/unified1/spirv.hpp11": "0ced9f5113fc286788a53fa71a609e076834172151a696142226be1c489e1c15",
+        "include/spirv/unified1/OpenCLDebugInfo100.h": "80f14fe4347d597c274e334f434fe5819f16dc10805fef0f0bedfe159091d11f",
+        "include/spirv/unified1/spv.d": "61bb2c38c45b606ebb45b9e3d3e77176a97c3719d4bde196b86272548d991b45",
+        "include/spirv/unified1/NonSemanticVkspReflection.h": "1447e0f039b8baeb4ccd0e1b00ea1d51d9d03019f5cb5037999d107a000642ef",
+        "include/spirv/unified1/NonSemanticClspvReflection.h": "10dfd6329e8ca50f49ea85961c757fb8ee03cba9fa01031e165b8964a1473059",
+        "include/spirv/unified1/NonSemanticDebugPrintf.h": "79b5ee5d02940ef73db51d4a4fbdc3c2bd7c318d1258f0ec39dc0a6fb3d620cb",
+        "include/spirv/unified1/extinst.glsl.std.450.grammar.json": "5d72e48247569f9b77a17a849db624350abc9d26f7f72b153bbcf15c37238239",
+        "include/spirv/unified1/extinst.nonsemantic.shader.debuginfo.grammar.json": "2259d8a845a96cf897974ba5c638fb6054cc3ef27ceb9a70e42075ce4ccb9ea2",
+        "include/spirv/unified1/extinst.spv-amd-shader-explicit-vertex-parameter.grammar.json": "c022b2c0b337d20951b9076ac0b6ec1ea512b2964051fc3ade04cbb70146ac8b",
+        "include/spirv/unified1/extinst.spv-amd-shader-ballot.grammar.json": "823b90a85ba6a516def3db45c6b37ecdaba56263f9f7867c8c5432a0d2597395",
+        "include/spirv/1.0/spirv.hpp": "4d74405b6f07fba049a576b007ddbf769afd5d9637c61daa20906ba217f6602c",
+        "include/spirv/1.0/spirv.h": "0c25f6eb16d544164fa48bafa0eac569c05f1400ea3daa903d50b6153fe08a43",
+        "include/spirv/1.0/spirv.lua": "d93d4f84a09796532b90c39270f04d602c20f16a646d558d4df7112fa3d92455",
+        "include/spirv/1.0/OpenCL.std.h": "ac8a686d215962253915ec76e34709d6bcf96f7136c75cd10dfcc90c7b3904a3",
+        "include/spirv/1.0/extinst.opencl.std.100.grammar.json": "313808d270e099397d70fb93699c3dea05f6eab8191cb1d06627788996e96403",
+        "include/spirv/1.0/spirv.json": "37511983938c9ab0b4c78ea635e298812d55867dc51cd257849dbe2b7d4cdd5a",
+        "include/spirv/1.0/GLSL.std.450.h": "dbbeafbec24d7d44e3b14969328f85c9fb94bf578f008b5aad1b347c34aa3471",
+        "include/spirv/1.0/spirv.cs": "9d8145d722ee34d7017b09e1fa47fc463b4f2ca14c80122a0b509e0186b8bd27",
+        "include/spirv/1.0/spirv.py": "5bdd478afd224ad31b496a14edd8208dd5a0e31c4c745f7d3205eb360705c542",
+        "include/spirv/1.0/spirv.core.grammar.json": "7d928866be499a40f6f84f4b6275d6c69e71834994fd0ab82f8f663cb13dcea9",
+        "include/spirv/1.0/spirv.hpp11": "7a896d4af952a978e69ffe3e1def37f1ac610047063dc2d8be649d2b9ac718b7",
+        "include/spirv/1.0/extinst.glsl.std.450.grammar.json": "b0a122c0af7face3bd2adaa50277ea97647b8ff9e6659d9d5077d109b72f3e66",
+        "share/cmake/SPIRV-Headers/SPIRV-HeadersConfigVersion.cmake": "611ce05e5b1491a868dc4d31196770b31689bd0809ac313eef5d35bcdf750ff9",
+        "share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake": "3e68e6f6ca8fc44fb87ad6d14f7946b0109db12f4f902f019f521d157afb5005",
+        "share/pkgconfig/SPIRV-Headers.pc": "a471fc7f40fab89304d1f9a375c6c461184c1f9a829f2391b82abd1acdf5a2b1"
+      },
+      "roles": {
+        "spirv_header": "include/spirv/unified1/spirv.h",
+        "package_config": "share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake"
+      }
+    },
+    "validation-350-spirv-tools": {
+      "version": "0539c81f69a3daeb706fd3477dca61435b475156",
+      "commit": "0539c81f69a3daeb706fd3477dca61435b475156",
+      "tree": "4cb77a6eced2e1030f0623badfa05b2ab7d089fb",
+      "url": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+      "path": "private/s5-tools/validation-350/sources/SPIRV-Tools",
+      "prefix": "private/s5-tools/validation-350/runs/r350-adopt-01/install",
+      "installed_files": {
+        "lib/libSPIRV-Tools-opt.a": "09cefd5ca269fc8d3f974b5245b360c775fe3aaed83cee88eb7efde670769004",
+        "lib/cmake/SPIRV-Tools-opt/SPIRV-Tools-optTargets.cmake": "0a33570e4022f614cb563680abd6cf1c9fdaae612481df09fee5ff8f3f34593e",
+        "lib/cmake/SPIRV-Tools-opt/SPIRV-Tools-optTargets-release.cmake": "ce61c432c8b892f8f4e1b29765c0d704607df2031033cc86ba3ab66c140c9fc2",
+        "lib/cmake/SPIRV-Tools-opt/SPIRV-Tools-optConfig.cmake": "bcaab4836e4ea48a18984b7f87a3a7d1d623f0e2844c196b927ddffe38401f31",
+        "lib/libSPIRV-Tools-reduce.a": "7d713f91ae0e05c95abcab16bad8f839890102222ab58d43d3ea2ea04ce64db1",
+        "lib/cmake/SPIRV-Tools-reduce/SPIRV-Tools-reduceTarget.cmake": "2f76804db3ff80c10c5ec0afd8cd91dd241c2c70e437f45ad395e026d8fe8724",
+        "lib/cmake/SPIRV-Tools-reduce/SPIRV-Tools-reduceTarget-release.cmake": "8b35427f16fbe826c067ff53a377746a8dca73827396d1b274cc991b693074aa",
+        "lib/cmake/SPIRV-Tools-reduce/SPIRV-Tools-reduceConfig.cmake": "ef3163d71ccfe514fa164a219919b8285742f33711f9776f765177fd29bef06c",
+        "lib/libSPIRV-Tools-link.a": "997a7504cf78608ada77c351fe6117018688cbda48fb530aac76ce463e919f29",
+        "lib/cmake/SPIRV-Tools-link/SPIRV-Tools-linkTargets.cmake": "948283d91dafe7ed8bd14a6a8c81fd0880c12969273076142a059f2bfa459fc5",
+        "lib/cmake/SPIRV-Tools-link/SPIRV-Tools-linkTargets-release.cmake": "5176a23cca3c5f3a1e62664d0c519f1c484c8b66e8dfca89e72985eaa0ba420a",
+        "lib/cmake/SPIRV-Tools-link/SPIRV-Tools-linkConfig.cmake": "fcb2a64b3004ab7c742a7bd9d06f177a82ee303b87a0befc200749a5e24675ec",
+        "lib/libSPIRV-Tools-lint.a": "189e387143250847dedb960ae3a876d704110fa00fe7dcc7522569757c50bd33",
+        "lib/cmake/SPIRV-Tools-lint/SPIRV-Tools-lintTargets.cmake": "246f1cb6fa92cd4b8e6049acfb068b82b21f9c7eb2d69b37be6d7503831a07cf",
+        "lib/cmake/SPIRV-Tools-lint/SPIRV-Tools-lintTargets-release.cmake": "b7033033407da896203b1203e3dcc440817936dca19c60741d792c51bf971f5e",
+        "lib/cmake/SPIRV-Tools-lint/SPIRV-Tools-lintConfig.cmake": "35415be4766f5b9f9ce7202df75628eb8b4c15fb9efb5bd16b5b7b1faa372016",
+        "lib/libSPIRV-Tools-diff.a": "8cffdf76954e487b2cd3f2df3645a5bd2c196815884619d2b7ac58daffb68a2e",
+        "lib/cmake/SPIRV-Tools-diff/SPIRV-Tools-diffTargets.cmake": "9a7d7cdeb729f3bfabfe606eccad6a427a6b0f989c0c635eb1186170a59eaefe",
+        "lib/cmake/SPIRV-Tools-diff/SPIRV-Tools-diffTargets-release.cmake": "4c6afc716fb7df0a1b5901865cba46b15de1915af39924c21e4dcf362227c101",
+        "lib/cmake/SPIRV-Tools-diff/SPIRV-Tools-diffConfig.cmake": "ef65abed7d02633c7756dfab23661caa05eed1115e55624096b7bd76ac403441",
+        "lib/libSPIRV-Tools.a": "ad5cbfca3fe007b3a7c0f33c2e06183d609aca91e8643d3d21100ea79fc3854a",
+        "lib/libSPIRV-Tools-shared.so": "e3f736d8f7b12b9d19c62bd35c963781aa1ea14490e9af5917e014511fd781ac",
+        "lib/cmake/SPIRV-Tools/SPIRV-ToolsTarget.cmake": "ac3c33b709317f348297767e2e7852cb61f5c04888cab3b5f924eba6724b4cb8",
+        "lib/cmake/SPIRV-Tools/SPIRV-ToolsTarget-release.cmake": "14630c4806b3b1efe9fe855e4bdeb3e26f0634761c713c8556a87b1b7d893e15",
+        "lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake": "74c12e7c48d1fbfc36f85a2f64cf3a27a2f898b002d15fe0872dcd4a7faab9db",
+        "bin/spirv-lesspipe.sh": "d56334f18981c4ac80faedfd8bfd45c7843cf318ae983090ddc3d1bb50127375",
+        "bin/spirv-as": "6eda741b1e6cf85574e71375faf2db18ad89d8a7c2361435c830b4b8dc517172",
+        "bin/spirv-dis": "1ad6c999f60076b7e0e71c7b024c1596fabc22c9c0f8cbfd50f6b16b617c04d0",
+        "bin/spirv-val": "2f68c02957d12f60a24653a1beff8658e5df295de8975f2cd0efcdda606377a9",
+        "bin/spirv-opt": "43bc51c9e61a6e1debfe220867c44a71809e19f01b989592d7992ef52ac80e2d",
+        "bin/spirv-cfg": "21bc315aa1e40cd6b58baff35265ccb184ce0124608f5e6ff469ff44e58952c1",
+        "bin/spirv-link": "8deb249db66f6be9a39c13407a700fa73fa1b6a177d5fd05975ebbe5ac8913e7",
+        "bin/spirv-lint": "4f9a93397a9fc56de37a8085c07f243de053acd711e977d62cb2705a4db6d105",
+        "bin/spirv-diff": "38dcd6d14cbbc92c0bea1c3429c3642efb2ad46da1062fa82824427f65e908ae",
+        "bin/spirv-objdump": "3e5c4f994544c12a6649f501eef3c92df2163e838907c8f39d7215074989e2e3",
+        "bin/spirv-reduce": "df601d63178a90c1a390dea24b568dbb5c32a8dc60c52a20046c1dca4e1adf93",
+        "lib/cmake/SPIRV-Tools-tools/SPIRV-Tools-toolsTargets.cmake": "60025a07a9aea45782decf06199f229504cd4c8b036c996f89264a2183034284",
+        "lib/cmake/SPIRV-Tools-tools/SPIRV-Tools-toolsTargets-release.cmake": "56ae25439348aa3019a295bd1232a4e1bb0f3d7a80797c32a3ccf7ae6d7f639b",
+        "lib/cmake/SPIRV-Tools-tools/SPIRV-Tools-toolsConfig.cmake": "08931642822edec3c13978e2542abe2ca441f536ea1436470a6df6cc560268d0",
+        "include/spirv-tools/libspirv.h": "f4b0a2300806acf1efc9cfb79708b892891352f4d719de1f76848cc89b95acac",
+        "include/spirv-tools/libspirv.hpp": "6b6bcb9f5ab28642c51013433e75e5f9a4138577fcbce1e6204bcda47bbd1710",
+        "include/spirv-tools/optimizer.hpp": "85f5247437234e42c2fee6ddda387f097cd1de454f0ddb3a6d827bb8d53b95db",
+        "include/spirv-tools/linker.hpp": "cd3fc7d085f29437b4dc304a8d2496784e20703d7c9ca057a26f8226f038d8b0",
+        "lib/pkgconfig/SPIRV-Tools.pc": "84453d2a39f115236ca697f6b733b131f71c2a228666ba5e7012e786e82ebedd",
+        "lib/pkgconfig/SPIRV-Tools-shared.pc": "b2e28fcc25654852a07a30be146963a3f7ded8ede4c03056b6c356d253e069e1"
+      },
+      "roles": {
+        "spirv_tools_library": "lib/libSPIRV-Tools.a",
+        "optimizer_library": "lib/libSPIRV-Tools-opt.a",
+        "package_config": "lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake",
+        "optimizer_package_config": "lib/cmake/SPIRV-Tools-opt/SPIRV-Tools-optConfig.cmake"
+      },
+      "binary": "private/s5-tools/validation-350/runs/r350-adopt-01/install/bin/spirv-val",
+      "binary_sha256": "2f68c02957d12f60a24653a1beff8658e5df295de8975f2cd0efcdda606377a9",
+      "disassembler": "private/s5-tools/validation-350/runs/r350-adopt-01/install/bin/spirv-dis",
+      "disassembler_sha256": "1ad6c999f60076b7e0e71c7b024c1596fabc22c9c0f8cbfd50f6b16b617c04d0",
+      "assembler": "private/s5-tools/validation-350/runs/r350-adopt-01/install/bin/spirv-as",
+      "assembler_sha256": "6eda741b1e6cf85574e71375faf2db18ad89d8a7c2361435c830b4b8dc517172",
+      "optimizer": "private/s5-tools/validation-350/runs/r350-adopt-01/install/bin/spirv-opt",
+      "optimizer_sha256": "43bc51c9e61a6e1debfe220867c44a71809e19f01b989592d7992ef52ac80e2d"
+    },
+    "validation-350-vulkan-validation-layers": {
+      "version": "vulkan-sdk-1.4.350.1",
+      "commit": "b9d4f9ead8d97c1bb0d174ea07d8aed8273818a5",
+      "tree": "a78a772c5446e38806911238be4c7db553db95ab",
+      "url": "https://github.com/KhronosGroup/Vulkan-ValidationLayers.git",
+      "path": "private/s5-tools/validation-350/sources/Vulkan-ValidationLayers",
+      "prefix": "private/s5-tools/validation-350/runs/r350-adopt-01/install",
+      "installed_files": {
+        "share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json": "6ba37faf671325ef83d0c5f8c38d41bdb09ea3592b7b1f7ec4311c75e4d05d8a",
+        "lib/libVkLayer_khronos_validation.so": "fa34adf01ecb8b54b6156599012d5b116163737ec51cf064908e5fe2b035fb55"
+      },
+      "roles": {},
+      "library": "private/s5-tools/validation-350/runs/r350-adopt-01/install/lib/libVkLayer_khronos_validation.so",
+      "library_sha256": "fa34adf01ecb8b54b6156599012d5b116163737ec51cf064908e5fe2b035fb55",
+      "manifest": "private/s5-tools/validation-350/runs/r350-adopt-01/install/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json",
+      "manifest_sha256": "6ba37faf671325ef83d0c5f8c38d41bdb09ea3592b7b1f7ec4311c75e4d05d8a"
+    },
+    "qemu-user": {
+      "version": "10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+      "path": "private/predecessor-tools/qemu/root/usr/bin/qemu-aarch64",
+      "sha256": "73cc2584f119f9e74c85c0a8549dbb6fd104ae3897a06a7500797f9e5b4d0943",
+      "package": "private/predecessor-tools/qemu/deb/qemu-user_1%3a10.0.13+ds-0+deb13u1_amd64.deb",
+      "package_sha256": "ca6ede739327a20ae5a3498230c8a3a9a072c586e131bc6bcc1201eb1725e336",
+      "url": "http://deb.debian.org/debian/pool/main/q/qemu/qemu-user_10.0.13+ds-0+deb13u1_amd64.deb"
+    },
+    "libpng": {
+      "version": "1.6.59",
+      "path": "private/predecessor-tools/win-deps/libpng-1.6.59.tar.xz",
+      "sha256": "d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389",
+      "url": "https://download.sourceforge.net/libpng/libpng-1.6.59.tar.xz"
+    },
+    "zlib": {
+      "version": "1.3.2",
+      "path": "private/predecessor-tools/win-deps/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "url": "https://zlib.net/zlib-1.3.2.tar.gz"
+    },
+    "zstd": {
+      "version": "1.5.7",
+      "path": "private/predecessor-tools/win-deps/zstd-1.5.7.tar.gz",
+      "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+      "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz"
+    }
+  },
+  "not_yet_pinned": [
+    "SDL2 development headers",
+    "rev.ng (no user-space install route met the download rule; recorded in Documentation/receipts/s1-lifter-spike-v1.json)"
+  ]
+}

@@ -1,0 +1,104 @@
+{
+ "schema": "sa2-digest-exclusions/v1",
+ "what": "The boot word-log mask's exclusion record (tools/oracle/oracle_mode.py EXCLUSIONS_REQUIRED; harness/replay/masks/boot.h cites it): the two words of harness/replay/tick_digest_exclusions.json, which the snapshot mask harness/replay/tick_digest.h cites and which stays as it was, each with its evidence copied from that record and a retirement for each probe build whose plain boots were each seen to take one path through it: the boot-ticks-v14 runs' and the boot-ticks-v15 runs' (the re-take batch of 2026-09-26). A retired word is compared in a mask of that build; for any other build the record still drops it. Words of .dataa that plain native repeats of the boot take one of two values in, from tick 369, and that no snapshot run can show: every run with harness/replay/native_snapshot_probe.c loaded took the same value (18 runs, boot-two-v2a to v2i and boot-after-v2a to v2i, the latter snapshotting only from tick 372), while about one plain run in three took the other. tools/s4/snapshot_fields.py --exclude-words drops each from the digest mask's candidates, and harness/replay/tick_digest.h cites this file.",
+ "found": "2026-09-24, re-deriving the boot mask from vanilla option-A runs (Documentation/decisions/2026-09-23-S4-vanilla-oracle.md, the mask). The mask the twelve-run recipe gave kept these two words; the loader-mode mask it replaces did not. A first attempt named two other addresses, read from the header by a parser that skipped the entries the header writes as a plain 0; they were not in the mask, and are not here.",
+ "retired_by": "The U6 fold, 2026-09-26: the masks review's W1 (private/generated/s4/wordlog-u6/reports/review-u6-masks.md) found the lifted boot differing on both words from tick 369 while the exclusion hid it, with the record's evidence taken under another probe build. Re-derived for the boot-ticks-v15 build by unit IN, 2026-09-26: the re-take batch's fourteen plain boots each take one path through both words (private/evidence-packets/u6-landing-v1/masks/paths369.json), and its device-profile control's run with the probe loaded, devprofile-control-on-v2a, of the same build, takes the same path (fold:final, 2026-09-27, the masks review of unit IN, finding 3).",
+ "words": [
+  {
+   "address": "0x01a557ec",
+   "disagree": [
+    "private/generated/oracle/captures/boot-ticks-v12a and boot-ticks-v12b: d_01a50000 differs on every row from tick 369 to 1200 (832 rows); the same between boot-ticks-v11a and boot-ticks-v11b. It is the one word of that block the vanilla mask kept and the loader-mode mask it replaces did not."
+   ],
+   "agree_without": "private/generated/oracle/captures/boot-trial-v3a to v3i: nine plain boots, the boot replay's probe set, whose tick probe digested this mask less 0x01a557ec and 0x01af1970, gave one tick capture, sha256 9d850a5ac829...; the full mask split them about one run in three (boot-ticks-v11a against v11b and v11c, v12a against v12b and v12c).",
+   "retired": [
+    {
+     "build": "f35d50adeb9c16c2bea80d33ab3a2308cc139819b20d05763be0641bc5a66a7a",
+     "runs": [
+      "private/generated/oracle/captures/boot-ticks-v14a",
+      "private/generated/oracle/captures/boot-ticks-v14b",
+      "private/generated/oracle/captures/boot-ticks-v14d",
+      "private/generated/oracle/captures/boot-ticks-v14e",
+      "private/generated/oracle/captures/boot-ticks-v14f",
+      "private/generated/oracle/captures/boot-ticks-v14g",
+      "private/generated/oracle/captures/boot-ticks-v14h",
+      "private/generated/oracle/captures/boot-ticks-v14i",
+      "private/generated/oracle/captures/boot-ticks-v14j",
+      "private/generated/oracle/captures/boot-ticks-v14k",
+      "private/generated/oracle/captures/boot-ticks-v14l",
+      "private/generated/oracle/captures/boot-ticks-v14m"
+     ],
+     "why": "Every plain boot of this probe build and configuration takes one path through the word: the twelve boot-ticks-v14 runs named here (v14a, v14b, v14d to v14m, four of them cold), and the stack control boot-ticks-v14c-stackpad, which is another build (STACK_PAD) and is not named. The words' evidence above is the v11 and v12 captures, another probe build, and the mask rule chooses a mask from runs configured exactly like the comparison runs (Documentation/decisions/2026-09-24-S4-halt-220h.md), so the boot's word-log mask of this build compares the word (the U6 masks review, W1). tools/s4/snapshot_fields.py reads every named run's path through it, and every source's and the held-out run's, whenever it chooses this build's mask, and refuses the mask if any of them takes a second path."
+    },
+    {
+     "build": "a288935a29086d5e9f109576bb513eb17561a342e3b3e16e8f4024bad93b6212",
+     "runs": [
+      "private/generated/oracle/captures/boot-ticks-v15a",
+      "private/generated/oracle/captures/boot-ticks-v15b",
+      "private/generated/oracle/captures/boot-ticks-v15d",
+      "private/generated/oracle/captures/boot-ticks-v15e",
+      "private/generated/oracle/captures/boot-ticks-v15f",
+      "private/generated/oracle/captures/boot-ticks-v15g",
+      "private/generated/oracle/captures/boot-ticks-v15h",
+      "private/generated/oracle/captures/boot-ticks-v15i",
+      "private/generated/oracle/captures/boot-ticks-v15j",
+      "private/generated/oracle/captures/boot-ticks-v15k",
+      "private/generated/oracle/captures/boot-ticks-v15l",
+      "private/generated/oracle/captures/boot-ticks-v15m",
+      "private/generated/oracle/captures/boot-ticks-v15n",
+      "private/generated/oracle/captures/boot-ticks-v15o",
+      "private/generated/oracle/captures/devprofile-control-on-v2a"
+     ],
+     "why": "Every plain boot of this probe build and configuration takes one path through the word: the fourteen boot-ticks-v15 runs of the re-take batch named here (v15a, v15b, v15d to v15o, five of them cold, each launched at a one-minute load below 1.0; private/generated/oracle/batches/retake-batch-20260926-205224.json) and the batch's device-profile control run with the profile probe loaded, devprofile-control-on-v2a, the same probe build (its pair's other run, devprofile-control-off-v2a, loads no profile probe and is another build), all with the locale take's device-profile probe (harness/replay/native_device_profile.c 14a57b17...), so the v14 retirement above, another build, does not carry over and is re-derived here (unit IN, 2026-09-26). The stack control boot-ticks-v15c-stackpad is another build (STACK_PAD) and is not named. A caution the retirement does not rest on: the twenty Metal Harbor re-takes of the same batch, another build (the stage's probe set), take two paths through this word at tick 5, 11 one way and 9 the other, all launched below a load of 1.0, so which path a run takes is not load alone (Documentation/risks.json, a_native_second_path_narrows_the_mask). tools/s4/snapshot_fields.py reads every named run's path through it, and every source's and the held-out run's, whenever it chooses this build's mask, and refuses the mask if any of them takes a second path."
+    }
+   ]
+  },
+  {
+   "address": "0x01af1970",
+   "disagree": [
+    "private/generated/oracle/captures/boot-ticks-v12a and boot-ticks-v12b: d_01af0000 differs on every row from tick 369 to 1200 (832 rows); the same between boot-ticks-v11a and boot-ticks-v11b. The vanilla decision's evidence names 0x01AF1970 a loading-screen counter that differs between native runs (Documentation/decisions/2026-09-23-S4-vanilla-oracle.md)."
+   ],
+   "agree_without": "as for 0x01a557ec: the same nine plain boots",
+   "retired": [
+    {
+     "build": "f35d50adeb9c16c2bea80d33ab3a2308cc139819b20d05763be0641bc5a66a7a",
+     "runs": [
+      "private/generated/oracle/captures/boot-ticks-v14a",
+      "private/generated/oracle/captures/boot-ticks-v14b",
+      "private/generated/oracle/captures/boot-ticks-v14d",
+      "private/generated/oracle/captures/boot-ticks-v14e",
+      "private/generated/oracle/captures/boot-ticks-v14f",
+      "private/generated/oracle/captures/boot-ticks-v14g",
+      "private/generated/oracle/captures/boot-ticks-v14h",
+      "private/generated/oracle/captures/boot-ticks-v14i",
+      "private/generated/oracle/captures/boot-ticks-v14j",
+      "private/generated/oracle/captures/boot-ticks-v14k",
+      "private/generated/oracle/captures/boot-ticks-v14l",
+      "private/generated/oracle/captures/boot-ticks-v14m"
+     ],
+     "why": "Every plain boot of this probe build and configuration takes one path through the word: the twelve boot-ticks-v14 runs named here (v14a, v14b, v14d to v14m, four of them cold), and the stack control boot-ticks-v14c-stackpad, which is another build (STACK_PAD) and is not named. The words' evidence above is the v11 and v12 captures, another probe build, and the mask rule chooses a mask from runs configured exactly like the comparison runs (Documentation/decisions/2026-09-24-S4-halt-220h.md), so the boot's word-log mask of this build compares the word (the U6 masks review, W1). tools/s4/snapshot_fields.py reads every named run's path through it, and every source's and the held-out run's, whenever it chooses this build's mask, and refuses the mask if any of them takes a second path."
+    },
+    {
+     "build": "a288935a29086d5e9f109576bb513eb17561a342e3b3e16e8f4024bad93b6212",
+     "runs": [
+      "private/generated/oracle/captures/boot-ticks-v15a",
+      "private/generated/oracle/captures/boot-ticks-v15b",
+      "private/generated/oracle/captures/boot-ticks-v15d",
+      "private/generated/oracle/captures/boot-ticks-v15e",
+      "private/generated/oracle/captures/boot-ticks-v15f",
+      "private/generated/oracle/captures/boot-ticks-v15g",
+      "private/generated/oracle/captures/boot-ticks-v15h",
+      "private/generated/oracle/captures/boot-ticks-v15i",
+      "private/generated/oracle/captures/boot-ticks-v15j",
+      "private/generated/oracle/captures/boot-ticks-v15k",
+      "private/generated/oracle/captures/boot-ticks-v15l",
+      "private/generated/oracle/captures/boot-ticks-v15m",
+      "private/generated/oracle/captures/boot-ticks-v15n",
+      "private/generated/oracle/captures/boot-ticks-v15o",
+      "private/generated/oracle/captures/devprofile-control-on-v2a"
+     ],
+     "why": "Every plain boot of this probe build and configuration takes one path through the word: the fourteen boot-ticks-v15 runs of the re-take batch named here (v15a, v15b, v15d to v15o, five of them cold, each launched at a one-minute load below 1.0; private/generated/oracle/batches/retake-batch-20260926-205224.json) and the batch's device-profile control run with the profile probe loaded, devprofile-control-on-v2a, the same probe build (its pair's other run, devprofile-control-off-v2a, loads no profile probe and is another build), all with the locale take's device-profile probe (harness/replay/native_device_profile.c 14a57b17...), so the v14 retirement above, another build, does not carry over and is re-derived here (unit IN, 2026-09-26). The stack control boot-ticks-v15c-stackpad is another build (STACK_PAD) and is not named. A caution the retirement does not rest on: the twenty Metal Harbor re-takes of the same batch, another build (the stage's probe set), take two paths through this word at tick 5, 11 one way and 9 the other, all launched below a load of 1.0, so which path a run takes is not load alone (Documentation/risks.json, a_native_second_path_narrows_the_mask). tools/s4/snapshot_fields.py reads every named run's path through it, and every source's and the held-out run's, whenever it chooses this build's mask, and refuses the mask if any of them takes a second path."
+    }
+   ]
+  }
+ ]
+}

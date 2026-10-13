@@ -1,0 +1,3413 @@
+{
+  "schema": "sa2-recomp-receipt/v1",
+  "id": "s4-import-surface-v1",
+  "stage": "S4",
+  "date": "2026-09-20",
+  "question": "How large is the executable's dynamic import surface -- the names it resolves through `GetProcAddress` rather than through an IAT slot -- and what should M4's denominator therefore be?",
+  "authority": "statically-translated",
+  "inputs": {
+    "design": [
+      "Documentation/SA2_RECOMP_DESIGN.md section 3.5 (imports), section 8 (M4)"
+    ],
+    "executable": {
+      "path": "private/exe/sonic2app-unpacked.exe",
+      "sha256": "c97b116fbd1d64108cbc8ec403b4a59ba6f815159b9a0ad896668d6c19c1bfe9",
+      "image_base": "0x400000",
+      "executable_sections": [
+        {
+          "name": ".text",
+          "va": "0x401000",
+          "virtual_size": 4650385,
+          "raw_size": 4650496,
+          "flags": "rx"
+        },
+        {
+          "name": "PSFD00",
+          "va": "0x871000",
+          "virtual_size": 7544,
+          "raw_size": 7680,
+          "flags": "rx"
+        }
+      ],
+      "instructions_decoded": 1494541
+    },
+    "function_map": {
+      "path": "private/generated/function-map.json",
+      "present": true,
+      "sha256": "11b82ae844467a97ff6d9e99faa827f6ab8f2411e942fb415344ed12c96e622e",
+      "functions": 12683,
+      "regions": {
+        "game": 8581,
+        "crt": 705,
+        "cri": 3325,
+        "other": 72
+      }
+    },
+    "decision": {
+      "path": "Documentation/decisions/2026-09-19-G1-lifter-eh-threads.md",
+      "sha256": "94740711813c240d13ce877126ef5af86a5091d3a573d611254faf729b64a049"
+    },
+    "s1_receipt": {
+      "path": "Documentation/receipts/s1-import-classification-v1.json",
+      "sha256": "7cde53707d6ae3879160ed82cf7c8f851fbd9b04b24a121cda09b3309434a0b8"
+    },
+    "pipeline": {
+      "tools/s4/image.py": "132c07c1bf70ed655048d2e47a9fad0df6b266da406a322cf0fbd24ad9a38ae0",
+      "tools/s4/import_surface.py": "32119e7550a159d7c696b85612bdd3810f98c84e38e027f0b1c392517a1c954d"
+    },
+    "tools": {
+      "python": {
+        "pinned": "3.13.5",
+        "observed": "3.13.5"
+      },
+      "pefile": {
+        "pinned": "2024.8.26",
+        "observed": "2024.8.26"
+      },
+      "iced-x86": {
+        "pinned": "1.21.0",
+        "observed": "1.21.0"
+      }
+    }
+  },
+  "commands": [
+    "source tools/env.sh",
+    ".venv/bin/python tools/s4/import_surface.py",
+    ".venv/bin/python Documentation/scripts/check_boundary.py",
+    ".venv/bin/python Documentation/scripts/check_receipt_pins.py"
+  ],
+  "method": "Every executable section is decoded once, linearly, with iced-x86; every instruction whose sole absolute memory operand is the `GetProcAddress` IAT slot is a site. A `call` is a direct call site, a `mov <reg>` is a pointer load, and each pointer load is walked forward to the end of its function's [entry, next entry) span to find the `call <reg>` sites it feeds, stopping at the first write to that register. Symbols come from the `push imm32` two pushes back from a call, which is `lpProcName` under __stdcall; no looser rule is used. Three checks can fail the enumeration: a byte search for the slot address that never decodes anything, a second decode anchored on each site's function entry, and `.reloc` coverage of each operand field.",
+  "slot": {
+    "symbol": "GetProcAddress",
+    "dll": "KERNEL32.dll",
+    "iat_slot": "0x8730d4"
+  },
+  "sites": {
+    "direct_call_sites": {
+      "total": 209,
+      "per_region": {
+        "game": 154,
+        "crt": 4,
+        "unmapped": 51
+      }
+    },
+    "pointer_loads": {
+      "total": 134,
+      "per_region": {
+        "game": 121,
+        "crt": 3,
+        "unmapped": 10
+      }
+    },
+    "register_cached_call_sites": {
+      "total": 499,
+      "per_region": {
+        "game": 446,
+        "crt": 11,
+        "unmapped": 42
+      }
+    },
+    "all_call_sites": {
+      "total": 708,
+      "per_region": {
+        "game": 600,
+        "crt": 15,
+        "unmapped": 93
+      }
+    },
+    "pointer_load_destinations": {
+      "ESI": 83,
+      "EBP": 21,
+      "EDI": 19,
+      "EBX": 11
+    },
+    "calls_per_pointer_load": {
+      "2": 76,
+      "3": 19,
+      "4": 15,
+      "5": 8,
+      "6": 4,
+      "7": 5,
+      "9": 1,
+      "12": 1,
+      "13": 2,
+      "19": 1,
+      "20": 1,
+      "45": 1
+    },
+    "pointer_loads_that_reach_no_call": 0,
+    "pointer_load_walk_stops": {
+      "register overwritten": 133,
+      "reached the next function entry": 1
+    },
+    "volatile_destinations": [],
+    "module_handle_operand": {
+      "push ecx": 480,
+      "push edx": 205,
+      "push eax": 10,
+      "push edi": 9,
+      "push esi": 3,
+      "push dword [ebp-1Ch]": 1
+    }
+  },
+  "unmapped_sites": {
+    "question": "the analyzer's region for a site is 'unmapped' when the site falls outside [entry, entry + size) of every function. What are those?",
+    "direct_calls_unmapped": [
+      "0x4a56b6",
+      "0x4abdce",
+      "0x4abef6",
+      "0x4abf1f",
+      "0x4adef7",
+      "0x4adf1d",
+      "0x4adf68",
+      "0x4bb229",
+      "0x4d3f42",
+      "0x4e7b25",
+      "0x53afee",
+      "0x54d969",
+      "0x54da09",
+      "0x56ac6b",
+      "0x56adad",
+      "0x56ade5",
+      "0x585948",
+      "0x5c5f1e",
+      "0x5c630e",
+      "0x5c672e",
+      "0x5ddd8c",
+      "0x5edb25",
+      "0x61ab09",
+      "0x61abd9",
+      "0x61cba4",
+      "0x6219bc",
+      "0x6219df",
+      "0x621a12",
+      "0x621a35",
+      "0x621af2",
+      "0x621b1d",
+      "0x623e2f",
+      "0x623fee",
+      "0x6249c4",
+      "0x6249e7",
+      "0x624a20",
+      "0x624a43",
+      "0x624ba7",
+      "0x624bd2",
+      "0x625e58",
+      "0x625e7b",
+      "0x625f39",
+      "0x625f64",
+      "0x6295a2",
+      "0x649148",
+      "0x64f475",
+      "0x6754f2",
+      "0x675542",
+      "0x67f547",
+      "0x6f373c",
+      "0x86b401"
+    ],
+    "pointer_loads_unmapped": [
+      "0x4cca6d",
+      "0x4de936",
+      "0x61c7ee",
+      "0x623a28",
+      "0x623a9e",
+      "0x624288",
+      "0x624a63",
+      "0x624d8d",
+      "0x6255c7",
+      "0x625d27"
+    ],
+    "all_fall_inside_a_preceding_function_span": true,
+    "preceding_function_regions": {
+      "game": 61
+    },
+    "finding": "every unmapped site is an instruction boundary on a decode started at the preceding function's entry, and lies before the next entry. They are not a separate region: they are the analyzer's `size` field under-reporting a discontiguous function body, the same defect Documentation/S3_INPUTS.md section 1 is owed a fix for. Counted by their containing function they belong to the region of that function."
+  },
+  "checks": {
+    "byte_scan_vs_sweep": {
+      "question": "does a decode-independent search for the slot address find exactly the references the sweep claims?",
+      "slot_dwords_in_executable_sections": 343,
+      "operand_fields_claimed_by_the_sweep": 343,
+      "found_by_bytes_but_not_by_the_sweep": [],
+      "claimed_by_the_sweep_but_not_in_the_bytes": [],
+      "pass": true
+    },
+    "anchored_redecode": {
+      "question": "is every site an instruction boundary on a second decode started at its function's entry, not only on the linear sweep?",
+      "sites_checked": 842,
+      "not_a_boundary": [],
+      "pass": true
+    },
+    "relocation_coverage": {
+      "question": "is every claimed slot operand a dword `.reloc` says holds an absolute address?",
+      "sites_checked": 343,
+      "without_a_relocation": [],
+      "pass": true
+    },
+    "slot_pointers_in_data": {
+      "question": "does any non-executable section hold the slot address, which would be a fourth kind of site this enumeration does not model?",
+      "occurrences": [],
+      "pass": true
+    },
+    "thunks": {
+      "question": "does the image reach this import through a `jmp [slot]` thunk, which would add call sites that never name the slot?",
+      "thunks": [],
+      "pass": true
+    },
+    "register_cached_call_shape": {
+      "question": "does every `call <reg>` the forward walk attributes to a cached `GetProcAddress` pointer actually carry that import's argument shape -- a module handle in [esp] that is not a link-time constant, and a name written to [esp+4]?",
+      "sites_checked": 499,
+      "without_the_argument_shape": [],
+      "negative_control": {
+        "unclaimed_register_calls_in_the_same_spans": 149,
+        "of_those_failing_the_same_test": 35,
+        "note": "the test is a necessary condition, not a sufficient one: an unclaimed site can satisfy it by being some other two-argument indirect call whose second argument is a string. It has teeth only because the sites the walk does claim fail it zero times while unclaimed sites in the same code fail it often."
+      },
+      "pass": true
+    }
+  },
+  "symbols": {
+    "call_sites_examined": 708,
+    "resolved": 706,
+    "unresolved": 2,
+    "distinct_symbols": 451,
+    "distinct_symbols_that_are_also_static_imports": [
+      "GetActiveWindow",
+      "GetLastActivePopup",
+      "MessageBoxA"
+    ],
+    "unresolved_reasons": {
+      "lpProcName is not an immediate: the name arrives in a register or from memory and is only known at run time": 2
+    },
+    "unresolved_sites": [
+      {
+        "va": "0x77df09",
+        "kind": "call-slot",
+        "region": "game",
+        "function": "GetDllData",
+        "containing_span_entry": "0x77def0",
+        "containing_span_name": "GetDllData",
+        "containing_span_region": "game",
+        "symbol": null,
+        "reason": "lpProcName is not an immediate: the name arrives in a register or from memory and is only known at run time",
+        "name_operand": "push eax",
+        "module_operand": "push ecx",
+        "name_written_by": "push",
+        "block_instructions": 3,
+        "boundary": "je short 0077DF12h",
+        "helper_entry": "0x77def0",
+        "helper_direct_callers": 84,
+        "helper_address_referenced_anywhere": 0,
+        "residual": "the name is this helper's own argument, so completing it means tracing 84 direct caller(s); the helper's address appears 0 time(s) as a dword anywhere in the image, so direct calls are its whole entry surface"
+      },
+      {
+        "va": "0x86b401",
+        "kind": "call-slot",
+        "region": "unmapped",
+        "function": null,
+        "containing_span_entry": "0x86b320",
+        "containing_span_name": "FUN_0086b320",
+        "containing_span_region": "game",
+        "symbol": null,
+        "reason": "lpProcName is not an immediate: the name arrives in a register or from memory and is only known at run time",
+        "name_operand": "push edx",
+        "module_operand": "push ecx",
+        "name_written_by": "push",
+        "block_instructions": 2,
+        "boundary": "je short 0086B407h",
+        "helper_entry": "0x86b3f0",
+        "helper_direct_callers": 0,
+        "helper_address_referenced_anywhere": 0,
+        "residual": "the name is this helper's own argument, so completing it means tracing 0 direct caller(s); the helper's address appears 0 time(s) as a dword anywhere in the image, so nothing at all references it and it is reached, if ever, only by a computed address"
+      }
+    ],
+    "by_symbol": {
+      "_fileSelectPvr": {
+        "sites": 16,
+        "at": [
+          "0x6826a0",
+          "0x6828b3",
+          "0x681e79",
+          "0x681f19",
+          "0x681fbb",
+          "0x682059",
+          "0x682e5c",
+          "0x682efe",
+          "0x68344d",
+          "0x6835bd",
+          "0x6836b7",
+          "0x683817",
+          "0x683978",
+          "0x683ae8",
+          "0x683be2",
+          "0x6841e4"
+        ]
+      },
+      "exParam": {
+        "sites": 16,
+        "at": [
+          "0x61c4dd",
+          "0x61cba4",
+          "0x61fa5b",
+          "0x61fa96",
+          "0x61fb51",
+          "0x61fbd6",
+          "0x61fcb9",
+          "0x61fcf4",
+          "0x623094",
+          "0x623130",
+          "0x623257",
+          "0x61d431",
+          "0x61f9e9",
+          "0x61fa18",
+          "0x61fc47",
+          "0x61fc76"
+        ]
+      },
+      "texlist_course": {
+        "sites": 14,
+        "at": [
+          "0x61a611",
+          "0x61a998",
+          "0x61ab09",
+          "0x61abd9",
+          "0x61b207",
+          "0x621af2",
+          "0x623e2f",
+          "0x624ba7",
+          "0x625f39",
+          "0x626086",
+          "0x6242a2",
+          "0x624da7",
+          "0x6255e1",
+          "0x625d41"
+        ]
+      },
+      "PlistTblData": {
+        "sites": 9,
+        "at": [
+          "0x6219df",
+          "0x621a35",
+          "0x6249e7",
+          "0x624a43",
+          "0x625e7b",
+          "0x625ff3",
+          "0x624a9d",
+          "0x624af1",
+          "0x6256de"
+        ]
+      },
+      "CartCourseModels": {
+        "sites": 7,
+        "at": [
+          "0x62211a",
+          "0x6221dc",
+          "0x62231f",
+          "0x622448",
+          "0x622485",
+          "0x6224bc",
+          "0x623fee"
+        ]
+      },
+      "kartRacePvr": {
+        "sites": 7,
+        "at": [
+          "0x68ab72",
+          "0x68ad67",
+          "0x68ae98",
+          "0x68b00d",
+          "0x68c3bd",
+          "0x68a73f",
+          "0x68a7d9"
+        ]
+      },
+      "objLandTable0032": {
+        "sites": 7,
+        "at": [
+          "0x5bdee2",
+          "0x5be5c0",
+          "0x5be5e3",
+          "0x5bed03",
+          "0x5bed21",
+          "0x5bed57",
+          "0x5bed75"
+        ]
+      },
+      "object_gate_gate_gate": {
+        "sites": 7,
+        "at": [
+          "0x6249c4",
+          "0x624a20",
+          "0x624bd2",
+          "0x624370",
+          "0x6243f8",
+          "0x624a7e",
+          "0x624ad2"
+        ]
+      },
+      "texlist_batadvPlayer": {
+        "sites": 7,
+        "at": [
+          "0x67ebbb",
+          "0x67ec57",
+          "0x67ecf4",
+          "0x67ed94",
+          "0x680713",
+          "0x6812d2",
+          "0x681359"
+        ]
+      },
+      "texlist_fileSelect": {
+        "sites": 7,
+        "at": [
+          "0x684419",
+          "0x684443",
+          "0x6844d2",
+          "0x681e55",
+          "0x681ef5",
+          "0x681f97",
+          "0x682035"
+        ]
+      },
+      "advShareDataPvr": {
+        "sites": 6,
+        "at": [
+          "0x674d19",
+          "0x674da9",
+          "0x675426",
+          "0x675444",
+          "0x675474",
+          "0x675492"
+        ]
+      },
+      "battleAPvrs": {
+        "sites": 6,
+        "at": [
+          "0x67f7b2",
+          "0x67ebdf",
+          "0x67ec7b",
+          "0x67ed18",
+          "0x67edb8",
+          "0x680e62"
+        ]
+      },
+      "object_gate_gate_start_p": {
+        "sites": 6,
+        "at": [
+          "0x624352",
+          "0x6243da",
+          "0x624457",
+          "0x62449d",
+          "0x6244e3",
+          "0x624529"
+        ]
+      },
+      "object_stand0_effectring1_effectring1": {
+        "sites": 6,
+        "at": [
+          "0x4bf897",
+          "0x4bf926",
+          "0x4c5168",
+          "0x4c539d",
+          "0x4c5ef4",
+          "0x4c5f77"
+        ]
+      },
+      "texlist_al_stg_hero_tex": {
+        "sites": 6,
+        "at": [
+          "0x54d4d3",
+          "0x54d515",
+          "0x54d557",
+          "0x54d599",
+          "0x54d5db",
+          "0x54d61d"
+        ]
+      },
+      "_charaObject": {
+        "sites": 5,
+        "at": [
+          "0x67f547",
+          "0x6800b8",
+          "0x680948",
+          "0x67ee2f",
+          "0x680697"
+        ]
+      },
+      "objLandTable0008": {
+        "sites": 5,
+        "at": [
+          "0x634539",
+          "0x6349d1",
+          "0x6349f4",
+          "0x634e57",
+          "0x634e71"
+        ]
+      },
+      "texlist_kartRace": {
+        "sites": 5,
+        "at": [
+          "0x68a71b",
+          "0x68a7b5",
+          "0x68b77b",
+          "0x68c507",
+          "0x68c6a9"
+        ]
+      },
+      "texlist_titletex_golem": {
+        "sites": 5,
+        "at": [
+          "0x4a56b6",
+          "0x4a5d15",
+          "0x4bb229",
+          "0x4a53f0",
+          "0x4bafbe"
+        ]
+      },
+      "objLandTable0030": {
+        "sites": 4,
+        "at": [
+          "0x4ac818",
+          "0x4ac838",
+          "0x4ac878",
+          "0x4ac8a0"
+        ]
+      },
+      "object_poster_body_body": {
+        "sites": 4,
+        "at": [
+          "0x625e58",
+          "0x625f64",
+          "0x625fd0",
+          "0x6260b1"
+        ]
+      },
+      "texlist_advShareData": {
+        "sites": 4,
+        "at": [
+          "0x6754f2",
+          "0x675542",
+          "0x674cf5",
+          "0x674d85"
+        ]
+      },
+      "texlist_al_stg_neut_tex": {
+        "sites": 4,
+        "at": [
+          "0x54c6d2",
+          "0x54cb6a",
+          "0x54cbac",
+          "0x54cbee"
+        ]
+      },
+      "texlist_batadvPlayerChara": {
+        "sites": 4,
+        "at": [
+          "0x68019b",
+          "0x68062a",
+          "0x6812fd",
+          "0x681381"
+        ]
+      },
+      "texlist_kartExModel_cartSpecial": {
+        "sites": 4,
+        "at": [
+          "0x62012f",
+          "0x6201c2",
+          "0x620265",
+          "0x6203b9"
+        ]
+      },
+      "model_stand0_particle_particle_boss_golemE": {
+        "sites": 3,
+        "at": [
+          "0x4aaac2",
+          "0x4ab9b0",
+          "0x4abef6"
+        ]
+      },
+      "objLandTable0005": {
+        "sites": 3,
+        "at": [
+          "0x4b3793",
+          "0x4b37bc",
+          "0x4b3840"
+        ]
+      },
+      "objLandTable0013": {
+        "sites": 3,
+        "at": [
+          "0x5dcdc6",
+          "0x5dcdef",
+          "0x5dcf51"
+        ]
+      },
+      "objLandTable0022": {
+        "sites": 3,
+        "at": [
+          "0x772b8d",
+          "0x772bba",
+          "0x770612"
+        ]
+      },
+      "objLandTable0030_uv": {
+        "sites": 3,
+        "at": [
+          "0x4adef7",
+          "0x4adf1d",
+          "0x4ac7f3"
+        ]
+      },
+      "objLandTable0031_ani": {
+        "sites": 3,
+        "at": [
+          "0x5db37e",
+          "0x5db3a1",
+          "0x5db3c6"
+        ]
+      },
+      "objLandTable0032_tani": {
+        "sites": 3,
+        "at": [
+          "0x5bf627",
+          "0x5bf64a",
+          "0x5bf66e"
+        ]
+      },
+      "objLandTable0040": {
+        "sites": 3,
+        "at": [
+          "0x4e6c90",
+          "0x4e6cd0",
+          "0x4e6cf8"
+        ]
+      },
+      "object_check_gate_gate": {
+        "sites": 3,
+        "at": [
+          "0x6219bc",
+          "0x621a12",
+          "0x621b1d"
+        ]
+      },
+      "player00": {
+        "sites": 3,
+        "at": [
+          "0x68b5e9",
+          "0x68b995",
+          "0x68bcbf"
+        ]
+      },
+      "sUn0Tuuro1": {
+        "sites": 3,
+        "at": [
+          "0x4cb9af",
+          "0x4cba0e",
+          "0x4cba6d"
+        ]
+      },
+      "sUn1Beam": {
+        "sites": 3,
+        "at": [
+          "0x4ccb29",
+          "0x4ccb8b",
+          "0x4ccbda"
+        ]
+      },
+      "sUn5Denki": {
+        "sites": 3,
+        "at": [
+          "0x4d3f42",
+          "0x4cce78",
+          "0x4cceea"
+        ]
+      },
+      "texlist_cartData_cartSpecial": {
+        "sites": 3,
+        "at": [
+          "0x61ed1a",
+          "0x620108",
+          "0x620391"
+        ]
+      },
+      "texlist_cartData_kartRace": {
+        "sites": 3,
+        "at": [
+          "0x68b809",
+          "0x68c55d",
+          "0x68c6f9"
+        ]
+      },
+      "texlist_cartLim": {
+        "sites": 3,
+        "at": [
+          "0x623bf2",
+          "0x623c72",
+          "0x623a45"
+        ]
+      },
+      "texlist_kartExModel_kartRace": {
+        "sites": 3,
+        "at": [
+          "0x68b7db",
+          "0x68c532",
+          "0x68c6d1"
+        ]
+      },
+      "texlist_landtx35": {
+        "sites": 3,
+        "at": [
+          "0x517a27",
+          "0x514231",
+          "0x514252"
+        ]
+      },
+      "texlist_limtails": {
+        "sites": 3,
+        "at": [
+          "0x623c26",
+          "0x623ca2",
+          "0x623abb"
+        ]
+      },
+      "texlist_stand0_effectring1": {
+        "sites": 3,
+        "at": [
+          "0x4bf86e",
+          "0x4c5378",
+          "0x4c5ecb"
+        ]
+      },
+      "DecodePointer": {
+        "sites": 2,
+        "at": [
+          "0x7ac2a4",
+          "0x7ac3c9"
+        ]
+      },
+      "EncodePointer": {
+        "sites": 2,
+        "at": [
+          "0x7ac229",
+          "0x7ac3b9"
+        ]
+      },
+      "KartSeEntry": {
+        "sites": 2,
+        "at": [
+          "0x61a416",
+          "0x61a442"
+        ]
+      },
+      "MaskObjObjectList": {
+        "sites": 2,
+        "at": [
+          "0x58a954",
+          "0x58a995"
+        ]
+      },
+      "cardObj": {
+        "sites": 2,
+        "at": [
+          "0x683dc6",
+          "0x684202"
+        ]
+      },
+      "cod_golem_E": {
+        "sites": 2,
+        "at": [
+          "0x4aa1b4",
+          "0x4abdce"
+        ]
+      },
+      "cursorObj": {
+        "sites": 2,
+        "at": [
+          "0x6806b5",
+          "0x680e44"
+        ]
+      },
+      "epilog_motion": {
+        "sites": 2,
+        "at": [
+          "0x530c85",
+          "0x530e5d"
+        ]
+      },
+      "header_stg10": {
+        "sites": 2,
+        "at": [
+          "0x6f36ba",
+          "0x6f373c"
+        ]
+      },
+      "header_stg13": {
+        "sites": 2,
+        "at": [
+          "0x5ddd0a",
+          "0x5ddd8c"
+        ]
+      },
+      "model_lsonic_un4_water_BK04050607__nc_un4_water_": {
+        "sites": 2,
+        "at": [
+          "0x4cc36a",
+          "0x4cc39e"
+        ]
+      },
+      "model_weakpoint_w_mech_w_mech": {
+        "sites": 2,
+        "at": [
+          "0x4aa5f3",
+          "0x4aa40d"
+        ]
+      },
+      "model_weakpoint_weakcube_weakcube": {
+        "sites": 2,
+        "at": [
+          "0x4ab1ef",
+          "0x4abf1f"
+        ]
+      },
+      "motion_lsonic_unit1_cylinder": {
+        "sites": 2,
+        "at": [
+          "0x4cbd5b",
+          "0x4cbc5a"
+        ]
+      },
+      "motion_tornado_3rd": {
+        "sites": 2,
+        "at": [
+          "0x623ae4",
+          "0x623b65"
+        ]
+      },
+      "objLandTable0022_uv": {
+        "sites": 2,
+        "at": [
+          "0x771e1e",
+          "0x771e45"
+        ]
+      },
+      "objLandTable0022_x": {
+        "sites": 2,
+        "at": [
+          "0x77259e",
+          "0x7725cb"
+        ]
+      },
+      "objLandTable0024_Poison": {
+        "sites": 2,
+        "at": [
+          "0x787655",
+          "0x78767c"
+        ]
+      },
+      "objLandTable0024_uv": {
+        "sites": 2,
+        "at": [
+          "0x787422",
+          "0x787449"
+        ]
+      },
+      "objLandTable0027_light": {
+        "sites": 2,
+        "at": [
+          "0x764207",
+          "0x76422e"
+        ]
+      },
+      "objLandTable0027_poison": {
+        "sites": 2,
+        "at": [
+          "0x764753",
+          "0x764780"
+        ]
+      },
+      "objLandTable0027_uv": {
+        "sites": 2,
+        "at": [
+          "0x764485",
+          "0x7644ac"
+        ]
+      },
+      "objLandTable0029": {
+        "sites": 2,
+        "at": [
+          "0x4ba6a9",
+          "0x661df5"
+        ]
+      },
+      "object_dash_plate1_plate1": {
+        "sites": 2,
+        "at": [
+          "0x62563e",
+          "0x6256c0"
+        ]
+      },
+      "object_gate_chack_p_chack_p": {
+        "sites": 2,
+        "at": [
+          "0x624501",
+          "0x624547"
+        ]
+      },
+      "object_gate_goal_p_goal_p": {
+        "sites": 2,
+        "at": [
+          "0x624475",
+          "0x6244bb"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_body1_boss_golem": {
+        "sites": 2,
+        "at": [
+          "0x4c0037",
+          "0x4c007f"
+        ]
+      },
+      "object_lsonic_un4_kuruma_BK040506__un4_kuruma_BK040506_": {
+        "sites": 2,
+        "at": [
+          "0x4cb61d",
+          "0x4cae6e"
+        ]
+      },
+      "object_lsonic_un5_denki_BK0809__un5_denki_BK0809_": {
+        "sites": 2,
+        "at": [
+          "0x4cae16",
+          "0x4cce54"
+        ]
+      },
+      "object_lsonic_un5_denki_BK0910__un5_denki_BK0910_": {
+        "sites": 2,
+        "at": [
+          "0x4cae42",
+          "0x4ccec6"
+        ]
+      },
+      "object_lsonic_un5_water5_BK0809__un5_water5_BK0809_": {
+        "sites": 2,
+        "at": [
+          "0x4cc9a8",
+          "0x4ccf63"
+        ]
+      },
+      "object_lsonic_unit1_cylinder_unit1_cylinder": {
+        "sites": 2,
+        "at": [
+          "0x4cbd7d",
+          "0x4cbc7a"
+        ]
+      },
+      "object_race_obj_hata_hata": {
+        "sites": 2,
+        "at": [
+          "0x56adad",
+          "0x56ade5"
+        ]
+      },
+      "object_race_omo_original_original": {
+        "sites": 2,
+        "at": [
+          "0x53afee",
+          "0x56ac6b"
+        ]
+      },
+      "object_stand0_emecha1_emecha1": {
+        "sites": 2,
+        "at": [
+          "0x4c524d",
+          "0x4c5291"
+        ]
+      },
+      "prolog_motion": {
+        "sites": 2,
+        "at": [
+          "0x530c60",
+          "0x530e38"
+        ]
+      },
+      "sUn0Tuuro0": {
+        "sites": 2,
+        "at": [
+          "0x4cb8c8",
+          "0x4cb927"
+        ]
+      },
+      "sUn0Tuuro2": {
+        "sites": 2,
+        "at": [
+          "0x4cbaf5",
+          "0x4cbb54"
+        ]
+      },
+      "sUn5Kabe2": {
+        "sites": 2,
+        "at": [
+          "0x4cc568",
+          "0x4cc5c4"
+        ]
+      },
+      "sUn5Kabe3": {
+        "sites": 2,
+        "at": [
+          "0x4cc64a",
+          "0x4cc6aa"
+        ]
+      },
+      "sUn5Kabe4": {
+        "sites": 2,
+        "at": [
+          "0x4cc72b",
+          "0x4cc78b"
+        ]
+      },
+      "texlist_landtx03_suimen": {
+        "sites": 2,
+        "at": [
+          "0x5edb25",
+          "0x5ed19f"
+        ]
+      },
+      "texlist_landtx16": {
+        "sites": 2,
+        "at": [
+          "0x6a2529",
+          "0x6a254a"
+        ]
+      },
+      "texlist_landtx22_uv": {
+        "sites": 2,
+        "at": [
+          "0x771e90",
+          "0x770663"
+        ]
+      },
+      "texlist_landtx22_x": {
+        "sites": 2,
+        "at": [
+          "0x772616",
+          "0x770688"
+        ]
+      },
+      "texlist_landtx24_Poison": {
+        "sites": 2,
+        "at": [
+          "0x7876c3",
+          "0x7867f2"
+        ]
+      },
+      "texlist_landtx24_uv": {
+        "sites": 2,
+        "at": [
+          "0x787490",
+          "0x786817"
+        ]
+      },
+      "texlist_landtx25": {
+        "sites": 2,
+        "at": [
+          "0x6aa241",
+          "0x6aa262"
+        ]
+      },
+      "texlist_landtx26": {
+        "sites": 2,
+        "at": [
+          "0x68f931",
+          "0x68f952"
+        ]
+      },
+      "texlist_landtx27_light": {
+        "sites": 2,
+        "at": [
+          "0x764276",
+          "0x763386"
+        ]
+      },
+      "texlist_landtx27_poison": {
+        "sites": 2,
+        "at": [
+          "0x7647c9",
+          "0x76333c"
+        ]
+      },
+      "texlist_landtx27_uv": {
+        "sites": 2,
+        "at": [
+          "0x7644f5",
+          "0x763361"
+        ]
+      },
+      "texlist_landtx30_uv": {
+        "sites": 2,
+        "at": [
+          "0x4adf68",
+          "0x4ac8e5"
+        ]
+      },
+      "texlist_landtx31_ani": {
+        "sites": 2,
+        "at": [
+          "0x5da9f8",
+          "0x5db325"
+        ]
+      },
+      "texlist_landtx32": {
+        "sites": 2,
+        "at": [
+          "0x5bdf5d",
+          "0x5bdf7e"
+        ]
+      },
+      "texlist_landtx32_tani": {
+        "sites": 2,
+        "at": [
+          "0x5bdf9f",
+          "0x5bf5dc"
+        ]
+      },
+      "texlist_landtx34": {
+        "sites": 2,
+        "at": [
+          "0x4ca0b8",
+          "0x4ca0fa"
+        ]
+      },
+      "texlist_landtx36": {
+        "sites": 2,
+        "at": [
+          "0x63c9e6",
+          "0x639bf0"
+        ]
+      },
+      "texlist_landtx37": {
+        "sites": 2,
+        "at": [
+          "0x4db1a6",
+          "0x4db1c7"
+        ]
+      },
+      "texlist_landtx38": {
+        "sites": 2,
+        "at": [
+          "0x65e74a",
+          "0x65e76b"
+        ]
+      },
+      "texlist_landtx40": {
+        "sites": 2,
+        "at": [
+          "0x4e6d5e",
+          "0x4e6d7f"
+        ]
+      },
+      "texlist_landtx43": {
+        "sites": 2,
+        "at": [
+          "0x628851",
+          "0x6288a9"
+        ]
+      },
+      "texlist_landtx44": {
+        "sites": 2,
+        "at": [
+          "0x64e25b",
+          "0x64e27c"
+        ]
+      },
+      "texlist_landtx48": {
+        "sites": 2,
+        "at": [
+          "0x6556bc",
+          "0x6556dd"
+        ]
+      },
+      "texlist_landtx50": {
+        "sites": 2,
+        "at": [
+          "0x663a71",
+          "0x663a92"
+        ]
+      },
+      "texlist_landtx59": {
+        "sites": 2,
+        "at": [
+          "0x64c661",
+          "0x64c682"
+        ]
+      },
+      "texlist_lsonic_unit1_cylinder": {
+        "sites": 2,
+        "at": [
+          "0x4cbd32",
+          "0x4cbc34"
+        ]
+      },
+      "texlist_stand0_particle_boss_golemE": {
+        "sites": 2,
+        "at": [
+          "0x4aaae5",
+          "0x4ab9d2"
+        ]
+      },
+      "texlist_weakpoint_w_mech": {
+        "sites": 2,
+        "at": [
+          "0x4aa5ca",
+          "0x4aa3d9"
+        ]
+      },
+      "AL_RootObject": {
+        "sites": 1,
+        "at": [
+          "0x56ca19"
+        ]
+      },
+      "CorExitProcess": {
+        "sites": 1,
+        "at": [
+          "0x7ac92d"
+        ]
+      },
+      "DirectDrawCreate": {
+        "sites": 1,
+        "at": [
+          "0x865d9e"
+        ]
+      },
+      "DirectDrawEnumerateExA": {
+        "sites": 1,
+        "at": [
+          "0x865d84"
+        ]
+      },
+      "FlsAlloc": {
+        "sites": 1,
+        "at": [
+          "0x7ac6bb"
+        ]
+      },
+      "FlsFree": {
+        "sites": 1,
+        "at": [
+          "0x7ac6e2"
+        ]
+      },
+      "FlsGetValue": {
+        "sites": 1,
+        "at": [
+          "0x7ac6c8"
+        ]
+      },
+      "FlsSetValue": {
+        "sites": 1,
+        "at": [
+          "0x7ac6d5"
+        ]
+      },
+      "GetActiveWindow": {
+        "sites": 1,
+        "at": [
+          "0x7bc3c3"
+        ]
+      },
+      "GetLastActivePopup": {
+        "sites": 1,
+        "at": [
+          "0x7bc3d8"
+        ]
+      },
+      "GetProcessWindowStation": {
+        "sites": 1,
+        "at": [
+          "0x7bc405"
+        ]
+      },
+      "GetUserObjectInformationA": {
+        "sites": 1,
+        "at": [
+          "0x7bc3ed"
+        ]
+      },
+      "IsProcessorFeaturePresent": {
+        "sites": 1,
+        "at": [
+          "0x7ba6bf"
+        ]
+      },
+      "MayuObjectList": {
+        "sites": 1,
+        "at": [
+          "0x568c08"
+        ]
+      },
+      "MessageBoxA": {
+        "sites": 1,
+        "at": [
+          "0x7bc3a6"
+        ]
+      },
+      "al_motion_table": {
+        "sites": 1,
+        "at": [
+          "0x55c38d"
+        ]
+      },
+      "battleADefault": {
+        "sites": 1,
+        "at": [
+          "0x681152"
+        ]
+      },
+      "cameraMoion": {
+        "sites": 1,
+        "at": [
+          "0x67ef39"
+        ]
+      },
+      "exModels": {
+        "sites": 1,
+        "at": [
+          "0x6200c6"
+        ]
+      },
+      "exParamSpecial": {
+        "sites": 1,
+        "at": [
+          "0x61d413"
+        ]
+      },
+      "gGolemTexlists_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4baebb"
+        ]
+      },
+      "gGolemTexlists_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a52db"
+        ]
+      },
+      "ligcCount_stg27": {
+        "sites": 1,
+        "at": [
+          "0x763df2"
+        ]
+      },
+      "ligc_stg27": {
+        "sites": 1,
+        "at": [
+          "0x763dd4"
+        ]
+      },
+      "model_crazy_bk0607_nc_1ti": {
+        "sites": 1,
+        "at": [
+          "0x772c46"
+        ]
+      },
+      "model_crazy_bk0607_nc_2ti": {
+        "sites": 1,
+        "at": [
+          "0x772d81"
+        ]
+      },
+      "model_lsonic_un2_kabe2_BK01020304__nc_un2_kabe21_": {
+        "sites": 1,
+        "at": [
+          "0x4cbfe8"
+        ]
+      },
+      "model_lsonic_un2_kabe2_BK01020304__nc_un2_kabe22_": {
+        "sites": 1,
+        "at": [
+          "0x4cc011"
+        ]
+      },
+      "model_lsonic_un4_kuruma_BK040506__nc_un4_kuruma_11": {
+        "sites": 1,
+        "at": [
+          "0x4cb6cd"
+        ]
+      },
+      "model_stand0_particle_particle_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c65a1"
+        ]
+      },
+      "model_wave01_wave01_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c090b"
+        ]
+      },
+      "model_wave01_wave01_golem_E": {
+        "sites": 1,
+        "at": [
+          "0x4ac50b"
+        ]
+      },
+      "model_weakpoint_w_mech_l_blue": {
+        "sites": 1,
+        "at": [
+          "0x4aa4db"
+        ]
+      },
+      "model_weakpoint_weakp0_weakp0": {
+        "sites": 1,
+        "at": [
+          "0x4a9b6d"
+        ]
+      },
+      "model_weakpoint_weakp1_weakp1": {
+        "sites": 1,
+        "at": [
+          "0x4a9bb9"
+        ]
+      },
+      "model_weakpoint_weakp2_weakp2": {
+        "sites": 1,
+        "at": [
+          "0x4a9c01"
+        ]
+      },
+      "motion_lsonic_unit3_hako": {
+        "sites": 1,
+        "at": [
+          "0x4cc1a0"
+        ]
+      },
+      "motion_magic_ring03_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c0afa"
+        ]
+      },
+      "motion_magic_ring03_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4ac6fa"
+        ]
+      },
+      "nbgTexlists_stg34": {
+        "sites": 1,
+        "at": [
+          "0x4ca11b"
+        ]
+      },
+      "objLandTable0000": {
+        "sites": 1,
+        "at": [
+          "0x78652d"
+        ]
+      },
+      "objLandTable0003": {
+        "sites": 1,
+        "at": [
+          "0x5ed12b"
+        ]
+      },
+      "objLandTable0004": {
+        "sites": 1,
+        "at": [
+          "0x62ea0c"
+        ]
+      },
+      "objLandTable0006": {
+        "sites": 1,
+        "at": [
+          "0x5b988c"
+        ]
+      },
+      "objLandTable0007": {
+        "sites": 1,
+        "at": [
+          "0x4d4402"
+        ]
+      },
+      "objLandTable0009": {
+        "sites": 1,
+        "at": [
+          "0x604af2"
+        ]
+      },
+      "objLandTable0010": {
+        "sites": 1,
+        "at": [
+          "0x6f2932"
+        ]
+      },
+      "objLandTable0011": {
+        "sites": 1,
+        "at": [
+          "0x6993a2"
+        ]
+      },
+      "objLandTable0012": {
+        "sites": 1,
+        "at": [
+          "0x76aa42"
+        ]
+      },
+      "objLandTable0014": {
+        "sites": 1,
+        "at": [
+          "0x4de950"
+        ]
+      },
+      "objLandTable0015": {
+        "sites": 1,
+        "at": [
+          "0x64bbe5"
+        ]
+      },
+      "objLandTable0016": {
+        "sites": 1,
+        "at": [
+          "0x6a24f6"
+        ]
+      },
+      "objLandTable0017": {
+        "sites": 1,
+        "at": [
+          "0x5ad742"
+        ]
+      },
+      "objLandTable0018": {
+        "sites": 1,
+        "at": [
+          "0x63d4f2"
+        ]
+      },
+      "objLandTable0019": {
+        "sites": 1,
+        "at": [
+          "0x619434"
+        ]
+      },
+      "objLandTable0020": {
+        "sites": 1,
+        "at": [
+          "0x62678b"
+        ]
+      },
+      "objLandTable0021": {
+        "sites": 1,
+        "at": [
+          "0x6563c7"
+        ]
+      },
+      "objLandTable0023": {
+        "sites": 1,
+        "at": [
+          "0x7102d8"
+        ]
+      },
+      "objLandTable0024": {
+        "sites": 1,
+        "at": [
+          "0x7867a1"
+        ]
+      },
+      "objLandTable0025": {
+        "sites": 1,
+        "at": [
+          "0x6aa20e"
+        ]
+      },
+      "objLandTable0026": {
+        "sites": 1,
+        "at": [
+          "0x68f8fe"
+        ]
+      },
+      "objLandTable0027": {
+        "sites": 1,
+        "at": [
+          "0x7632eb"
+        ]
+      },
+      "objLandTable0028": {
+        "sites": 1,
+        "at": [
+          "0x6fa9f3"
+        ]
+      },
+      "objLandTable0031": {
+        "sites": 1,
+        "at": [
+          "0x5da9c0"
+        ]
+      },
+      "objLandTable0031_uv": {
+        "sites": 1,
+        "at": [
+          "0x5db429"
+        ]
+      },
+      "objLandTable0032_ma": {
+        "sites": 1,
+        "at": [
+          "0x5be332"
+        ]
+      },
+      "objLandTable0032_uv": {
+        "sites": 1,
+        "at": [
+          "0x5bf5b3"
+        ]
+      },
+      "objLandTable0033": {
+        "sites": 1,
+        "at": [
+          "0x6486fa"
+        ]
+      },
+      "objLandTable0033_uv": {
+        "sites": 1,
+        "at": [
+          "0x649148"
+        ]
+      },
+      "objLandTable0034": {
+        "sites": 1,
+        "at": [
+          "0x4ca085"
+        ]
+      },
+      "objLandTable0035": {
+        "sites": 1,
+        "at": [
+          "0x5141fe"
+        ]
+      },
+      "objLandTable0036": {
+        "sites": 1,
+        "at": [
+          "0x639bbe"
+        ]
+      },
+      "objLandTable0037": {
+        "sites": 1,
+        "at": [
+          "0x4db173"
+        ]
+      },
+      "objLandTable0038": {
+        "sites": 1,
+        "at": [
+          "0x65e717"
+        ]
+      },
+      "objLandTable0039": {
+        "sites": 1,
+        "at": [
+          "0x7932f5"
+        ]
+      },
+      "objLandTable0040_uv": {
+        "sites": 1,
+        "at": [
+          "0x4e7b25"
+        ]
+      },
+      "objLandTable0041": {
+        "sites": 1,
+        "at": [
+          "0x4b98b7"
+        ]
+      },
+      "objLandTable0043": {
+        "sites": 1,
+        "at": [
+          "0x628801"
+        ]
+      },
+      "objLandTable0043_uv": {
+        "sites": 1,
+        "at": [
+          "0x6295a2"
+        ]
+      },
+      "objLandTable0044": {
+        "sites": 1,
+        "at": [
+          "0x64e202"
+        ]
+      },
+      "objLandTable0044_uv": {
+        "sites": 1,
+        "at": [
+          "0x64f475"
+        ]
+      },
+      "objLandTable0045": {
+        "sites": 1,
+        "at": [
+          "0x51c923"
+        ]
+      },
+      "objLandTable0046": {
+        "sites": 1,
+        "at": [
+          "0x4e4fc2"
+        ]
+      },
+      "objLandTable0047": {
+        "sites": 1,
+        "at": [
+          "0x4ddcd9"
+        ]
+      },
+      "objLandTable0048": {
+        "sites": 1,
+        "at": [
+          "0x65566a"
+        ]
+      },
+      "objLandTable0049": {
+        "sites": 1,
+        "at": [
+          "0x6f2192"
+        ]
+      },
+      "objLandTable0050": {
+        "sites": 1,
+        "at": [
+          "0x663a11"
+        ]
+      },
+      "objLandTable0051": {
+        "sites": 1,
+        "at": [
+          "0x7929d5"
+        ]
+      },
+      "objLandTable0052": {
+        "sites": 1,
+        "at": [
+          "0x51d8db"
+        ]
+      },
+      "objLandTable0053": {
+        "sites": 1,
+        "at": [
+          "0x627d85"
+        ]
+      },
+      "objLandTable0054": {
+        "sites": 1,
+        "at": [
+          "0x5181cd"
+        ]
+      },
+      "objLandTable0055": {
+        "sites": 1,
+        "at": [
+          "0x68e579"
+        ]
+      },
+      "objLandTable0057": {
+        "sites": 1,
+        "at": [
+          "0x64db3c"
+        ]
+      },
+      "objLandTable0058": {
+        "sites": 1,
+        "at": [
+          "0x529653"
+        ]
+      },
+      "objLandTable0059": {
+        "sites": 1,
+        "at": [
+          "0x64c62e"
+        ]
+      },
+      "objLandTableBossBigFoot": {
+        "sites": 1,
+        "at": [
+          "0x5c630e"
+        ]
+      },
+      "objLandTableBossFlyingDog": {
+        "sites": 1,
+        "at": [
+          "0x5c672e"
+        ]
+      },
+      "objLandTableBossGolem": {
+        "sites": 1,
+        "at": [
+          "0x4bae45"
+        ]
+      },
+      "objLandTableBossGolemE": {
+        "sites": 1,
+        "at": [
+          "0x4a5265"
+        ]
+      },
+      "objLandTableBossGuard0": {
+        "sites": 1,
+        "at": [
+          "0x5c5f1e"
+        ]
+      },
+      "objLandTableBossLast1": {
+        "sites": 1,
+        "at": [
+          "0x51dead"
+        ]
+      },
+      "objLandTableChaoKarate": {
+        "sites": 1,
+        "at": [
+          "0x52d9d6"
+        ]
+      },
+      "objLandTableDark": {
+        "sites": 1,
+        "at": [
+          "0x54b753"
+        ]
+      },
+      "objLandTableEntrance": {
+        "sites": 1,
+        "at": [
+          "0x54db0b"
+        ]
+      },
+      "objLandTableHero": {
+        "sites": 1,
+        "at": [
+          "0x54d233"
+        ]
+      },
+      "objLandTableKinderCl": {
+        "sites": 1,
+        "at": [
+          "0x5872b4"
+        ]
+      },
+      "objLandTableKinderHo": {
+        "sites": 1,
+        "at": [
+          "0x585948"
+        ]
+      },
+      "objLandTableNeut": {
+        "sites": 1,
+        "at": [
+          "0x54c7fa"
+        ]
+      },
+      "objLandTableRace": {
+        "sites": 1,
+        "at": [
+          "0x52d2a9"
+        ]
+      },
+      "objLandTableRaceDark": {
+        "sites": 1,
+        "at": [
+          "0x52d233"
+        ]
+      },
+      "objLandTableRaceHero": {
+        "sites": 1,
+        "at": [
+          "0x52d273"
+        ]
+      },
+      "objLandTableStadium": {
+        "sites": 1,
+        "at": [
+          "0x54e04e"
+        ]
+      },
+      "object_al_egghead_egghead": {
+        "sites": 1,
+        "at": [
+          "0x54003b"
+        ]
+      },
+      "object_al_egghead_eye_egghead_eye": {
+        "sites": 1,
+        "at": [
+          "0x540059"
+        ]
+      },
+      "object_al_egghead_jaw_egghead_jaw": {
+        "sites": 1,
+        "at": [
+          "0x540077"
+        ]
+      },
+      "object_cart_jumpdai_jumpdai": {
+        "sites": 1,
+        "at": [
+          "0x625d6a"
+        ]
+      },
+      "object_cart_obj_line_line": {
+        "sites": 1,
+        "at": [
+          "0x624dd0"
+        ]
+      },
+      "object_cartobj_balloon_ring_balloon_ring": {
+        "sites": 1,
+        "at": [
+          "0x6242d7"
+        ]
+      },
+      "object_chara_limoall_limoall": {
+        "sites": 1,
+        "at": [
+          "0x623a6e"
+        ]
+      },
+      "object_dash_dash_p_dash_p": {
+        "sites": 1,
+        "at": [
+          "0x62560a"
+        ]
+      },
+      "object_entrance_nc_sky_nc_sky": {
+        "sites": 1,
+        "at": [
+          "0x54da09"
+        ]
+      },
+      "object_gdark_nc_hotspring00_hotspring00": {
+        "sites": 1,
+        "at": [
+          "0x54b9dc"
+        ]
+      },
+      "object_ghero_nc_pot_pot": {
+        "sites": 1,
+        "at": [
+          "0x54d5ba"
+        ]
+      },
+      "object_ghero_nc_river00_river00": {
+        "sites": 1,
+        "at": [
+          "0x54d5fc"
+        ]
+      },
+      "object_ghero_nc_spout00_spout00": {
+        "sites": 1,
+        "at": [
+          "0x54d4b2"
+        ]
+      },
+      "object_ghero_nc_spout01_spout01": {
+        "sites": 1,
+        "at": [
+          "0x54d4f4"
+        ]
+      },
+      "object_ghero_nc_spout02_spout02": {
+        "sites": 1,
+        "at": [
+          "0x54d536"
+        ]
+      },
+      "object_ghero_nc_spout03_spout03": {
+        "sites": 1,
+        "at": [
+          "0x54d578"
+        ]
+      },
+      "object_ghero_nk_kumoback_kumoback": {
+        "sites": 1,
+        "at": [
+          "0x54d155"
+        ]
+      },
+      "object_ghero_nk_kumofront_kumofront": {
+        "sites": 1,
+        "at": [
+          "0x54d135"
+        ]
+      },
+      "object_ghero_nk_skydome_skydome": {
+        "sites": 1,
+        "at": [
+          "0x54d112"
+        ]
+      },
+      "object_gneut_nc_fwater00_nc_fwater00": {
+        "sites": 1,
+        "at": [
+          "0x54cb8b"
+        ]
+      },
+      "object_gneut_nc_fwater01_nc_fwater01": {
+        "sites": 1,
+        "at": [
+          "0x54cbcd"
+        ]
+      },
+      "object_gneut_nc_water_nc_water": {
+        "sites": 1,
+        "at": [
+          "0x54cb49"
+        ]
+      },
+      "object_kart_1Psign_1Psign": {
+        "sites": 1,
+        "at": [
+          "0x61c80b"
+        ]
+      },
+      "object_kart_2Psign_2Psign": {
+        "sites": 1,
+        "at": [
+          "0x61c83c"
+        ]
+      },
+      "object_kartrace_kartlight_kartlight": {
+        "sites": 1,
+        "at": [
+          "0x68b7a0"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_body0_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c00bf"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_body1_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a6c90"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_head1_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c4de7"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_head_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c0011"
+        ]
+      },
+      "object_kihon2_cl_golem_cl_head_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a6c63"
+        ]
+      },
+      "object_kihon2_cl_stairs0_cl_stairs0": {
+        "sites": 1,
+        "at": [
+          "0x4c4d84"
+        ]
+      },
+      "object_kihon2_cl_stairs1_cl_stairs1": {
+        "sites": 1,
+        "at": [
+          "0x4c4da5"
+        ]
+      },
+      "object_kihon2_cl_stairs2_cl_stairs2": {
+        "sites": 1,
+        "at": [
+          "0x4c4dc6"
+        ]
+      },
+      "object_kihon2_cl_stairs3_cl_stairs3": {
+        "sites": 1,
+        "at": [
+          "0x4c4013"
+        ]
+      },
+      "object_kihon2_cl_stairs4_cl_stairs4": {
+        "sites": 1,
+        "at": [
+          "0x4c4038"
+        ]
+      },
+      "object_kihon2_cl_stairs5_cl_stairs5": {
+        "sites": 1,
+        "at": [
+          "0x4c405d"
+        ]
+      },
+      "object_kihon2_golem_golem": {
+        "sites": 1,
+        "at": [
+          "0x4bee1b"
+        ]
+      },
+      "object_kihon2_golem_head": {
+        "sites": 1,
+        "at": [
+          "0x4bea41"
+        ]
+      },
+      "object_kihon2_golem_lhand": {
+        "sites": 1,
+        "at": [
+          "0x4bec31"
+        ]
+      },
+      "object_kihon2_golem_rhand": {
+        "sites": 1,
+        "at": [
+          "0x4beb39"
+        ]
+      },
+      "object_kihon2_stairs0__stairs0_": {
+        "sites": 1,
+        "at": [
+          "0x4c4cbe"
+        ]
+      },
+      "object_kihon2_stairs0_stairs0": {
+        "sites": 1,
+        "at": [
+          "0x4c4d21"
+        ]
+      },
+      "object_kihon2_stairs1__stairs1_": {
+        "sites": 1,
+        "at": [
+          "0x4c4cdf"
+        ]
+      },
+      "object_kihon2_stairs1_stairs1": {
+        "sites": 1,
+        "at": [
+          "0x4c4d42"
+        ]
+      },
+      "object_kihon2_stairs2__stairs2_": {
+        "sites": 1,
+        "at": [
+          "0x4c4d00"
+        ]
+      },
+      "object_kihon2_stairs2_stairs2": {
+        "sites": 1,
+        "at": [
+          "0x4c4d63"
+        ]
+      },
+      "object_kihon2_stairs3__stairs3_": {
+        "sites": 1,
+        "at": [
+          "0x4c42d9"
+        ]
+      },
+      "object_kihon2_stairs3_stairs3": {
+        "sites": 1,
+        "at": [
+          "0x4c42b7"
+        ]
+      },
+      "object_kihon2_stairs4__stairs4_": {
+        "sites": 1,
+        "at": [
+          "0x4c433f"
+        ]
+      },
+      "object_kihon2_stairs4_stairs4": {
+        "sites": 1,
+        "at": [
+          "0x4c431d"
+        ]
+      },
+      "object_kihon2_stairs5__stairs5_": {
+        "sites": 1,
+        "at": [
+          "0x4c43a5"
+        ]
+      },
+      "object_kihon2_stairs5_stairs5": {
+        "sites": 1,
+        "at": [
+          "0x4c4383"
+        ]
+      },
+      "object_lsonic_un0_tuuro0_BK01__un0_tuuro0_BK01_": {
+        "sites": 1,
+        "at": [
+          "0x4cb8a9"
+        ]
+      },
+      "object_lsonic_un0_tuuro0_BK060708__un0_tuuro0_BK060708_": {
+        "sites": 1,
+        "at": [
+          "0x4cb908"
+        ]
+      },
+      "object_lsonic_un0_tuuro1_BK0102__un0_tuuro1_BK0102_": {
+        "sites": 1,
+        "at": [
+          "0x4cb9ef"
+        ]
+      },
+      "object_lsonic_un0_tuuro1_BK01__un0_tuuro1_BK01_": {
+        "sites": 1,
+        "at": [
+          "0x4cb990"
+        ]
+      },
+      "object_lsonic_un0_tuuro1_BK060708__un0_tuuro1_BK060708_": {
+        "sites": 1,
+        "at": [
+          "0x4cba4e"
+        ]
+      },
+      "object_lsonic_un0_tuuro2_BK0102__un0_tuuro2_BK0102_": {
+        "sites": 1,
+        "at": [
+          "0x4cbad6"
+        ]
+      },
+      "object_lsonic_un0_tuuro2_BK070809__un0_tuuro2_BK070809_": {
+        "sites": 1,
+        "at": [
+          "0x4cbb35"
+        ]
+      },
+      "object_lsonic_un1_back_BK010203__un1_back_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4cbe5c"
+        ]
+      },
+      "object_lsonic_un1_beam1_BK010203__un1_beam1_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4ccb0b"
+        ]
+      },
+      "object_lsonic_un1_beam2_BK010203__un1_beam2_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4ccb6d"
+        ]
+      },
+      "object_lsonic_un1_beam3_BK010203__un1_beam3_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4ccbbc"
+        ]
+      },
+      "object_lsonic_un1_light_BK010203__un1_light_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4cb253"
+        ]
+      },
+      "object_lsonic_un2_beam_BK020304__un2_beam_BK020304_": {
+        "sites": 1,
+        "at": [
+          "0x4ccca7"
+        ]
+      },
+      "object_lsonic_un2_kabe1_BK01020304__un2_kabe1_BK01020304_": {
+        "sites": 1,
+        "at": [
+          "0x4cbeec"
+        ]
+      },
+      "object_lsonic_un3_beam_BK030405__un3_beam_BK030405_": {
+        "sites": 1,
+        "at": [
+          "0x4ccd92"
+        ]
+      },
+      "object_lsonic_un3_kabe1_BK03040506__un3_kabe1_BK03040506_": {
+        "sites": 1,
+        "at": [
+          "0x4cc07d"
+        ]
+      },
+      "object_lsonic_un3_light_BK0304__un3_light_BK0304_": {
+        "sites": 1,
+        "at": [
+          "0x4cb504"
+        ]
+      },
+      "object_lsonic_un4_beam_BK04050607__nc_un4_beam1_": {
+        "sites": 1,
+        "at": [
+          "0x4cc30b"
+        ]
+      },
+      "object_lsonic_un4_beam_BK04050607__nc_un4_beam2_": {
+        "sites": 1,
+        "at": [
+          "0x4cc327"
+        ]
+      },
+      "object_lsonic_un4_kabelig_BK050607__un4_kabelig_BK050607_": {
+        "sites": 1,
+        "at": [
+          "0x4cc26b"
+        ]
+      },
+      "object_lsonic_un4_water_BK04050607__un4_water_BK04050607_": {
+        "sites": 1,
+        "at": [
+          "0x4cc445"
+        ]
+      },
+      "object_lsonic_un5_kabee1_BK0809_un5_kabee1_BK0809": {
+        "sites": 1,
+        "at": [
+          "0x4cc4c4"
+        ]
+      },
+      "object_lsonic_un5_kabee2_BK0809_un5_kabee2_BK0809": {
+        "sites": 1,
+        "at": [
+          "0x4cc54a"
+        ]
+      },
+      "object_lsonic_un5_kabee2_BK0910_un5_kabee2_BK0910": {
+        "sites": 1,
+        "at": [
+          "0x4cc5a6"
+        ]
+      },
+      "object_lsonic_un5_kabee3_BK0809_un5_kabee3_BK0809": {
+        "sites": 1,
+        "at": [
+          "0x4cc62c"
+        ]
+      },
+      "object_lsonic_un5_kabee3_BK0910_un5_kabee3_BK0910": {
+        "sites": 1,
+        "at": [
+          "0x4cc68c"
+        ]
+      },
+      "object_lsonic_un5_kabee4_BK070809__un5_kabee4_BK070809_": {
+        "sites": 1,
+        "at": [
+          "0x4cc70d"
+        ]
+      },
+      "object_lsonic_un5_kabee4_BK0910__un5_kabee4_BK0910_": {
+        "sites": 1,
+        "at": [
+          "0x4cc76d"
+        ]
+      },
+      "object_lsonic_un5_water6_BK07080910__un5_water6_BK07080910_": {
+        "sites": 1,
+        "at": [
+          "0x4cc906"
+        ]
+      },
+      "object_lsonic_un5_water_BK0809_un5_water_BK0809": {
+        "sites": 1,
+        "at": [
+          "0x4cc7d6"
+        ]
+      },
+      "object_lsonic_un5_water_BK0910_un5_water_BK0910": {
+        "sites": 1,
+        "at": [
+          "0x4cc811"
+        ]
+      },
+      "object_lsonic_un6_water_BK1011_un6_water_BK1011": {
+        "sites": 1,
+        "at": [
+          "0x4cc844"
+        ]
+      },
+      "object_lsonic_un6_water_BK1112_un6_water_BK1112": {
+        "sites": 1,
+        "at": [
+          "0x4cc87b"
+        ]
+      },
+      "object_lsonic_un6_water_BK1213_un6_water_BK1213": {
+        "sites": 1,
+        "at": [
+          "0x4cc8b2"
+        ]
+      },
+      "object_lsonic_un7_water1_BK13_un7_water1_BK13": {
+        "sites": 1,
+        "at": [
+          "0x4cca17"
+        ]
+      },
+      "object_lsonic_unit3_hako_unit3_hako": {
+        "sites": 1,
+        "at": [
+          "0x4cc1c0"
+        ]
+      },
+      "object_magic_ring03_magic_ring03_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c0b1c"
+        ]
+      },
+      "object_magic_ring03_magic_ring03_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4ac71c"
+        ]
+      },
+      "object_tornado_3rd_tornado_3rd": {
+        "sites": 1,
+        "at": [
+          "0x623b02"
+        ]
+      },
+      "object_weakpoint_golem_golem": {
+        "sites": 1,
+        "at": [
+          "0x4a6356"
+        ]
+      },
+      "object_weakpoint_golem_head": {
+        "sites": 1,
+        "at": [
+          "0x4a5f8a"
+        ]
+      },
+      "object_weakpoint_golem_lhand": {
+        "sites": 1,
+        "at": [
+          "0x4a60ec"
+        ]
+      },
+      "object_weakpoint_golem_rhand": {
+        "sites": 1,
+        "at": [
+          "0x4a603b"
+        ]
+      },
+      "sGolemColiCorrespondenceTbl_golem": {
+        "sites": 1,
+        "at": [
+          "0x4be815"
+        ]
+      },
+      "sGolemColiCorrespondenceTbl_golem_E": {
+        "sites": 1,
+        "at": [
+          "0x4a5f47"
+        ]
+      },
+      "sGolemColiTbl_golem": {
+        "sites": 1,
+        "at": [
+          "0x4be1ca"
+        ]
+      },
+      "sGolemColiTbl_golem_E": {
+        "sites": 1,
+        "at": [
+          "0x4a6bb5"
+        ]
+      },
+      "sUn1Back": {
+        "sites": 1,
+        "at": [
+          "0x4cbe7b"
+        ]
+      },
+      "sUn2Beam": {
+        "sites": 1,
+        "at": [
+          "0x4cccc5"
+        ]
+      },
+      "sUn2Kabe": {
+        "sites": 1,
+        "at": [
+          "0x4cbf0b"
+        ]
+      },
+      "sUn3Beam": {
+        "sites": 1,
+        "at": [
+          "0x4ccdb0"
+        ]
+      },
+      "sUn3Kabe": {
+        "sites": 1,
+        "at": [
+          "0x4cc09c"
+        ]
+      },
+      "sUn4Kabe": {
+        "sites": 1,
+        "at": [
+          "0x4cc28a"
+        ]
+      },
+      "sUn5Kabe1": {
+        "sites": 1,
+        "at": [
+          "0x4cc4e2"
+        ]
+      },
+      "sUn5Water5": {
+        "sites": 1,
+        "at": [
+          "0x4cc9c6"
+        ]
+      },
+      "sUn5Water5_2": {
+        "sites": 1,
+        "at": [
+          "0x4ccf81"
+        ]
+      },
+      "sUn5Water6": {
+        "sites": 1,
+        "at": [
+          "0x4cc92a"
+        ]
+      },
+      "shape_magic_ring03_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c0ad8"
+        ]
+      },
+      "shape_magic_ring03_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4ac6d8"
+        ]
+      },
+      "specialInfo": {
+        "sites": 1,
+        "at": [
+          "0x61fff9"
+        ]
+      },
+      "stand0_effectring_uvcinfo": {
+        "sites": 1,
+        "at": [
+          "0x4c514a"
+        ]
+      },
+      "texlist_al_stg_dark_tex": {
+        "sites": 1,
+        "at": [
+          "0x54b9fd"
+        ]
+      },
+      "texlist_al_stg_entrance_tex": {
+        "sites": 1,
+        "at": [
+          "0x54d969"
+        ]
+      },
+      "texlist_al_stg_race_tex": {
+        "sites": 1,
+        "at": [
+          "0x53abd6"
+        ]
+      },
+      "texlist_bgtex34": {
+        "sites": 1,
+        "at": [
+          "0x4ca0d9"
+        ]
+      },
+      "texlist_bosstx_golem": {
+        "sites": 1,
+        "at": [
+          "0x4bae9a"
+        ]
+      },
+      "texlist_bosstx_golem_e": {
+        "sites": 1,
+        "at": [
+          "0x4a52ba"
+        ]
+      },
+      "texlist_kihon2_golem": {
+        "sites": 1,
+        "at": [
+          "0x4bedf2"
+        ]
+      },
+      "texlist_kihon2_stairs0": {
+        "sites": 1,
+        "at": [
+          "0x4c4c57"
+        ]
+      },
+      "texlist_kihon2_stairs1": {
+        "sites": 1,
+        "at": [
+          "0x4c4c7c"
+        ]
+      },
+      "texlist_kihon2_stairs2": {
+        "sites": 1,
+        "at": [
+          "0x4c4c9d"
+        ]
+      },
+      "texlist_kihon2_stairs3": {
+        "sites": 1,
+        "at": [
+          "0x4c42fb"
+        ]
+      },
+      "texlist_kihon2_stairs4": {
+        "sites": 1,
+        "at": [
+          "0x4c4361"
+        ]
+      },
+      "texlist_kihon2_stairs5": {
+        "sites": 1,
+        "at": [
+          "0x4c43c7"
+        ]
+      },
+      "texlist_landtx03": {
+        "sites": 1,
+        "at": [
+          "0x5ed1c0"
+        ]
+      },
+      "texlist_landtx03_main": {
+        "sites": 1,
+        "at": [
+          "0x5ed17e"
+        ]
+      },
+      "texlist_landtx04": {
+        "sites": 1,
+        "at": [
+          "0x62ea5c"
+        ]
+      },
+      "texlist_landtx05": {
+        "sites": 1,
+        "at": [
+          "0x4b37ea"
+        ]
+      },
+      "texlist_landtx06": {
+        "sites": 1,
+        "at": [
+          "0x5b98dc"
+        ]
+      },
+      "texlist_landtx07": {
+        "sites": 1,
+        "at": [
+          "0x4d4452"
+        ]
+      },
+      "texlist_landtx08": {
+        "sites": 1,
+        "at": [
+          "0x634574"
+        ]
+      },
+      "texlist_landtx09": {
+        "sites": 1,
+        "at": [
+          "0x604b42"
+        ]
+      },
+      "texlist_landtx10": {
+        "sites": 1,
+        "at": [
+          "0x6f2969"
+        ]
+      },
+      "texlist_landtx11": {
+        "sites": 1,
+        "at": [
+          "0x6993fc"
+        ]
+      },
+      "texlist_landtx12": {
+        "sites": 1,
+        "at": [
+          "0x76aa79"
+        ]
+      },
+      "texlist_landtx13": {
+        "sites": 1,
+        "at": [
+          "0x5dce4e"
+        ]
+      },
+      "texlist_landtx14": {
+        "sites": 1,
+        "at": [
+          "0x4de9a0"
+        ]
+      },
+      "texlist_landtx15": {
+        "sites": 1,
+        "at": [
+          "0x64bc1c"
+        ]
+      },
+      "texlist_landtx17": {
+        "sites": 1,
+        "at": [
+          "0x5ad792"
+        ]
+      },
+      "texlist_landtx18": {
+        "sites": 1,
+        "at": [
+          "0x63d524"
+        ]
+      },
+      "texlist_landtx20": {
+        "sites": 1,
+        "at": [
+          "0x6267c2"
+        ]
+      },
+      "texlist_landtx21": {
+        "sites": 1,
+        "at": [
+          "0x656417"
+        ]
+      },
+      "texlist_landtx22": {
+        "sites": 1,
+        "at": [
+          "0x7706ad"
+        ]
+      },
+      "texlist_landtx23": {
+        "sites": 1,
+        "at": [
+          "0x710329"
+        ]
+      },
+      "texlist_landtx24": {
+        "sites": 1,
+        "at": [
+          "0x78683c"
+        ]
+      },
+      "texlist_landtx27": {
+        "sites": 1,
+        "at": [
+          "0x7633ab"
+        ]
+      },
+      "texlist_landtx28": {
+        "sites": 1,
+        "at": [
+          "0x6faa25"
+        ]
+      },
+      "texlist_landtx30": {
+        "sites": 1,
+        "at": [
+          "0x4ac906"
+        ]
+      },
+      "texlist_landtx31": {
+        "sites": 1,
+        "at": [
+          "0x5daa42"
+        ]
+      },
+      "texlist_landtx31_uv": {
+        "sites": 1,
+        "at": [
+          "0x5daa1d"
+        ]
+      },
+      "texlist_landtx32_ma": {
+        "sites": 1,
+        "at": [
+          "0x5bdf1b"
+        ]
+      },
+      "texlist_landtx32_uv": {
+        "sites": 1,
+        "at": [
+          "0x5bdf3c"
+        ]
+      },
+      "texlist_landtx33_uv": {
+        "sites": 1,
+        "at": [
+          "0x648731"
+        ]
+      },
+      "texlist_landtx39": {
+        "sites": 1,
+        "at": [
+          "0x793335"
+        ]
+      },
+      "texlist_landtx40_uv": {
+        "sites": 1,
+        "at": [
+          "0x4e6d3d"
+        ]
+      },
+      "texlist_landtx41": {
+        "sites": 1,
+        "at": [
+          "0x4b98e9"
+        ]
+      },
+      "texlist_landtx43_uv": {
+        "sites": 1,
+        "at": [
+          "0x628888"
+        ]
+      },
+      "texlist_landtx44_uv": {
+        "sites": 1,
+        "at": [
+          "0x64e23a"
+        ]
+      },
+      "texlist_landtx45": {
+        "sites": 1,
+        "at": [
+          "0x51c955"
+        ]
+      },
+      "texlist_landtx46": {
+        "sites": 1,
+        "at": [
+          "0x4e4ff4"
+        ]
+      },
+      "texlist_landtx47": {
+        "sites": 1,
+        "at": [
+          "0x4ddd0b"
+        ]
+      },
+      "texlist_landtx49": {
+        "sites": 1,
+        "at": [
+          "0x6f21e2"
+        ]
+      },
+      "texlist_landtx50_uv": {
+        "sites": 1,
+        "at": [
+          "0x663a50"
+        ]
+      },
+      "texlist_landtx51": {
+        "sites": 1,
+        "at": [
+          "0x792a0c"
+        ]
+      },
+      "texlist_landtx52": {
+        "sites": 1,
+        "at": [
+          "0x51d92b"
+        ]
+      },
+      "texlist_landtx53": {
+        "sites": 1,
+        "at": [
+          "0x627dbc"
+        ]
+      },
+      "texlist_landtx54": {
+        "sites": 1,
+        "at": [
+          "0x51821e"
+        ]
+      },
+      "texlist_landtx55": {
+        "sites": 1,
+        "at": [
+          "0x68e5bf"
+        ]
+      },
+      "texlist_landtx57": {
+        "sites": 1,
+        "at": [
+          "0x64db95"
+        ]
+      },
+      "texlist_landtx58": {
+        "sites": 1,
+        "at": [
+          "0x529693"
+        ]
+      },
+      "texlist_lsonic_pt_un0_tuuro0": {
+        "sites": 1,
+        "at": [
+          "0x4cb874"
+        ]
+      },
+      "texlist_lsonic_pt_un0_tuuro1": {
+        "sites": 1,
+        "at": [
+          "0x4cb96a"
+        ]
+      },
+      "texlist_lsonic_pt_un0_tuuro2": {
+        "sites": 1,
+        "at": [
+          "0x4cbab0"
+        ]
+      },
+      "texlist_lsonic_pt_un1_back": {
+        "sites": 1,
+        "at": [
+          "0x4cbe36"
+        ]
+      },
+      "texlist_lsonic_pt_un1_beam": {
+        "sites": 1,
+        "at": [
+          "0x4ccae2"
+        ]
+      },
+      "texlist_lsonic_pt_un2_beam": {
+        "sites": 1,
+        "at": [
+          "0x4ccc82"
+        ]
+      },
+      "texlist_lsonic_pt_un2_kabe1": {
+        "sites": 1,
+        "at": [
+          "0x4cbec6"
+        ]
+      },
+      "texlist_lsonic_pt_un3_beam": {
+        "sites": 1,
+        "at": [
+          "0x4ccd6d"
+        ]
+      },
+      "texlist_lsonic_pt_un3_kabe1": {
+        "sites": 1,
+        "at": [
+          "0x4cc057"
+        ]
+      },
+      "texlist_lsonic_pt_un4_kabelight1": {
+        "sites": 1,
+        "at": [
+          "0x4cc245"
+        ]
+      },
+      "texlist_lsonic_pt_un5_kabee1": {
+        "sites": 1,
+        "at": [
+          "0x4cc49f"
+        ]
+      },
+      "texlist_lsonic_pt_un5_kabee2": {
+        "sites": 1,
+        "at": [
+          "0x4cc525"
+        ]
+      },
+      "texlist_lsonic_pt_un5_kabee3": {
+        "sites": 1,
+        "at": [
+          "0x4cc607"
+        ]
+      },
+      "texlist_lsonic_pt_un5_kabee4": {
+        "sites": 1,
+        "at": [
+          "0x4cc6e8"
+        ]
+      },
+      "texlist_lsonic_un1_light_BK010203_": {
+        "sites": 1,
+        "at": [
+          "0x4cb2e2"
+        ]
+      },
+      "texlist_lsonic_un2_kabe2_BK01020304_": {
+        "sites": 1,
+        "at": [
+          "0x4cbf5c"
+        ]
+      },
+      "texlist_lsonic_un3_light_BK0304_": {
+        "sites": 1,
+        "at": [
+          "0x4cb54a"
+        ]
+      },
+      "texlist_lsonic_un4_beam_BK04050607_": {
+        "sites": 1,
+        "at": [
+          "0x4cc2db"
+        ]
+      },
+      "texlist_lsonic_un4_kuruma_BK040506_": {
+        "sites": 1,
+        "at": [
+          "0x4cb64d"
+        ]
+      },
+      "texlist_lsonic_unit3_hako": {
+        "sites": 1,
+        "at": [
+          "0x4cc17a"
+        ]
+      },
+      "texlist_magic_ring03_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c0aaf"
+        ]
+      },
+      "texlist_magic_ring03_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4ac6af"
+        ]
+      },
+      "texlist_objtex_golem": {
+        "sites": 1,
+        "at": [
+          "0x4bae79"
+        ]
+      },
+      "texlist_objtex_golem_e": {
+        "sites": 1,
+        "at": [
+          "0x4a5299"
+        ]
+      },
+      "texlist_rougeBig": {
+        "sites": 1,
+        "at": [
+          "0x6203f5"
+        ]
+      },
+      "texlist_stand0_emecha1": {
+        "sites": 1,
+        "at": [
+          "0x4c51df"
+        ]
+      },
+      "texlist_stand0_particle_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c65c3"
+        ]
+      },
+      "texlist_tailsBig": {
+        "sites": 1,
+        "at": [
+          "0x620425"
+        ]
+      },
+      "texlist_wave01_boss_golem": {
+        "sites": 1,
+        "at": [
+          "0x4c087f"
+        ]
+      },
+      "texlist_wave01_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4ac47f"
+        ]
+      },
+      "texlist_weakpoint_golem": {
+        "sites": 1,
+        "at": [
+          "0x4a6308"
+        ]
+      },
+      "texlist_weakpoint_weakcube": {
+        "sites": 1,
+        "at": [
+          "0x4ab212"
+        ]
+      },
+      "texlist_weakpoint_weakp0_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a9b97"
+        ]
+      },
+      "texlist_weakpoint_weakp1_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a9bdf"
+        ]
+      },
+      "texlist_weakpoint_weakp2_boss_golemE": {
+        "sites": 1,
+        "at": [
+          "0x4a9c27"
+        ]
+      },
+      "uvcCount_stg30": {
+        "sites": 1,
+        "at": [
+          "0x4ace4d"
+        ]
+      },
+      "uvcCount_stg32": {
+        "sites": 1,
+        "at": [
+          "0x5bf0c0"
+        ]
+      },
+      "uvcCount_stg33": {
+        "sites": 1,
+        "at": [
+          "0x648b6b"
+        ]
+      },
+      "uvcCount_stg40": {
+        "sites": 1,
+        "at": [
+          "0x4e746c"
+        ]
+      },
+      "uvcCount_stg43": {
+        "sites": 1,
+        "at": [
+          "0x628f40"
+        ]
+      },
+      "uvcCount_stg44": {
+        "sites": 1,
+        "at": [
+          "0x64ec02"
+        ]
+      },
+      "uvcCount_stg50": {
+        "sites": 1,
+        "at": [
+          "0x6643a2"
+        ]
+      },
+      "uvcdCount_stg22": {
+        "sites": 1,
+        "at": [
+          "0x770e29"
+        ]
+      },
+      "uvcdCount_stg24": {
+        "sites": 1,
+        "at": [
+          "0x7870e2"
+        ]
+      },
+      "uvcd_stg22": {
+        "sites": 1,
+        "at": [
+          "0x770e0b"
+        ]
+      },
+      "uvcd_stg24": {
+        "sites": 1,
+        "at": [
+          "0x7870c4"
+        ]
+      },
+      "uvcinfo_stg30": {
+        "sites": 1,
+        "at": [
+          "0x4acdf1"
+        ]
+      },
+      "uvcinfo_stg32": {
+        "sites": 1,
+        "at": [
+          "0x5bf068"
+        ]
+      },
+      "uvcinfo_stg33": {
+        "sites": 1,
+        "at": [
+          "0x648b13"
+        ]
+      },
+      "uvcinfo_stg40": {
+        "sites": 1,
+        "at": [
+          "0x4e7414"
+        ]
+      },
+      "uvcinfo_stg43": {
+        "sites": 1,
+        "at": [
+          "0x628ee8"
+        ]
+      },
+      "uvcinfo_stg44": {
+        "sites": 1,
+        "at": [
+          "0x64ebaa"
+        ]
+      },
+      "uvcinfo_stg50": {
+        "sites": 1,
+        "at": [
+          "0x66434a"
+        ]
+      }
+    },
+    "reading": "the strings are not Win32 entry points. They are SA2 data symbols -- land tables, texture lists, model and object data, character objects -- looked up in a module whose handle the game keeps at a fixed global. A runtime that stubs `GetProcAddress` for these is answering asset-data questions, not OS-API questions, which is the central reason they do not belong in the same denominator as the IAT slots."
+  },
+  "reconciliation": {
+    "decision": "Documentation/decisions/2026-09-19-G1-lifter-eh-threads.md",
+    "decision_sha256": "94740711813c240d13ce877126ef5af86a5091d3a573d611254faf729b64a049",
+    "s1_receipt": "Documentation/receipts/s1-import-classification-v1.json",
+    "s1_receipt_sha256": "7cde53707d6ae3879160ed82cf7c8f851fbd9b04b24a121cda09b3309434a0b8",
+    "s1_direct_call_sites": 209,
+    "s1_pointer_loads": 134,
+    "s1_direct_call_sites_by_region": {
+      "crt": 4,
+      "game": 154,
+      "unmapped": 51
+    },
+    "markers": [
+      {
+        "marker": "imports-getprocaddress-direct-call-sites",
+        "decision_record": 209,
+        "s4_independent_decode": 209,
+        "agrees": true,
+        "delta": 0
+      },
+      {
+        "marker": "imports-getprocaddress-direct-call-sites-game",
+        "decision_record": 154,
+        "s4_independent_decode": 154,
+        "agrees": true,
+        "delta": 0
+      },
+      {
+        "marker": "imports-getprocaddress-pointer-loads",
+        "decision_record": 134,
+        "s4_independent_decode": 134,
+        "agrees": true,
+        "delta": 0
+      },
+      {
+        "marker": "imports-total",
+        "decision_record": 251,
+        "s4_independent_decode": 251,
+        "agrees": true,
+        "delta": 0
+      }
+    ],
+    "all_marked_numbers_agree": true,
+    "what_the_quoted_numbers_do_not_count": {
+      "register_cached_call_sites": 499,
+      "note": "each of the 'pointer loads' the decision quotes is a `mov <callee-saved reg>, [slot]` that feeds one or more `call <reg>` sites later in the same function. The decision counts the loads; it does not count the calls they make, so the quoted figures understate the dynamic call surface."
+    },
+    "analyzer_cross_check": {
+      "source": "function-map.json functions[].import_calls, written by Ghidra's own reference resolution (Documentation/scripts/ExportSA2FunctionMap.java)",
+      "functions_the_analyzer_says_call_this_import": 192,
+      "functions_holding_a_direct_call_in_this_decode": 104,
+      "functions_holding_a_direct_call_or_a_pointer_load": 216,
+      "analyzer_functions_with_no_site_in_this_decode": [],
+      "sites_in_functions_the_analyzer_does_not_list": [
+        "0x4abc10",
+        "0x4ad960",
+        "0x4d3ba0",
+        "0x4de920",
+        "0x4e75b0",
+        "0x53ae10",
+        "0x56ab30",
+        "0x585870",
+        "0x5c5ee0",
+        "0x5c62e0",
+        "0x5c6700",
+        "0x5ed650",
+        "0x61aa70",
+        "0x61c660",
+        "0x621720",
+        "0x623900",
+        "0x623e00",
+        "0x624100",
+        "0x624580",
+        "0x625320",
+        "0x625a00",
+        "0x629050",
+        "0x64ed50",
+        "0x86b320"
+      ],
+      "reading": "the analyzer resolves `mov reg,[slot]` + `call reg` to the import and records it as a call, so its function count matches this decode only once pointer loads are counted alongside direct calls -- independent confirmation that the loads are calls, not address-taking."
+    }
+  },
+  "denominator": {
+    "m4_today": {
+      "source": "Documentation/scripts/metrics.py IMPORT_DENOMINATOR",
+      "value": 251,
+      "agrees_with_the_import_directory": true
+    },
+    "options": [
+      {
+        "option": "A: leave M4 at the IAT slot count",
+        "denominator": 251,
+        "counts": "the 251 import-address-table slots and nothing else",
+        "for": "it is what M4 has always meant, it is a closed set, and every slot is a real thing the runtime must bind",
+        "against": "it omits 708 dynamic call sites resolving 451 distinct names; a rate of 100 % against it would not mean the guest can resolve every name it asks for"
+      },
+      {
+        "option": "B: 251 IAT slots plus the distinct dynamically-resolved symbols",
+        "denominator": 702,
+        "counts": "251 slots + 451 distinct strings this decode recovers",
+        "for": "one number, and it does cover the whole name-resolution surface",
+        "against": "it adds unlike things. Of the 451 distinct strings, 3 are also static imports and the rest are not OS entry points at all; and the set is only as complete as the 2 unresolved site(s) allow, so the denominator would move when the unresolved ones are traced"
+      },
+      {
+        "option": "C: keep M4 at the IAT slots and publish a second metric for the dynamic surface",
+        "denominator": "251 for M4; 451 distinct symbols over 708 call sites for the second",
+        "counts": "two populations measured separately",
+        "for": "the two are bound by different machinery -- a slot is bound once at load, a dynamic name is answered per call by a stubbed `GetProcAddress` -- and a stage rate that mixes them cannot be read; it also keeps every number already published against 251 comparable",
+        "against": "two metrics is two things to keep measured, and nothing forces the second to be re-measured on the build that ships"
+      }
+    ],
+    "recommendation": "C",
+    "why": "a slot is bound once, at load, by the loader; a dynamic name is answered per call by a stubbed GetProcAddress against a module handle the guest itself produced. They are not the same work and a single rate over their sum cannot be read -- which is the failure S3 already had once, a rate that saturated against a denominator that did not mean what it said. Option C also leaves every figure already published against 251 comparable."
+  },
+  "limits": [
+    "Nothing here was executed. Every number is a static decode of private/exe/sonic2app-unpacked.exe; no guest has called `GetProcAddress` and no stub has answered one, so this establishes the size of the surface and not that any of it is reachable.",
+    "The symbol set is a lower bound on what the guest will ask for, in two directions. A site whose lpProcName is a register cannot be resolved statically at all, and the strings a resolvable site names are the ones the compiler placed inline -- a name assembled at run time, or read from a data table this decode does not walk, appears in neither count.",
+    "The register-cached call sites are found by a forward walk inside one function's [entry, next entry) span that stops at the first write to the register. It can miss and it can over-reach. It misses a pointer cached in a callee-saved register and called from a different function, or stored to memory and called from there. It over-reaches when a `call <reg>` is reachable only on a control-flow path that does not run the load -- the walk is linear, not a dominance computation, so it reads no branches. The argument-shape check bounds the over-reach without eliminating it, and the walk-stop reasons are published so the shape of both errors is visible.",
+    "A site the analyzer maps to no function is reported with the function that precedes it, which fixes its region but not its owner. Ghidra attributes those addresses to some function's discontiguous body, and which function that is is not re-derived here: 24 of the 216 containing spans this receipt names hold only unmapped sites, and the analyzer lists none of them as calling this import. Ownership of the unmapped sites is open; their reality as code, their region and their count are not.",
+    "Region attribution uses the analyzer map, whose `size` field under-reports discontiguous bodies. Sites in the under-reported part are reported both as 'unmapped' (the map's own answer) and by their containing function's region; neither is re-derived from control flow, because Documentation/S3_INPUTS.md section 1 is still owed.",
+    "Only `GetProcAddress` is enumerated. `LoadLibrary`, `GetModuleHandle` and ordinal-based resolution are a separate surface and are not measured here; so is any name a loaded module resolves on the guest's behalf.",
+    "This receipt recommends a denominator. It does not change one: `Documentation/scripts/metrics.py` is untouched, and which denominator M4 carries is the main thread's decision to take on this evidence."
+  ],
+  "verdict": "The G1 decision's three GetProcAddress figures are exact, and this decode reproduces them without reusing the code that made them: 209 direct call sites, 154 of them in the game region, 134 pointer loads; a byte search that decodes nothing finds 343 slot dwords in the executable sections and the two sets account for every one of them. They are nonetheless incomplete as a measure of work: every pointer load is a `mov <callee-saved reg>, [slot]` feeding 499 further `call <reg>` sites the quoted figures do not count, so the dynamic call surface is 708 sites, not 209. 706 of 708 sites carry lpProcName as an immediate and resolve to 451 distinct strings; 2 do not, 2 of them because lpProcName arrives in a register from the caller, which no static decode can resolve, so 451 is a floor and not a total: those two are generic helpers whose name argument lives one frame up, and completing them means tracing 84 further call sites. The strings are not OS entry points -- they are SA2 data symbols, and only 3 of the 451 appear among the 251 static imports. The recommendation is option C: M4 keeps its 251-slot denominator and the dynamic surface gets its own metric, because binding a slot and answering a name are different work and a single rate over their sum cannot be read. All 6 falsifiable checks pass."
+}

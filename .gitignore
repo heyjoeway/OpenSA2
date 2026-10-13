@@ -1,0 +1,45 @@
+# Everything derived from or belonging to the user's own copy of the game lives
+# under private/: the executable, the installation, the Proton prefix, captures,
+# fixtures, the analyzer's function map, the lifted C, build output, venvs.
+# No trailing slash: with one, the pattern matches a directory but not a symlink
+# of the same name, so a stray link could be committed and replace the real
+# directory on the next checkout. That happened once in reference-project.
+/private
+/build
+/.venv
+
+# Compiler output anywhere in the tree. `ship.py` stages with `git add -A`, so
+# an object file left in the repository root by a probe build is one command
+# away from being committed -- which nearly happened on 2026-09-21, when a
+# unit compiling `runtime/sa2_dialog.c` wrote `sa2_dialog.o` beside it. The
+# boundary rule (design 12.9) says never commit build output; this makes it
+# true by default rather than by everyone remembering.
+*.o
+*.a
+*.so
+*.obj
+
+# Editor and Python debris.
+.idea/
+.vscode/
+.DS_Store
+*~
+*.swp
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Game frames, video and recorded streams stay under private/.
+*.y4m
+*.y4m.times.tsv
+*.mp4
+*.i420
+*.bgra
+*.sa2s
+*.sa2s.status
+*.sa2d3d9
+frame-[0-9]*.png
+*_d3d9.log
+
+# Claude Code session state.
+/.claude/scheduled_tasks.lock

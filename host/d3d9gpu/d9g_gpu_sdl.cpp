@@ -1,0 +1,1695 @@
+// SDL_gpu backend: resource IDs are resolved and geometry is encoded during draw().
+// Copy and render passes are mutually exclusive and operations keep their call order.
+// Readback submits and waits, including every preceding draw before Present.
+// Transfer storage cycles, and so does each UP chunk at its first write in a command buffer
+// (upload_up); ordinary resources never cycle.
+#include "d9g.h"
+#include "d9g_props.h"
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+
+#include <string_view>
+
+// The Khronos headers of the pinned SDL tarball (test/extract_refs.py writes them beside the
+// build's generated sources), for the one property query below; no Vulkan function is linked.
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <new>
+#include <cstring>
+#include <unordered_map>
+#ifdef __ANDROID__
+#include <sys/system_properties.h>
+#endif
+
+namespace d9g {
+
+namespace {
+
+constexpr uint32_t kRing = 64u << 20;
+
+SDL_GPUTextureFormat sdl_format(GFmt f) {
+    switch (f) {
+    case GFmt::bgra8: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+    case GFmt::bc1: return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM;
+    case GFmt::bc2: return SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM;
+    case GFmt::bc3: return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
+    case GFmt::d24s8: return SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+    case GFmt::d32s8: return SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+    default: return SDL_GPU_TEXTUREFORMAT_INVALID;
+    }
+}
+bool is_depth(GFmt f) { return f == GFmt::d24s8 || f == GFmt::d32s8; }
+size_t gfmt_level_bytes(GFmt f, uint32_t w, uint32_t h) {
+    const size_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+    switch (f) {
+    case GFmt::bc1: return bw * bh * 8;
+    case GFmt::bc2: case GFmt::bc3: return bw * bh * 16;
+    default: return size_t(w) * h * 4;
+    }
+}
+// One layer's level, packed: a volume's is its level's slices.
+size_t level_upload_bytes(const TexDesc& d, uint32_t level) {
+    const size_t slice = gfmt_level_bytes(d.fmt, level_dim(d.w, level), level_dim(d.h, level));
+    return d.type == TexType::volume ? slice * level_dim(d.depth, level) : slice;
+}
+std::string prop(SDL_PropertiesID p, const char* name) {
+    const char* v = SDL_GetStringProperty(p, name, nullptr);
+    return v ? v : "";
+}
+
+// The project's SDL patch (patches/sdl3): its two device properties, by name, so a stock SDL's
+// headers, which do not define them, build the same detection. The revision mark the patched
+// build carries (tools/s5/build_host_deps.sh's SDL_VENDOR_INFO).
+constexpr const char kPropBorder[] = "SDL.gpu.device.sa2recomp.sampler_clamp_to_border";
+constexpr const char kPropClipAndClamp[] = "SDL.gpu.device.sa2recomp.depth_clip_and_clamp";
+constexpr const char kPatchedMark[] = " (sa2-recomp sdl3-patches ";
+#ifdef SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN
+static_assert(std::string_view(SDL_PROP_GPU_DEVICE_SA2RECOMP_SAMPLER_CLAMP_TO_BORDER_BOOLEAN) == kPropBorder);
+static_assert(std::string_view(SDL_PROP_GPU_DEVICE_SA2RECOMP_DEPTH_CLIP_AND_CLAMP_BOOLEAN) == kPropClipAndClamp);
+#endif
+
+class SdlGpu final : public Gpu {
+public:
+    // `off`: a test run's capability override (d9g_entry.cpp refuses it outside one), applied
+    // after the detection: the detected capabilities stay as SDL reported them.
+    SdlGpu(SDL_GPUDevice* dev, bool debug, const CapsOff& off) : dev_(dev) {
+        info_.driver = SDL_GetGPUDeviceDriver(dev) ? SDL_GetGPUDeviceDriver(dev) : "";
+        const SDL_PropertiesID p = SDL_GetGPUDeviceProperties(dev);
+        info_.device_name = prop(p, SDL_PROP_GPU_DEVICE_NAME_STRING);
+        info_.driver_name = prop(p, SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING);
+        info_.driver_version = prop(p, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING);
+        info_.driver_info = prop(p, SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING);
+        info_.debug_mode = debug;
+        // Run-time detection of the SDL patch's capabilities (absent: false, the fallback).
+        const char* revision = SDL_GetRevision();
+        info_.sdl_revision = revision ? revision : "";
+        info_.sdl_patched = info_.sdl_revision.find(kPatchedMark) != std::string::npos;
+        info_.sdl_capabilities_present = SDL_HasProperty(p, kPropBorder) && SDL_HasProperty(p, kPropClipAndClamp);
+        info_.sampler_clamp_to_border_detected = SDL_GetBooleanProperty(p, kPropBorder, false);
+        info_.depth_clip_and_clamp_detected = SDL_GetBooleanProperty(p, kPropClipAndClamp, false);
+        apply_caps_off(info_, off);
+        // DXVK's D24S8 fallback (d3d9_format.cpp): D32_FLOAT_S8_UINT where D24S8 cannot be
+        // a depth target.
+        depth_ = SDL_GPUTextureSupportsFormat(dev, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, SDL_GPU_TEXTURETYPE_2D,
+                                              SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)
+                     ? GFmt::d24s8 : GFmt::d32s8;
+        info_.depth_format = gfmt_name(depth_);
+        // The BC formats a sampled 2D texture cannot be made of here (GpuInfo::bc_unsupported).
+        for (GFmt f : {GFmt::bc1, GFmt::bc2, GFmt::bc3})
+            if (!SDL_GPUTextureSupportsFormat(dev, sdl_format(f), SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER))
+                info_.bc_unsupported += std::string(info_.bc_unsupported.empty() ? "" : ", ") + gfmt_name(f);
+        SDL_GPUTransferBufferCreateInfo ri{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, kRing, 0};
+        ring_ = SDL_CreateGPUTransferBuffer(dev, &ri);
+    }
+
+    ~SdlGpu() override {
+        finish();
+        for (auto& [id, t] : tex_) SDL_ReleaseGPUTexture(dev_, t.t);
+        for (auto& [id, b] : buf_) SDL_ReleaseGPUBuffer(dev_, b.b);
+        free_up_chunks();
+        for (auto& [pair, cache] : pipelines_)
+            for (auto& [hash, bucket] : cache)
+                for (const PipelineEntry& e : bucket) SDL_ReleaseGPUGraphicsPipeline(dev_, e.pipeline);
+        for (auto& [key, sampler] : samplers_) SDL_ReleaseGPUSampler(dev_, sampler);
+        for (auto& [key, object] : shaders_) SDL_ReleaseGPUShader(dev_, object->shader);
+        if (ring_) SDL_ReleaseGPUTransferBuffer(dev_, ring_);
+        if (down_) SDL_ReleaseGPUTransferBuffer(dev_, down_);
+        if (win_) SDL_ReleaseWindowFromGPUDevice(dev_, win_);
+        SDL_DestroyGPUDevice(dev_);
+    }
+
+    draw::Outcome draw(const draw::DrawRequest& request) override {
+        try {
+            if (poisoned_) return draw::Failure{"draw command buffer", err_};
+            const draw::Values& v = request.values();
+            auto fail = [&](const char* operation, const std::string& reason) -> draw::Outcome {
+                err_ = std::string(operation) + ": " + reason;
+                return draw::Failure{operation, reason};
+            };
+            if (!v.program) return fail("draw inputs", "no immutable program image");
+            const PipelineDesc& p = v.pipeline;
+            if (!p.unmapped.empty()) return fail("draw inputs", p.unmapped.front());
+            if (p.rt_feedback) return fail("draw inputs", "render-target feedback is unsupported");
+            if (p.n_vbs > 4 || p.n_attrs > 16 || p.n_ct > 4)
+                return fail("draw inputs", "pipeline description exceeds its fixed arrays");
+            if (v.attachments.colours.size() != p.n_ct || bool(v.attachments.depth_stencil) != p.has_ds)
+                return fail("draw attachments", "attachments disagree with mapped pipeline");
+            if (!p.n_ct && !p.has_ds) return fail("draw attachments", "no mapped render attachment");
+            if (p.ms.sample_count != SDL_GPU_SAMPLECOUNT_1 || p.ms.enable_mask || p.ms.sample_mask)
+                return fail("draw inputs", "unsupported multisample state");
+            if (p.depth_clamp && !info_.depth_clip_and_clamp)
+                return fail("draw inputs", "depth-clamp property requires the effective device capability");
+
+            // The draw's scratch (members, so their storage is reused draw after draw).
+            std::vector<SDL_GPUColorTargetInfo>& colours = draw_colours_;
+            colours.assign(p.n_ct, SDL_GPUColorTargetInfo{});
+            SDL_GPUDepthStencilTargetInfo depth{};
+            std::string& attachment_key = draw_attachment_key_;
+            attachment_key.clear();
+            uint32_t render_w = UINT32_MAX, render_h = UINT32_MAX;
+            auto resolve_attachment = [&](const draw::TextureLevel& a, bool ds, uint32_t slot) -> bool {
+                auto it = tex_.find(a.texture.value);
+                if (it == tex_.end()) { err_ = "unknown attachment texture"; return false; }
+                const Tex& t = it->second;
+                if (t.d.type == TexType::volume || a.layer >= (t.d.type == TexType::cube ? 6u : 1u)) {
+                    err_ = "a volume texture, or a layer the texture does not have, as an attachment"; return false;
+                }
+                if (a.level >= t.d.levels || (ds && a.level > UINT8_MAX)) {
+                    err_ = "attachment mip level is out of range"; return false;
+                }
+                if (is_depth(t.d.fmt) != ds || (!ds && !t.d.target) ||
+                    sdl_format(t.d.fmt) != (ds ? p.ds_fmt : p.ct[slot].format)) {
+                    err_ = "attachment usage or format disagrees with mapped pipeline"; return false;
+                }
+                render_w = std::min(render_w, level_dim(t.d.w, a.level));
+                render_h = std::min(render_h, level_dim(t.d.h, a.level));
+                append_u32(attachment_key, a.texture.value); append_u32(attachment_key, a.level); append_u32(attachment_key, a.layer);
+                if (ds) {
+                    depth.texture = t.t; depth.mip_level = Uint8(a.level); depth.layer = Uint8(a.layer);
+                    depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_LOAD;
+                    depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_STORE;
+                } else {
+                    colours[slot].texture = t.t; colours[slot].mip_level = a.level; colours[slot].layer_or_depth_plane = a.layer;
+                    colours[slot].load_op = SDL_GPU_LOADOP_LOAD;
+                    colours[slot].store_op = SDL_GPU_STOREOP_STORE;
+                }
+                return true;
+            };
+            append_u32(attachment_key, p.n_ct);
+            for (uint32_t i = 0; i < p.n_ct; ++i)
+                if (!resolve_attachment(v.attachments.colours[i], false, i)) return fail("draw attachments", err_);
+            append_u32(attachment_key, p.has_ds);
+            if (p.has_ds && !resolve_attachment(*v.attachments.depth_stencil, true, 0))
+                return fail("draw attachments", err_);
+
+            const auto& d = v.dynamic;
+            if (!std::isfinite(d.x) || !std::isfinite(d.y) || !std::isfinite(d.width) ||
+                !std::isfinite(d.height) || d.width <= 0 || d.height <= 0 ||
+                !std::isfinite(d.min_depth) || !std::isfinite(d.max_depth) || d.min_depth < 0 ||
+                d.max_depth > 1 || d.min_depth > d.max_depth || d.scissor_x < 0 || d.scissor_y < 0 ||
+                d.scissor_width > INT32_MAX || d.scissor_height > INT32_MAX ||
+                uint64_t(d.scissor_x) + d.scissor_width > render_w ||
+                uint64_t(d.scissor_y) + d.scissor_height > render_h)
+                return fail("draw dynamic state", "viewport or scissor is outside the executable domain");
+            for (float value : d.blend_constant)
+                if (!std::isfinite(value)) return fail("draw dynamic state", "nonfinite blend constant");
+
+            auto validate_stage = [&](const shader::Built& b, const draw::StageBindings& bindings) -> bool {
+                if (!b.ok || b.spirv.empty() || b.spirv[0] != 0x07230203u || b.num_samplers > 16 ||
+                    b.num_samplers != b.sampler_registers.size() || b.num_uniform_buffers > 4) {
+                    err_ = "invalid Built shader ABI"; return false;
+                }
+                if (bindings.samplers.size() != b.num_samplers || bindings.uniforms.count != b.num_uniform_buffers) {
+                    err_ = "binding count disagrees with Built shader ABI"; return false;
+                }
+                uint32_t seen_registers = 0, seen_uniforms = 0;
+                for (uint32_t reg : b.sampler_registers) {
+                    if (reg >= 32 || (seen_registers & (1u << reg))) { err_ = "invalid compact sampler register order"; return false; }
+                    seen_registers |= 1u << reg;
+                }
+                for (const auto& use : b.uniforms) {
+                    if (use.slot >= b.num_uniform_buffers || !use.bytes || use.bytes > shader::kSdlUniformWindow ||
+                        (seen_uniforms & (1u << use.slot)) || bindings.uniforms.slots[use.slot].size() < use.bytes) {
+                        err_ = "uniform payload does not cover its declared slot"; return false;
+                    }
+                    seen_uniforms |= 1u << use.slot;
+                }
+                for (uint32_t i = 0; i < b.num_uniform_buffers; ++i)
+                    if (bindings.uniforms.slots[i].empty() || bindings.uniforms.slots[i].size() > shader::kSdlUniformWindow) {
+                        err_ = "uniform hole is uninitialized or payload exceeds 4 KiB"; return false;
+                    }
+                return true;
+            };
+            if (!validate_stage(v.program->vertex, v.vertex) || !validate_stage(v.program->pixel, v.pixel))
+                return fail("draw bindings", err_);
+
+            std::vector<SDL_GPUTextureSamplerBinding>& vertex_samplers = draw_vertex_samplers_;
+            std::vector<SDL_GPUTextureSamplerBinding>& pixel_samplers = draw_pixel_samplers_;
+            vertex_samplers.clear(); pixel_samplers.clear();
+            auto resolve_samplers = [&](const draw::StageBindings& stage, const shader::Built& b,
+                                        const shader::Reflection& reflection,
+                                        std::vector<SDL_GPUTextureSamplerBinding>& out) -> bool {
+                out.reserve(stage.samplers.size());
+                for (size_t i = 0; i < stage.samplers.size(); ++i) {
+                    const auto& binding = stage.samplers[i];
+                    auto it = tex_.find(binding.texture.value);
+                    if (it == tex_.end()) { err_ = "unknown sampled texture, including an unresolved null binding"; return false; }
+                    const Tex& t = it->second;
+                    if (!(t.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) { err_ = "texture allocation has no sampled usage"; return false; }
+                    // the device refuses a draw sampling a cube or volume texture (CUBE_TEXTURE_SAMPLE,
+                    // VOLUME_TEXTURE_SAMPLE): the shaders' samplers here are 2D
+                    if (t.d.type != TexType::flat) { err_ = "a cube or volume texture sampled"; return false; }
+                    for (const auto& colour : v.attachments.colours)
+                        if (binding.texture.value == colour.texture.value) { err_ = "sampled texture aliases a colour attachment"; return false; }
+                    if (v.attachments.depth_stencil && binding.texture.value == v.attachments.depth_stencil->texture.value) {
+                        err_ = "sampled texture aliases the depth attachment"; return false;
+                    }
+                    const uint32_t reg = b.sampler_registers[i];
+                    const bool depth_read = (reflection.depth_compare_registers & (1u << reg)) != 0;
+                    if (!binding.sampler.info || binding.sampler.fallback() || !binding.sampler.unmapped.empty()) {
+                        err_ = "sampler description has an unfinished fallback or unmapped field"; return false;
+                    }
+                    if (depth_read != bool(binding.sampler.info->enable_compare) || (depth_read && !is_depth(t.d.fmt))) {
+                        err_ = "shader depth-compare use disagrees with sampler or texture allocation"; return false;
+                    }
+                    SDL_GPUSampler* sampler = sampler_object(binding.sampler);
+                    if (!sampler) return false;
+                    out.push_back(SDL_GPUTextureSamplerBinding{t.t, sampler});
+                }
+                return true;
+            };
+            if (!resolve_samplers(v.vertex, v.program->vertex, v.program->vertex_reflection, vertex_samplers) ||
+                !resolve_samplers(v.pixel, v.program->pixel, v.program->pixel_reflection, pixel_samplers))
+                return fail("draw samplers", err_);
+
+            bool real_slot = false, null_slot = false;
+            uint32_t highest_slot = 0, pitch = 0, real_footprint = 0;
+            uint32_t vb_slots = 0, attr_locations = 0, other_slots = 0;
+            for (uint32_t i = 0; i < p.n_vbs; ++i) {
+                const auto& vb = p.vbs[i];
+                if (vb.slot >= 16 || (vb_slots & (1u << vb.slot)) || vb.instance_step_rate) {
+                    return fail("draw vertices", "unsupported or duplicate vertex binding");
+                }
+                vb_slots |= 1u << vb.slot; highest_slot = std::max(highest_slot, vb.slot);
+                if (vb.slot == 0) {
+                    if (vb.input_rate != SDL_GPU_VERTEXINPUTRATE_VERTEX || !vb.pitch)
+                        return fail("draw vertices", "real stream must have per-vertex nonzero pitch");
+                    real_slot = true; pitch = vb.pitch;
+                } else if (vb.slot == kNullStreamSlot) {
+                    if (vb.pitch || vb.input_rate != SDL_GPU_VERTEXINPUTRATE_INSTANCE)
+                        return fail("draw vertices", "semantic null must use zero pitch and per-instance rate");
+                    null_slot = true;
+                } else {
+                    // a stream other than 0 (d9g_pipeline.cpp): per vertex, or per instance at SDL's
+                    // one-instance step (INSTANCEDATA with divisor 1)
+                    if (!vb.pitch || (vb.input_rate != SDL_GPU_VERTEXINPUTRATE_VERTEX &&
+                                      vb.input_rate != SDL_GPU_VERTEXINPUTRATE_INSTANCE))
+                        return fail("draw vertices", "a stream other than 0 must have a nonzero pitch and a vertex or instance rate");
+                    other_slots |= 1u << vb.slot;
+                }
+            }
+            if (null_slot != p.null_stream) return fail("draw vertices", "null-stream obligation disagrees with vertex bindings");
+            for (uint32_t i = 0; i < p.n_attrs; ++i) {
+                const auto& a = p.attrs[i];
+                const uint32_t width = vertex_element_bytes(a.format);
+                if (a.location >= 16 || (attr_locations & (1u << a.location)) || a.buffer_slot >= 16 ||
+                    !(vb_slots & (1u << a.buffer_slot)) || !width || uint64_t(a.offset) + width > UINT32_MAX)
+                    return fail("draw vertices", "invalid vertex attribute or missing binding");
+                attr_locations |= 1u << a.location;
+                if (a.buffer_slot == 0) real_footprint = std::max(real_footprint, a.offset + width);
+                else if (a.buffer_slot == kNullStreamSlot && (a.offset || a.format != SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4))
+                    return fail("draw vertices", "semantic null must read the first FLOAT4");
+            }
+
+            SDL_GPUBufferBinding real{}, index{}, filler{};
+            uint32_t vertex_available = 0, count = 0, first_vertex = 0, first_index = 0, instances = 1;
+            int32_t base_vertex = 0;
+            bool indexed = false;
+            draw::IndexWidth index_width = draw::IndexWidth::U16;
+            const std::vector<uint8_t>* up_bytes = nullptr;
+            uint32_t up_index_offset = 0;
+            auto resolve_slice = [&](const draw::BufferSlice& slice, SDL_GPUBufferUsageFlags usage,
+                                     SDL_GPUBufferBinding& out) -> bool {
+                auto it = buf_.find(slice.buffer.value);
+                if (it == buf_.end()) { err_ = "unknown buffer ID"; return false; }
+                const Buf& buffer = it->second;
+                if (!(buffer.usage & usage) || !slice.available_bytes || slice.offset >= buffer.bytes ||
+                    uint64_t(slice.offset) + slice.available_bytes > buffer.bytes) {
+                    err_ = "buffer slice is outside the native allocation or has incompatible usage"; return false;
+                }
+                out = SDL_GPUBufferBinding{buffer.b, slice.offset};
+                return true;
+            };
+            auto resolve_vertices = [&](const draw::VertexSource& source) -> bool {
+                if (const auto* bound = std::get_if<draw::BoundVertices>(&source)) {
+                    if (!resolve_slice(bound->stream_zero, SDL_GPU_BUFFERUSAGE_VERTEX, real)) return false;
+                    vertex_available = bound->stream_zero.available_bytes;
+                } else if (const auto* owned = std::get_if<draw::OwnedVertices>(&source)) {
+                    if (owned->padded_bytes.empty() || owned->padded_bytes.size() > UINT32_MAX - 63u) {
+                        err_ = "invalid owned vertex allocation"; return false;
+                    }
+                    up_bytes = &owned->padded_bytes;
+                    vertex_available = uint32_t(up_bytes->size());
+                } else if (real_slot) { err_ = "real vertex input has no source"; return false; }
+                return true;
+            };
+            if (const auto* non = std::get_if<draw::NonIndexed>(&v.geometry)) {
+                count = non->count; first_vertex = non->first_vertex;
+                if (!resolve_vertices(non->vertices)) return fail("draw geometry", err_);
+            } else if (const auto* buffered = std::get_if<draw::BufferIndexed>(&v.geometry)) {
+                indexed = true; count = buffered->count; first_index = buffered->first_index;
+                instances = buffered->instances; base_vertex = buffered->base_vertex; index_width = buffered->width;
+                if (index_width != draw::IndexWidth::U16 && index_width != draw::IndexWidth::U32)
+                    return fail("draw indices", "unknown index width");
+                if (!resolve_vertices(buffered->vertices) || !resolve_slice(buffered->indices, SDL_GPU_BUFFERUSAGE_INDEX, index))
+                    return fail("draw geometry", err_);
+                const uint32_t width = index_width == draw::IndexWidth::U16 ? 2u : 4u;
+                if (buffered->indices.offset % width)
+                    return fail("draw indices", "native index buffer binding offset is misaligned");
+                const uint32_t native_available = buf_.at(buffered->indices.buffer.value).bytes - buffered->indices.offset;
+                if ((uint64_t(first_index) + count) * width > native_available)
+                    return fail("ROBUST_INDEX_BUFFER_OOB", "SDL has no robustBufferAccess2 for the required native index interval");
+            } else {
+                const auto& owned = std::get<draw::OwnedIndexedUp>(v.geometry);
+                indexed = true; count = owned.count; instances = owned.instances; index_width = owned.width;
+                if (index_width != draw::IndexWidth::U16 && index_width != draw::IndexWidth::U32)
+                    return fail("draw indices", "unknown index width");
+                up_bytes = &owned.bytes; up_index_offset = owned.index_offset;
+                vertex_available = owned.vertex_bytes;
+                const uint32_t width = index_width == draw::IndexWidth::U16 ? 2u : 4u;
+                if (owned.bytes.empty() || owned.bytes.size() > UINT32_MAX - 63u || !owned.vertex_bytes ||
+                    owned.index_offset < owned.vertex_bytes || owned.index_offset % width ||
+                    uint64_t(owned.index_offset) + owned.index_bytes != owned.bytes.size() ||
+                    uint64_t(count) * width > owned.index_bytes)
+                    return fail("draw indices", "owned indexed-UP block has an invalid vertex/index interval");
+                if (real_slot) {
+                    for (uint32_t i = 0; i < count; ++i) {
+                        uint32_t value = 0;
+                        std::memcpy(&value, owned.bytes.data() + owned.index_offset + uint64_t(i) * width, width);
+                        if (uint64_t(value) * pitch + real_footprint > vertex_available)
+                            return fail("draw indices", "owned UP index addresses absent vertex data");
+                    }
+                }
+            }
+            if (!count || !instances) return fail("draw geometry", "empty geometry must be handled by Device");
+            if (index_width != draw::IndexWidth::U16 && index_width != draw::IndexWidth::U32)
+                return fail("draw indices", "unknown index width");
+            // Ordinary buffers keep D3D's accepted robust fetch behavior. Root enables the
+            // core robustBufferAccess feature in VulkanFeatures before this source is integrated.
+            if (up_bytes && real_slot && vertex_available < real_footprint)
+                return fail("draw vertices", "owned vertex source is shorter than its mapped attribute footprint");
+            if (up_bytes && real_slot && !indexed &&
+                (uint64_t(first_vertex) + count - 1u) * pitch + real_footprint > vertex_available)
+                return fail("draw vertices", "owned nonindexed fetch interval is outside its supplied block");
+            // the other streams' slices: one per binding, each inside its allocation
+            std::array<SDL_GPUBufferBinding, 16> other{};
+            uint32_t sliced = 0;
+            for (const auto& stream : v.streams) {
+                if (stream.stream >= 16 || !(other_slots & (1u << stream.stream)) || (sliced & (1u << stream.stream)))
+                    return fail("draw vertices", "a stream slice for no binding of the pipeline's, or twice");
+                if (!resolve_slice(stream.slice, SDL_GPU_BUFFERUSAGE_VERTEX, other[stream.stream])) return fail("draw vertices", err_);
+                sliced |= 1u << stream.stream;
+            }
+            if (sliced != other_slots) return fail("draw vertices", "a pipeline binding of a stream other than 0 has no slice");
+            // SDL binds slots 0..highest at once: a slot no binding names (the null stream's gap below
+            // slot 15, or a stream gap) takes the semantic-null buffer
+            const uint32_t span = (2u << highest_slot) - 1u;
+            if (p.n_vbs && (null_slot || (vb_slots & span) != span)) {
+                if (!v.semantic_null || !resolve_slice(*v.semantic_null, SDL_GPU_BUFFERUSAGE_VERTEX, filler))
+                    return fail("draw vertices", v.semantic_null ? err_ : "missing semantic-null/filler buffer");
+                if (v.semantic_null->available_bytes < 16)
+                    return fail("draw vertices", "semantic-null/filler slice is shorter than zero FLOAT4");
+            }
+
+            ProgramObjects* objects = program_objects(v.program);
+            if (!objects) return fail("draw shaders", err_);
+            SDL_GPUGraphicsPipeline* pipeline = pipeline_object(p, *objects);
+            if (!pipeline) return fail("draw pipeline", err_);
+            uint64_t uploaded = 0;
+            if (up_bytes) {
+                SDL_GPUBufferBinding upload{};
+                if (!stage_up(*up_bytes, upload)) return fail("draw UP upload", err_);
+                uploaded = up_bytes->size();
+                if (real_slot) real = upload;
+                if (std::holds_alternative<draw::OwnedIndexedUp>(v.geometry))
+                    index = SDL_GPUBufferBinding{upload.buffer, upload.offset + up_index_offset};
+            }
+            if (!open_pass(attachment_key, colours, p.has_ds ? &depth : nullptr)) return fail("draw render pass", err_);
+            // The draw joins the open pass's commands (flush_pass encodes them in one SDL render
+            // pass), reduced against the state SDL will hold at that point of the pass (bound_):
+            // a call that would set what is already set is left out, which leaves SDL's state as
+            // it was and spares SDL's descriptor sets the refresh a pipeline or sampler bind forces.
+            if (bound_.pipeline != pipeline) {
+                record(Op::pipeline).u.pipeline = pipeline;
+                bound_.pipeline = pipeline;
+            }
+            if (p.n_vbs) {
+                std::array<SDL_GPUBufferBinding, 16> bindings{};
+                for (uint32_t i = 0; i <= highest_slot; ++i) bindings[i] = filler;
+                if (real_slot) bindings[0] = real;
+                for (uint32_t i = 1; i < 16; ++i)
+                    if (other_slots & (1u << i)) bindings[i] = other[i];
+                record_vertex_buffers(bindings.data(), highest_slot + 1u);
+            }
+            if (indexed)
+                record_index_buffer(index, index_width == draw::IndexWidth::U16 ? SDL_GPU_INDEXELEMENTSIZE_16BIT
+                                                                                : SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            if (!vertex_samplers.empty()) record_samplers(0, vertex_samplers);
+            if (!pixel_samplers.empty()) record_samplers(1, pixel_samplers);
+            for (uint32_t i = 0; i < v.vertex.uniforms.count; ++i) record_uniform(0, i, v.vertex.uniforms.slots[i]);
+            for (uint32_t i = 0; i < v.pixel.uniforms.count; ++i) record_uniform(1, i, v.pixel.uniforms.slots[i]);
+            // Device supplied DXVK's half-pixel offset. SDL applies Vulkan's Y flip once.
+            const SDL_GPUViewport viewport{d.x, d.y, d.width, d.height, d.min_depth, d.max_depth};
+            const SDL_Rect scissor{d.scissor_x, d.scissor_y, int(d.scissor_width), int(d.scissor_height)};
+            const SDL_FColor blend{d.blend_constant[0], d.blend_constant[1], d.blend_constant[2], d.blend_constant[3]};
+            if (!bound_.has_dynamic || std::memcmp(&bound_.viewport, &viewport, sizeof viewport) != 0)
+                record(Op::viewport).u.viewport = viewport;
+            if (!bound_.has_dynamic || std::memcmp(&bound_.scissor, &scissor, sizeof scissor) != 0)
+                record(Op::scissor).u.scissor = scissor;
+            if (!bound_.has_dynamic || std::memcmp(&bound_.blend, &blend, sizeof blend) != 0)
+                record(Op::blend).u.blend = blend;
+            if (!bound_.has_dynamic || bound_.stencil != d.stencil_reference)
+                record(Op::stencil).small = d.stencil_reference;
+            bound_.viewport = viewport; bound_.scissor = scissor; bound_.blend = blend;
+            bound_.stencil = d.stencil_reference; bound_.has_dynamic = true;
+            Cmd& call = record(indexed ? Op::draw_indexed : Op::draw);
+            if (indexed) call.u.draw = {count, instances, first_index, base_vertex};
+            else call.u.draw = {count, 1, first_vertex, 0};
+            return draw::Encoded{uploaded};
+        } catch (const std::bad_alloc&) {
+            err_ = "draw: no memory";
+            return draw::Failure{"draw allocation", "out of memory"};
+        }
+    }
+
+    uint32_t create_texture(const TexDesc& d) override {
+        SDL_GPUTextureCreateInfo ci{};
+        // A cube's six faces are its layers (D3DCUBEMAP_FACES' order is Vulkan's), a render-target
+        // cube's faces colour targets by layer; a volume's depth its third dimension, never a target
+        // (DXVK refuses a render-target volume).
+        ci.type = d.type == TexType::cube ? SDL_GPU_TEXTURETYPE_CUBE
+                : d.type == TexType::volume ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D;
+        ci.format = sdl_format(d.fmt);
+        ci.width = d.w;
+        ci.height = d.h;
+        ci.layer_count_or_depth = d.type == TexType::cube ? 6u : d.type == TexType::volume ? d.depth : 1u;
+        ci.num_levels = d.levels;
+        ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        if (!d.w || !d.h || !d.levels || ci.format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+            err_ = "invalid texture dimensions, levels or format"; return 0;
+        }
+        if (d.type != TexType::flat && ((d.type == TexType::volume && d.target) || is_depth(d.fmt) || !d.depth ||
+                                        (d.type == TexType::cube && d.w != d.h))) {
+            err_ = "a volume target, a cube or volume of a depth format, a cube not square or a volume of no depth"; return 0;
+        }
+        if (d.type != TexType::volume && d.depth != 1) { err_ = "a depth on a texture that is not a volume"; return 0; }
+        if (is_depth(d.fmt)) ci.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+                                      (d.sampled ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0);
+        else ci.usage = (d.target ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0) | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        if (!SDL_GPUTextureSupportsFormat(dev_, ci.format, ci.type, ci.usage)) {
+            err_ = d.sampled && is_depth(d.fmt) ? "sampled depth format/usage is unsupported" : "texture format/usage is unsupported";
+            return 0;
+        }
+        // SDL texture creation submits initialization commands and may defragment older
+        // images. Submit prior uses first so those images cannot move ahead of our draws.
+        if (cb_ && !submit(false)) return 0;
+        SDL_GPUTexture* t = SDL_CreateGPUTexture(dev_, &ci);
+        if (!t) { err_ = std::string("SDL_CreateGPUTexture: ") + SDL_GetError(); return 0; }
+        const uint32_t id = next_++;
+        tex_[id] = Tex{t, d, ci.usage};
+        // Zero, as DXVK's new images are (dxvk_context.cpp initImage): targets by a CLEAR
+        // pass per level, the rest by uploading zeros (every face of a cube, every slice of a volume).
+        bool ok = true;
+        const uint32_t layers = d.type == TexType::cube ? 6u : 1u;
+        for (uint32_t layer = 0; layer < layers && ok; layer++)
+            for (uint32_t l = 0; l < d.levels && ok; l++) {
+                if (d.target || is_depth(d.fmt)) {
+                    ClearValue v;
+                    v.colour = !is_depth(d.fmt);
+                    v.depth = v.stencil = is_depth(d.fmt);
+                    ok = clear_layer(id, layer, l, v);
+                } else {
+                    const size_t n = level_upload_bytes(d, l);
+                    if (zeros_.size() < n) zeros_.assign(n, 0);
+                    ok = upload_subresource(id, layer, l, zeros_.data(), n);
+                }
+            }
+        if (!ok) { release_texture(id); return 0; }
+        return id;
+    }
+
+    void release_texture(uint32_t id) override {
+        auto it = tex_.find(id);
+        if (it == tex_.end()) return;
+        end_render();
+        end_copy();
+        SDL_ReleaseGPUTexture(dev_, it->second.t);   // SDL defers it past the GPU's use
+        tex_.erase(it);
+    }
+
+    uint32_t create_buffer(uint32_t bytes, bool index) override {
+        if (!bytes) { err_ = "cannot create an empty GPU buffer"; return 0; }
+        const uint32_t native_bytes = std::max(bytes, 4u); // SDL requires at least four bytes.
+        SDL_GPUBufferCreateInfo ci{index ? SDL_GPU_BUFFERUSAGE_INDEX : SDL_GPU_BUFFERUSAGE_VERTEX, native_bytes, 0};
+        SDL_GPUBuffer* b = SDL_CreateGPUBuffer(dev_, &ci);
+        if (!b) { err_ = std::string("SDL_CreateGPUBuffer: ") + SDL_GetError(); return 0; }
+        const uint32_t id = next_++;
+        buf_[id] = Buf{b, native_bytes, ci.usage};
+        // Zero-filled, as DXVK's InitBuffer leaves a new buffer (the critic's A24).
+        if (zeros_.size() < native_bytes) zeros_.assign(native_bytes, 0);
+        if (!upload_buffer(id, 0, zeros_.data(), native_bytes)) { release_buffer(id); return 0; }
+        return id;
+    }
+
+    void release_buffer(uint32_t id) override {
+        auto it = buf_.find(id);
+        if (it == buf_.end()) return;
+        end_render();
+        end_copy();
+        SDL_ReleaseGPUBuffer(dev_, it->second.b);
+        buf_.erase(it);
+    }
+
+    bool upload_subresource(uint32_t id, uint32_t layer, uint32_t level, const uint8_t* data, size_t bytes) override {
+        auto it = tex_.find(id);
+        if (it == tex_.end()) { err_ = "upload to an unknown texture"; return false; }
+        const TexDesc& d = it->second.d;
+        if (level >= d.levels || layer >= (d.type == TexType::cube ? 6u : 1u) || !data || bytes > UINT32_MAX ||
+            bytes != level_upload_bytes(d, level)) {
+            err_ = "upload of a level with the wrong size";
+            return false;
+        }
+        SDL_GPUTransferBuffer* tb = nullptr;
+        uint32_t off = 0;
+        if (!stage(data, bytes, &tb, &off)) return false;
+        SDL_GPUTextureTransferInfo src{tb, off, 0, 0};
+        // a volume's level: all of its slices (z 0, its depth); a cube face: its layer
+        const uint32_t depth = d.type == TexType::volume ? level_dim(d.depth, level) : 1u;
+        SDL_GPUTextureRegion dst{it->second.t, level, layer, 0, 0, 0, level_dim(d.w, level), level_dim(d.h, level), depth};
+        SDL_GPUCopyPass* cp = copy_pass();
+        if (!cp) { release_dedicated(tb); return false; }
+        if (!encode_call("SDL_UploadToGPUTexture", [&] { SDL_UploadToGPUTexture(cp, &src, &dst, false); })) { release_dedicated(tb); return false; }
+        release_dedicated(tb);
+        c_.uploads++;
+        c_.upload_bytes += bytes;
+        return true;
+    }
+
+    bool upload_buffer(uint32_t id, uint32_t offset, const uint8_t* data, uint32_t bytes) override {
+        auto it = buf_.find(id);
+        if (it == buf_.end()) { err_ = "upload to an unknown buffer"; return false; }
+        if (!bytes) return true;
+        if (!data || uint64_t(offset) + bytes > it->second.bytes) {
+            err_ = "buffer upload is outside the native allocation"; return false;
+        }
+        SDL_GPUTransferBuffer* tb = nullptr;
+        uint32_t off = 0;
+        if (!stage(data, bytes, &tb, &off)) return false;
+        SDL_GPUTransferBufferLocation src{tb, off};
+        SDL_GPUBufferRegion dst{it->second.b, offset, bytes};
+        SDL_GPUCopyPass* cp = copy_pass();
+        if (!cp) { release_dedicated(tb); return false; }
+        if (!encode_call("SDL_UploadToGPUBuffer", [&] { SDL_UploadToGPUBuffer(cp, &src, &dst, false); })) { release_dedicated(tb); return false; }
+        release_dedicated(tb);
+        c_.uploads++;
+        c_.upload_bytes += bytes;
+        return true;
+    }
+
+    bool clear_layer(uint32_t id, uint32_t layer, uint32_t level, const ClearValue& v) override {
+        auto it = tex_.find(id);
+        if (it == tex_.end()) { err_ = "clear of an unknown texture"; return false; }
+        if (it->second.d.type == TexType::volume || layer >= (it->second.d.type == TexType::cube ? 6u : 1u)) {
+            err_ = "clear of a volume texture or of a layer the texture does not have"; return false;
+        }
+        if (level >= it->second.d.levels || (is_depth(it->second.d.fmt) && level > UINT8_MAX)) {
+            err_ = "clear mip level is out of range"; return false;
+        }
+        if (!end_render() || !end_copy()) return false;
+        SDL_GPUCommandBuffer* cb = cmd();
+        if (!cb) return false;
+        SDL_GPURenderPass* rp = nullptr;
+        if (is_depth(it->second.d.fmt)) {
+            SDL_GPUDepthStencilTargetInfo ds{};
+            ds.texture = it->second.t;
+            ds.clear_depth = v.z;
+            ds.load_op = v.depth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+            ds.store_op = SDL_GPU_STOREOP_STORE;
+            ds.stencil_load_op = v.stencil ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+            ds.stencil_store_op = SDL_GPU_STOREOP_STORE;
+            ds.cycle = false;
+            ds.clear_stencil = Uint8(v.s);
+            ds.mip_level = Uint8(level);
+            ds.layer = Uint8(layer);
+            if (!encode_call("SDL_BeginGPURenderPass(clear)", [&] { rp = SDL_BeginGPURenderPass(cb, nullptr, 0, &ds); })) return false;
+        } else {
+            SDL_GPUColorTargetInfo ct{};
+            ct.texture = it->second.t;
+            ct.mip_level = level;
+            ct.layer_or_depth_plane = layer;
+            ct.clear_color = SDL_FColor{v.rgba[0], v.rgba[1], v.rgba[2], v.rgba[3]};
+            ct.load_op = v.colour ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+            ct.store_op = SDL_GPU_STOREOP_STORE;
+            ct.cycle = false;
+            if (!encode_call("SDL_BeginGPURenderPass(clear)", [&] { rp = SDL_BeginGPURenderPass(cb, &ct, 1, nullptr); })) return false;
+        }
+        if (!rp) { err_ = std::string("SDL_BeginGPURenderPass: ") + SDL_GetError(); return false; }
+        if (!encode_call("SDL_EndGPURenderPass(clear)", [&] { SDL_EndGPURenderPass(rp); })) return false;
+        c_.render_passes++;
+        return true;
+    }
+
+    bool copy_layers(uint32_t src, uint32_t sa, uint32_t sl, uint32_t sx, uint32_t sy, uint32_t dst, uint32_t da, uint32_t dl,
+                     uint32_t dx, uint32_t dy, uint32_t w, uint32_t h) override {
+        auto a = tex_.find(src), b = tex_.find(dst);
+        if (a == tex_.end() || b == tex_.end()) { err_ = "copy between unknown textures"; return false; }
+        if (a->second.d.type == TexType::volume || b->second.d.type == TexType::volume ||
+            sa >= (a->second.d.type == TexType::cube ? 6u : 1u) || da >= (b->second.d.type == TexType::cube ? 6u : 1u)) {
+            err_ = "copy of a volume texture or of a layer a texture does not have"; return false;
+        }
+        if (sl >= a->second.d.levels || dl >= b->second.d.levels || a->second.d.fmt != b->second.d.fmt ||
+            !w || !h || uint64_t(sx) + w > level_dim(a->second.d.w, sl) ||
+            uint64_t(sy) + h > level_dim(a->second.d.h, sl) ||
+            uint64_t(dx) + w > level_dim(b->second.d.w, dl) || uint64_t(dy) + h > level_dim(b->second.d.h, dl)) {
+            err_ = "texture copy interval or format is invalid"; return false;
+        }
+        SDL_GPUTextureLocation from{a->second.t, sl, sa, sx, sy, 0};
+        SDL_GPUTextureLocation to{b->second.t, dl, da, dx, dy, 0};
+        SDL_GPUCopyPass* cp = copy_pass();
+        if (!cp) return false;
+        if (!encode_call("SDL_CopyGPUTextureToTexture", [&] { SDL_CopyGPUTextureToTexture(cp, &from, &to, w, h, 1, false); })) { return false; }
+        c_.copies++;
+        return true;
+    }
+
+    bool download(uint32_t id, uint32_t level, uint8_t* out, size_t bytes) override {
+        auto it = tex_.find(id);
+        if (it == tex_.end()) { err_ = "download of an unknown texture"; return false; }
+        const TexDesc& d = it->second.d;
+        if (d.type != TexType::flat) { err_ = "download of a cube or volume texture"; return false; }
+        if (level >= d.levels || !out || bytes > UINT32_MAX) { err_ = "invalid texture download interval"; return false; }
+        const uint32_t lw = level_dim(d.w, level), lh = level_dim(d.h, level);
+        if (d.fmt != GFmt::bgra8 || bytes != size_t(lw) * lh * 4) { err_ = "download of a non-BGRA8 level"; return false; }
+        if (down_size_ < bytes) {
+            if (down_) SDL_ReleaseGPUTransferBuffer(dev_, down_);
+            SDL_GPUTransferBufferCreateInfo ci{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, uint32_t(bytes), 0};
+            down_ = SDL_CreateGPUTransferBuffer(dev_, &ci);
+            down_size_ = down_ ? uint32_t(bytes) : 0;
+            if (!down_) { err_ = std::string("SDL_CreateGPUTransferBuffer: ") + SDL_GetError(); return false; }
+        }
+        SDL_GPUCopyPass* cp = copy_pass();
+        if (!cp) return false;
+        SDL_GPUTextureRegion from{it->second.t, level, 0, 0, 0, 0, lw, lh, 1};
+        SDL_GPUTextureTransferInfo to{down_, 0, 0, 0};
+        if (!encode_call("SDL_DownloadFromGPUTexture", [&] { SDL_DownloadFromGPUTexture(cp, &from, &to); })) { return false; }
+        if (!submit(true)) return false;
+        void* p = nullptr;
+        if (!encode_call("SDL_MapGPUTransferBuffer(download)", [&] { p = SDL_MapGPUTransferBuffer(dev_, down_, false); })) {
+            if (p) SDL_UnmapGPUTransferBuffer(dev_, down_);
+            return false;
+        }
+        if (!p) { err_ = std::string("SDL_MapGPUTransferBuffer: ") + SDL_GetError(); return false; }
+        std::memcpy(out, p, bytes);
+        if (!encode_call("SDL_UnmapGPUTransferBuffer(download)", [&] { SDL_UnmapGPUTransferBuffer(dev_, down_); })) return false;
+        c_.downloads++;
+        return true;
+    }
+
+    bool present(uint32_t bb, PresentInfo* out) override {
+        if (!out) { err_ = "no Present result destination"; return false; }
+        *out = PresentInfo{};
+        auto it = tex_.find(bb);
+        if (it == tex_.end()) { err_ = "present of an unknown texture"; return false; }
+        if (!end_render() || !end_copy()) return false;
+        if (win_) {
+            SDL_GPUCommandBuffer* cb = cmd();
+            if (!cb) return false;
+            SDL_GPUTexture* sw = nullptr;
+            Uint32 w = 0, h = 0;
+            SDL_ClearError();
+            const bool acquired = SDL_WaitAndAcquireGPUSwapchainTexture(cb, win_, &sw, &w, &h);
+            swapchain_acquired_ = sw != nullptr;
+            if (!check_encoding_error("SDL_WaitAndAcquireGPUSwapchainTexture")) return false;
+            if (!acquired) {
+                err_ = "SDL_WaitAndAcquireGPUSwapchainTexture failed";
+                discard_failed_commands();
+                return false;
+            }
+            if (sw) {
+                // The back buffer at its own aspect, centred, black bars on the sides (a wider
+                // swapchain: a 19.5:9 phone, a resized window) or above and below (a taller one):
+                // the blit's render pass clears the whole swapchain texture first. A swapchain of
+                // the back buffer's aspect is covered whole, as before, with nothing cleared.
+                const Uint32 bw = it->second.d.w, bh = it->second.d.h;
+                const FitRect dst = fit_rect(bw, bh, w, h);
+                const bool whole = dst.x == 0 && dst.y == 0 && dst.w == w && dst.h == h;
+                SDL_GPUBlitInfo bi{};
+                bi.source = SDL_GPUBlitRegion{it->second.t, 0, 0, 0, 0, bw, bh};
+                bi.destination = SDL_GPUBlitRegion{sw, 0, 0, dst.x, dst.y, dst.w, dst.h};
+                bi.load_op = whole ? SDL_GPU_LOADOP_DONT_CARE : SDL_GPU_LOADOP_CLEAR;
+                bi.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
+                bi.flip_mode = SDL_FLIP_NONE;
+                bi.filter = (dst.w == bw && dst.h == bh) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+                bi.cycle = false;
+                if (!encode_call("SDL_BlitGPUTexture", [&] { SDL_BlitGPUTexture(cb, &bi); })) return false;
+                c_.blits++;
+                // The window's present overlay (host/player/player.cpp "Gamepads": the touch
+                // overlay): a function the player keeps in the window's properties, given the
+                // frame and the swapchain texture it was just blitted to, draws over it in this
+                // command buffer before the submission. A window without one presents as before.
+                using PresentOverlay = void (*)(void*, SDL_GPUDevice*, SDL_GPUCommandBuffer*, SDL_GPUTexture*, Uint32,
+                                                Uint32, SDL_GPUTexture*, Uint32, Uint32);
+                const SDL_PropertiesID wp = SDL_GetWindowProperties(win_);
+                if (void* overlay = SDL_GetPointerProperty(wp, "sa2.present_overlay", nullptr)) {
+                    reinterpret_cast<PresentOverlay>(overlay)(SDL_GetPointerProperty(wp, "sa2.present_overlay.context", nullptr),
+                        dev_, cb, it->second.t, it->second.d.w, it->second.d.h, sw, w, h);
+                    SDL_ClearError();
+                }
+                out->presented = true;
+                out->sw_w = w;
+                out->sw_h = h;
+            } else {
+                out->no_swapchain_texture = true;
+            }
+        }
+        return submit(false);
+    }
+
+    bool finish() override {
+        const bool submitted = submit(true);
+        // Even when there is no current command buffer, Present can have submissions pending.
+        SDL_ClearError();
+        const bool idle = SDL_WaitForGPUIdle(dev_);
+        c_.waits++;
+        const bool no_error = check_encoding_error("SDL_WaitForGPUIdle");
+        if (idle && no_error) release_pending_fences();
+        if (!idle && no_error) err_ = "SDL_WaitForGPUIdle failed";
+        return submitted && idle && no_error;
+    }
+
+    bool attach_window(SDL_Window* w, bool vsync, std::string* mode) override {
+        Report& r = report();
+        r.claim_x87_before = x87_cw();
+        r.claim_mxcsr_before = mxcsr();
+        const bool ok = SDL_ClaimWindowForGPUDevice(dev_, w);
+        r.claim_x87_after = x87_cw();
+        r.claim_mxcsr_after = mxcsr();
+        if (!ok) { err_ = std::string("SDL_ClaimWindowForGPUDevice: ") + SDL_GetError(); return false; }
+        win_ = w;
+        SDL_GPUPresentMode m = SDL_GPU_PRESENTMODE_VSYNC;
+        if (!vsync) {
+            if (SDL_WindowSupportsGPUPresentMode(dev_, w, SDL_GPU_PRESENTMODE_IMMEDIATE)) m = SDL_GPU_PRESENTMODE_IMMEDIATE;
+            else if (SDL_WindowSupportsGPUPresentMode(dev_, w, SDL_GPU_PRESENTMODE_MAILBOX)) m = SDL_GPU_PRESENTMODE_MAILBOX;
+        }
+        *mode = m == SDL_GPU_PRESENTMODE_IMMEDIATE ? "IMMEDIATE" : m == SDL_GPU_PRESENTMODE_MAILBOX ? "MAILBOX" : "VSYNC";
+        if (!SDL_SetGPUSwapchainParameters(dev_, w, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, m)) {
+            err_ = std::string("SDL_SetGPUSwapchainParameters: ") + SDL_GetError();
+            return false;
+        }
+        return true;
+    }
+
+    const GpuInfo& info() const override { return info_; }
+    const GpuCounters& counters() const override { return c_; }
+    const std::string& error() const override { return err_; }
+    GFmt depth_format() const override { return depth_; }
+    bool samples(GFmt f, TexType t) const override {
+        const bool bc = f == GFmt::bc1 || f == GFmt::bc2 || f == GFmt::bc3;
+        if (bc && info_.bc_forced_off) return false;
+        const SDL_GPUTextureType type = t == TexType::cube ? SDL_GPU_TEXTURETYPE_CUBE
+                                      : t == TexType::volume ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D;
+        return SDL_GPUTextureSupportsFormat(dev_, sdl_format(f), type, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    }
+
+private:
+    struct Tex { SDL_GPUTexture* t; TexDesc d; SDL_GPUTextureUsageFlags usage; };
+    struct Buf { SDL_GPUBuffer* b; uint32_t bytes; SDL_GPUBufferUsageFlags usage; };
+
+    void discard_failed_commands() {
+        poisoned_ = true;
+        copy_ = nullptr;
+        close_pass();
+        up_copies_.clear();
+        if (ring_map_) { SDL_UnmapGPUTransferBuffer(dev_, ring_); ring_map_ = nullptr; }
+        if (cb_ && !swapchain_acquired_) {
+            SDL_GPUCommandBuffer* failed = cb_;
+            cb_ = nullptr;
+            SDL_ClearError();
+            if (!SDL_CancelGPUCommandBuffer(failed))
+                err_ += std::string("; SDL_CancelGPUCommandBuffer: ") + SDL_GetError();
+        }
+        // Once a swapchain image was acquired, SDL forbids cancellation. The poisoned
+        // command buffer remains quarantined until device teardown and is never submitted.
+        free_up_chunks();
+    }
+    bool check_encoding_error(const char* operation) {
+        const char* error = SDL_GetError();
+        if (!error || !*error) return true;
+        err_ = std::string(operation) + ": " + error;
+        discard_failed_commands();
+        return false;
+    }
+    template<class F> bool encode_call(const char* operation, F call) {
+        if (poisoned_) return false;
+        SDL_ClearError();
+        call();
+        return check_encoding_error(operation);
+    }
+
+    struct ShaderObject { SDL_GPUShader* shader; };
+    struct ProgramObjects {
+        draw::Program owner;
+        ShaderObject* vertex;
+        ShaderObject* pixel;
+    };
+    struct ShaderPair {
+        const ShaderObject* vertex;
+        const ShaderObject* pixel;
+        bool operator==(const ShaderPair& o) const { return vertex == o.vertex && pixel == o.pixel; }
+    };
+    struct ShaderPairHash {
+        size_t operator()(const ShaderPair& pair) const {
+            return std::hash<const void*>{}(pair.vertex) ^ (std::hash<const void*>{}(pair.pixel) << 1u);
+        }
+    };
+    // An UP chunk: its size, and the submission count (the command buffer) it was last written
+    // and last allocated from in (UINT64_MAX: never written).
+    struct UpChunk { SDL_GPUBuffer* buffer; uint32_t bytes; uint64_t written, used; };
+    // The UP uploads not yet encoded (stage_up), from the ring into a chunk.
+    struct UpCopy { SDL_GPUBuffer* buffer; uint32_t offset, destination, size, span; bool cycle; };
+    // A command of a draw pass (record, replay): its variable part a span [at, at + n) of an arena.
+    enum class Op : uint8_t { pipeline, vertex_buffers, index_buffer, vertex_samplers, fragment_samplers,
+                              vertex_uniform, fragment_uniform, viewport, scissor, blend, stencil, draw, draw_indexed };
+    struct Cmd {
+        Op op = Op::draw;
+        uint8_t small = 0;         // a uniform slot, an index element size or the stencil reference
+        uint32_t at = 0, n = 0;
+        union U {
+            SDL_GPUGraphicsPipeline* pipeline;
+            SDL_GPUBufferBinding buffer;
+            SDL_GPUViewport viewport;
+            SDL_Rect scissor;
+            SDL_FColor blend;
+            struct { uint32_t count, instances, first; int32_t base; } draw;
+        } u{};
+    };
+    // A pipeline by its canonical key (key_bytes), in its hash's bucket.
+    struct PipelineEntry { std::vector<uint8_t> key; SDL_GPUGraphicsPipeline* pipeline; };
+    // A sampler by every field SDL_CreateGPUSampler reads and the border colour property.
+    struct SamplerKey {
+        std::array<uint32_t, 14> w;
+        bool operator==(const SamplerKey& o) const { return same_bytes(w.data(), o.w.data(), sizeof w); }
+    };
+    struct SamplerKeyHash {
+        size_t operator()(const SamplerKey& k) const { return size_t(memo_hash(k.w.data(), sizeof k.w)); }
+    };
+
+    static void append_u32(std::string& key, uint32_t value) {
+        for (uint32_t i = 0; i < 4; ++i) key.push_back(char((value >> (8u * i)) & 255u));
+    }
+    static void append_text(std::string& key, const std::string& text) {
+        append_u32(key, uint32_t(text.size())); key.append(text);
+    }
+    static uint32_t vertex_element_bytes(SDL_GPUVertexElementFormat format) {
+        switch (format) {
+        case SDL_GPU_VERTEXELEMENTFORMAT_INT: case SDL_GPU_VERTEXELEMENTFORMAT_UINT:
+        case SDL_GPU_VERTEXELEMENTFORMAT_FLOAT: return 4;
+        case SDL_GPU_VERTEXELEMENTFORMAT_INT2: case SDL_GPU_VERTEXELEMENTFORMAT_UINT2:
+        case SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2: return 8;
+        case SDL_GPU_VERTEXELEMENTFORMAT_INT3: case SDL_GPU_VERTEXELEMENTFORMAT_UINT3:
+        case SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3: return 12;
+        case SDL_GPU_VERTEXELEMENTFORMAT_INT4: case SDL_GPU_VERTEXELEMENTFORMAT_UINT4:
+        case SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4: return 16;
+        case SDL_GPU_VERTEXELEMENTFORMAT_BYTE2: case SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2:
+        case SDL_GPU_VERTEXELEMENTFORMAT_BYTE2_NORM: case SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2_NORM: return 2;
+        case SDL_GPU_VERTEXELEMENTFORMAT_BYTE4: case SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4:
+        case SDL_GPU_VERTEXELEMENTFORMAT_BYTE4_NORM: case SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM:
+        case SDL_GPU_VERTEXELEMENTFORMAT_SHORT2: case SDL_GPU_VERTEXELEMENTFORMAT_USHORT2:
+        case SDL_GPU_VERTEXELEMENTFORMAT_SHORT2_NORM: case SDL_GPU_VERTEXELEMENTFORMAT_USHORT2_NORM:
+        case SDL_GPU_VERTEXELEMENTFORMAT_HALF2: return 4;
+        case SDL_GPU_VERTEXELEMENTFORMAT_SHORT4: case SDL_GPU_VERTEXELEMENTFORMAT_USHORT4:
+        case SDL_GPU_VERTEXELEMENTFORMAT_SHORT4_NORM: case SDL_GPU_VERTEXELEMENTFORMAT_USHORT4_NORM:
+        case SDL_GPU_VERTEXELEMENTFORMAT_HALF4: return 8;
+        default: return 0;
+        }
+    }
+    ShaderObject* shader_object(const shader::Built& b, const shader::CacheKey& identity, shader::Stage stage) {
+        // Exact content is interned once per immutable ProgramImage. Hashing only indexes the
+        // table; full identity, bindings and SPIR-V bytes decide equality.
+        std::string key;
+        append_u32(key, uint32_t(stage)); append_text(key, identity.text());
+        append_text(key, shader::encode_bindings(b));
+        append_u32(key, uint32_t(b.spirv.size()));
+        for (uint32_t word : b.spirv) append_u32(key, word);
+        auto found = shaders_.find(key);
+        if (found != shaders_.end()) return found->second.get();
+        SDL_GPUShaderCreateInfo ci{};
+        ci.code_size = b.spirv.size() * sizeof(uint32_t);
+        ci.code = reinterpret_cast<const Uint8*>(b.spirv.data());
+        ci.entrypoint = "main"; ci.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        ci.stage = stage == shader::Stage::Vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        ci.num_samplers = b.num_samplers; ci.num_uniform_buffers = b.num_uniform_buffers;
+        auto object = std::make_unique<ShaderObject>(ShaderObject{nullptr});
+        SDL_GPUShader* s = SDL_CreateGPUShader(dev_, &ci);
+        if (!s) { err_ = std::string("SDL_CreateGPUShader: ") + SDL_GetError(); return nullptr; }
+        object->shader = s;
+        ShaderObject* result = object.get();
+        try { shaders_.emplace(std::move(key), std::move(object)); }
+        catch (...) { SDL_ReleaseGPUShader(dev_, s); throw; }
+        return result;
+    }
+    ProgramObjects* program_objects(const draw::Program& program) {
+        auto found = programs_.find(program.get());
+        if (found != programs_.end()) return &found->second;
+        ShaderObject* vs = shader_object(program->vertex, program->vertex_identity, shader::Stage::Vertex);
+        if (!vs) return nullptr;
+        ShaderObject* ps = shader_object(program->pixel, program->pixel_identity, shader::Stage::Pixel);
+        if (!ps) return nullptr;
+        return &programs_.emplace(program.get(), ProgramObjects{program, vs, ps}).first->second;
+    }
+    SDL_GPUGraphicsPipeline* pipeline_object(const PipelineDesc& desc, const ProgramObjects& program) {
+        // key_of is the mapping's complete padding-free descriptor key. Interned module
+        // identities retain exact executable equality, including PS variants and linkage.
+        // The key's bytes on the stack and its hash index the pair's table; the bytes decide.
+        static const PipelineInput kNoShaderIds{};
+        uint8_t key[kPipelineKeyMaxBytes];
+        const size_t n = key_bytes(desc, kNoShaderIds, false, key);
+        auto& bucket = pipelines_[ShaderPair{program.vertex, program.pixel}][memo_hash(key, n)];
+        for (const PipelineEntry& e : bucket)
+            if (e.key.size() == n && same_bytes(e.key.data(), key, n)) return e.pipeline;
+        CreateProps props(desc);
+        if (!props.error().empty()) { err_ = props.error(); return nullptr; }
+        auto ci = desc.create_info(props.id());
+        ci.vertex_shader = program.vertex->shader; ci.fragment_shader = program.pixel->shader;
+        SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(dev_, &ci);
+        if (!pipeline) { err_ = std::string("SDL_CreateGPUGraphicsPipeline: ") + SDL_GetError(); return nullptr; }
+        try { bucket.push_back(PipelineEntry{std::vector<uint8_t>(key, key + n), pipeline}); }
+        catch (...) { SDL_ReleaseGPUGraphicsPipeline(dev_, pipeline); throw; }
+        return pipeline;
+    }
+    SDL_GPUSampler* sampler_object(const SamplerDesc& desc) {
+        const auto& fields = *desc.info;
+        if (!std::isfinite(fields.mip_lod_bias) || !std::isfinite(fields.max_anisotropy) ||
+            !std::isfinite(fields.min_lod) || !std::isfinite(fields.max_lod) || fields.min_lod < 0 ||
+            fields.max_lod < fields.min_lod || (fields.enable_anisotropy && fields.max_anisotropy < 1)) {
+            err_ = "invalid mapped sampler LOD or anisotropy interval"; return nullptr;
+        }
+        bool border = false;
+        for (auto axis : {fields.address_mode_u, fields.address_mode_v, fields.address_mode_w})
+            border |= axis == kAddressClampToBorder;
+        if (border && (!info_.sampler_clamp_to_border || desc.border_colour < kBorderTransparentBlack ||
+                       desc.border_colour > kBorderOpaqueWhite)) {
+            err_ = "native border sampler requires an effective capability and explicit colour"; return nullptr;
+        }
+        if (!border && desc.border_colour != kBorderNone) {
+            err_ = "border property on a sampler with no native border axis"; return nullptr;
+        }
+        auto bits = [](float value) { uint32_t b; std::memcpy(&b, &value, sizeof b); return b; };
+        const SamplerKey key{{uint32_t(fields.min_filter), uint32_t(fields.mag_filter), uint32_t(fields.mipmap_mode),
+            uint32_t(fields.address_mode_u), uint32_t(fields.address_mode_v), uint32_t(fields.address_mode_w),
+            bits(fields.mip_lod_bias), bits(fields.max_anisotropy), bits(fields.min_lod), bits(fields.max_lod),
+            uint32_t(fields.compare_op), uint32_t(fields.enable_anisotropy), uint32_t(fields.enable_compare),
+            uint32_t(desc.border_colour)}};
+        auto found = samplers_.find(key);
+        if (found != samplers_.end()) return found->second;
+        CreateProps props(desc);
+        if (!props.error().empty()) { err_ = props.error(); return nullptr; }
+        auto ci = desc.create_info(props.id());
+        SDL_GPUSampler* sampler = SDL_CreateGPUSampler(dev_, &ci);
+        if (!sampler) { err_ = std::string("SDL_CreateGPUSampler: ") + SDL_GetError(); return nullptr; }
+        try { samplers_.emplace(key, sampler); }
+        catch (...) { SDL_ReleaseGPUSampler(dev_, sampler); throw; }
+        return sampler;
+    }
+    bool upload_up(const std::vector<uint8_t>& bytes, SDL_GPUBufferBinding& binding) {
+        // The chunks outlive the command buffer: each command buffer fills them from the first
+        // again, only advancing, so later draws never overwrite an encoded draw's vertices or
+        // indices. A chunk's first write in a command buffer cycles it (SDL's cycle flag), which
+        // gives it a native buffer no earlier command buffer still reads (SDL keeps the ones it
+        // made and hands back an idle one), and every later write and bind in the command buffer
+        // goes to that one. So no buffer is created or released frame after frame.
+        if (bytes.empty() || bytes.size() > UINT32_MAX - 63u) { err_ = "UP allocation is empty or too large"; return false; }
+        const uint32_t need = (uint32_t(bytes.size()) + 63u) & ~63u;
+        UpChunk* chunk = up_allocate(need);
+        if (!chunk) return false;
+        const uint32_t destination = up_next_ - need;
+        SDL_GPUTransferBuffer* transfer = nullptr;
+        uint32_t offset = 0;
+        if (!stage(bytes.data(), bytes.size(), &transfer, &offset)) return false;
+        SDL_GPUCopyPass* pass = copy_pass();
+        if (!pass) { release_dedicated(transfer); return false; }
+        SDL_GPUTransferBufferLocation source{transfer, offset};
+        SDL_GPUBufferRegion target{chunk->buffer, destination, uint32_t(bytes.size())};
+        const bool cycle = chunk->written != c_.submits;
+        chunk->written = c_.submits;
+        if (!encode_call("SDL_UploadToGPUBuffer", [&] { SDL_UploadToGPUBuffer(pass, &source, &target, cycle); })) { release_dedicated(transfer); return false; }
+        release_dedicated(transfer);
+        binding = SDL_GPUBufferBinding{chunk->buffer, destination};
+        c_.uploads++; c_.upload_bytes += bytes.size();
+        return true;
+    }
+    // `need` bytes of the command buffer's UP space: the current chunk's next bytes, or the next
+    // chunk with room (a new one when none has), at up_next_ - need in the chunk returned.
+    UpChunk* up_allocate(uint32_t need) {
+        constexpr uint32_t kUpChunk = 1u << 20;
+        while (up_cursor_ < up_chunks_.size() && need > up_chunks_[up_cursor_].bytes - up_next_) { up_cursor_++; up_next_ = 0; }
+        if (up_cursor_ == up_chunks_.size()) {
+            const uint32_t size = std::max(kUpChunk, need);
+            SDL_GPUBufferCreateInfo ci{SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX, size, 0};
+            SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(dev_, &ci);
+            if (!buffer) { err_ = std::string("SDL_CreateGPUBuffer(UP): ") + SDL_GetError(); return nullptr; }
+            try { up_chunks_.push_back(UpChunk{buffer, size, UINT64_MAX, c_.submits}); }
+            catch (...) { SDL_ReleaseGPUBuffer(dev_, buffer); throw; }
+            up_next_ = 0;
+        }
+        UpChunk& chunk = up_chunks_[up_cursor_];
+        chunk.used = c_.submits;
+        up_next_ += need;
+        return &chunk;
+    }
+    // At a submission, the command buffer's hold on the UP space ends: the next one fills the
+    // chunks from the first again, and a chunk none has allocated from in kUpIdle submissions is
+    // released (SDL defers that past the GPU's use).
+    void release_up_chunks() {
+        constexpr uint64_t kUpIdle = 600;
+        up_cursor_ = 0; up_next_ = 0;
+        size_t kept = 0;
+        for (size_t i = 0; i < up_chunks_.size(); ++i) {
+            if (c_.submits - up_chunks_[i].used > kUpIdle) SDL_ReleaseGPUBuffer(dev_, up_chunks_[i].buffer);
+            else up_chunks_[kept++] = up_chunks_[i];
+        }
+        up_chunks_.resize(kept);
+    }
+    // Every chunk released (the device's end, or a discarded command buffer).
+    void free_up_chunks() {
+        for (const auto& chunk : up_chunks_) SDL_ReleaseGPUBuffer(dev_, chunk.buffer);
+        up_chunks_.clear();
+        up_cursor_ = 0; up_next_ = 0;
+    }
+    // The draw pass named by `key` (its attachments), open for the draw to join: the open one when
+    // it is that pass, else a new one after the open one is flushed. Nothing reaches SDL until
+    // flush_pass, so a DrawPrimitiveUP draw's upload no longer ends the pass it draws in.
+    bool open_pass(const std::string& key, const std::vector<SDL_GPUColorTargetInfo>& colours,
+                   const SDL_GPUDepthStencilTargetInfo* depth) {
+        if (poisoned_) return false;
+        if (pass_open_ && pass_key_.size() == key.size() && same_bytes(pass_key_.data(), key.data(), key.size())) return true;
+        if (!flush_pass()) return false;
+        pass_key_ = key;
+        pass_colours_ = colours;
+        pass_has_depth_ = depth != nullptr;
+        if (depth) pass_depth_ = *depth;
+        pass_open_ = true;
+        bound_.reset();
+        return true;
+    }
+    // Ends the draw pass (end_render's work): the pending UP uploads in a copy pass, then the open
+    // pass's commands in one SDL render pass, LOAD and STORE on every attachment as before. After
+    // it no render pass is open, so a copy, clear, Present or submission may follow.
+    bool flush_pass() {
+        if (poisoned_) return false;
+        if (!encode_up_copies()) return false;
+        if (!pass_open_) return true;
+        if (cmds_.empty()) { close_pass(); return true; }
+        if (!end_copy()) return false;
+        SDL_GPUCommandBuffer* cb = cmd();
+        if (!cb) return false;
+        SDL_ClearError();
+        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cb, pass_colours_.data(), uint32_t(pass_colours_.size()),
+                                                         pass_has_depth_ ? &pass_depth_ : nullptr);
+        if (!pass) {
+            err_ = std::string("SDL_BeginGPURenderPass(draw): ") + SDL_GetError();
+            discard_failed_commands();
+            return false;
+        }
+        c_.render_passes++;
+        replay(pass);
+        SDL_EndGPURenderPass(pass);
+        close_pass();
+        return check_encoding_error("the draw pass's SDL calls");
+    }
+    bool end_render() { return flush_pass(); }
+    void close_pass() {
+        pass_open_ = false;
+        pass_key_.clear();
+        cmds_.clear(); rec_bindings_.clear(); rec_samplers_.clear(); rec_uniforms_.clear();
+    }
+    Cmd& record(Op op) {
+        cmds_.emplace_back();
+        Cmd& c = cmds_.back();
+        c.op = op;
+        return c;
+    }
+    void record_vertex_buffers(const SDL_GPUBufferBinding* b, uint32_t n) {
+        if (bound_.n_vbs == n) {
+            bool same = true;
+            for (uint32_t i = 0; i < n && same; ++i)
+                same = rec_bindings_[bound_.vbs + i].buffer == b[i].buffer && rec_bindings_[bound_.vbs + i].offset == b[i].offset;
+            if (same) return;
+        }
+        // The arena first, the command after: an allocation that throws (draw() turns bad_alloc
+        // into a Failure) then leaves no command whose span has nothing behind it.
+        const uint32_t at = uint32_t(rec_bindings_.size());
+        rec_bindings_.insert(rec_bindings_.end(), b, b + n);
+        Cmd& c = record(Op::vertex_buffers);
+        c.at = at; c.n = n;
+        bound_.vbs = at; bound_.n_vbs = n;
+    }
+    void record_index_buffer(const SDL_GPUBufferBinding& b, SDL_GPUIndexElementSize size) {
+        if (bound_.has_index && bound_.index.buffer == b.buffer && bound_.index.offset == b.offset && bound_.index_size == size)
+            return;
+        Cmd& c = record(Op::index_buffer);
+        c.u.buffer = b; c.small = uint8_t(size);
+        bound_.index = b; bound_.index_size = size; bound_.has_index = true;
+    }
+    void record_samplers(int stage, const std::vector<SDL_GPUTextureSamplerBinding>& b) {
+        const uint32_t n = uint32_t(b.size());
+        if (bound_.n_samplers[stage] == n) {
+            bool same = true;
+            for (uint32_t i = 0; i < n && same; ++i) {
+                const SDL_GPUTextureSamplerBinding& was = rec_samplers_[bound_.samplers[stage] + i];
+                same = was.texture == b[i].texture && was.sampler == b[i].sampler;
+            }
+            if (same) return;
+        }
+        const uint32_t at = uint32_t(rec_samplers_.size());   // the arena first (record_vertex_buffers)
+        rec_samplers_.insert(rec_samplers_.end(), b.begin(), b.end());
+        Cmd& c = record(stage ? Op::fragment_samplers : Op::vertex_samplers);
+        c.at = at; c.n = n;
+        bound_.samplers[stage] = at; bound_.n_samplers[stage] = n;
+    }
+    // A uniform slot's bytes, pushed when they differ from what the pass last pushed there. SDL keeps
+    // a slot's data for the command buffer; it is tracked per pass, so a push from outside the draw
+    // passes (the present overlay's) is never mistaken for ours.
+    void record_uniform(int stage, uint32_t slot, const std::vector<uint8_t>& bytes) {
+        const uint32_t bit = 1u << (stage * 4 + slot);
+        const uint32_t n = uint32_t(bytes.size());
+        if ((bound_.uniform_valid & bit) && bound_.uniform_n[stage][slot] == n &&
+            same_bytes(rec_uniforms_.data() + bound_.uniform_at[stage][slot], bytes.data(), n))
+            return;
+        const uint32_t at = uint32_t(rec_uniforms_.size());   // the arena first (record_vertex_buffers)
+        rec_uniforms_.insert(rec_uniforms_.end(), bytes.begin(), bytes.end());
+        Cmd& c = record(stage ? Op::fragment_uniform : Op::vertex_uniform);
+        c.small = uint8_t(slot); c.at = at; c.n = n;
+        bound_.uniform_at[stage][slot] = at; bound_.uniform_n[stage][slot] = n;
+        bound_.uniform_valid |= bit;
+    }
+    void replay(SDL_GPURenderPass* pass) {
+        for (const Cmd& c : cmds_) {
+            switch (c.op) {
+            case Op::pipeline: SDL_BindGPUGraphicsPipeline(pass, c.u.pipeline); break;
+            case Op::vertex_buffers: SDL_BindGPUVertexBuffers(pass, 0, rec_bindings_.data() + c.at, c.n); break;
+            case Op::index_buffer: SDL_BindGPUIndexBuffer(pass, &c.u.buffer, SDL_GPUIndexElementSize(c.small)); break;
+            case Op::vertex_samplers: SDL_BindGPUVertexSamplers(pass, 0, rec_samplers_.data() + c.at, c.n); break;
+            case Op::fragment_samplers: SDL_BindGPUFragmentSamplers(pass, 0, rec_samplers_.data() + c.at, c.n); break;
+            case Op::vertex_uniform: SDL_PushGPUVertexUniformData(cb_, c.small, rec_uniforms_.data() + c.at, c.n); break;
+            case Op::fragment_uniform: SDL_PushGPUFragmentUniformData(cb_, c.small, rec_uniforms_.data() + c.at, c.n); break;
+            case Op::viewport: SDL_SetGPUViewport(pass, &c.u.viewport); break;
+            case Op::scissor: SDL_SetGPUScissor(pass, &c.u.scissor); break;
+            case Op::blend: SDL_SetGPUBlendConstants(pass, c.u.blend); break;
+            case Op::stencil: SDL_SetGPUStencilReference(pass, c.small); break;
+            case Op::draw: SDL_DrawGPUPrimitives(pass, c.u.draw.count, 1, c.u.draw.first, 0); break;
+            case Op::draw_indexed:
+                SDL_DrawGPUIndexedPrimitives(pass, c.u.draw.count, c.u.draw.instances, c.u.draw.first, c.u.draw.base, 0);
+                break;
+            }
+        }
+    }
+    // A DrawPrimitiveUP block into the command buffer's UP space, its upload left pending
+    // (encode_up_copies) so the pass it draws in stays open; contiguous blocks (each padded to 64
+    // bytes in both the ring and the chunk) become one upload. A block larger than the ring is
+    // uploaded at once (upload_up), which ends the open pass as before.
+    bool stage_up(const std::vector<uint8_t>& bytes, SDL_GPUBufferBinding& binding) {
+        if (bytes.empty() || bytes.size() > UINT32_MAX - 63u) { err_ = "UP allocation is empty or too large"; return false; }
+        if (bytes.size() > kRing) return upload_up(bytes, binding);
+        const uint32_t need = (uint32_t(bytes.size()) + 63u) & ~63u;
+        UpChunk* chunk = up_allocate(need);
+        if (!chunk) return false;
+        const uint32_t destination = up_next_ - need;
+        SDL_GPUTransferBuffer* transfer = nullptr;
+        uint32_t offset = 0;
+        if (!stage(bytes.data(), bytes.size(), &transfer, &offset, 64)) return false;
+        const bool cycle = chunk->written != c_.submits;
+        chunk->written = c_.submits;
+        UpCopy* last = up_copies_.empty() ? nullptr : &up_copies_.back();
+        if (!cycle && last && last->buffer == chunk->buffer && last->offset + last->span == offset &&
+            last->destination + last->span == destination) {
+            last->size = last->span + uint32_t(bytes.size());
+            last->span += need;
+        } else {
+            up_copies_.push_back(UpCopy{chunk->buffer, offset, destination, uint32_t(bytes.size()), need, cycle});
+        }
+        binding = SDL_GPUBufferBinding{chunk->buffer, destination};
+        c_.uploads++; c_.upload_bytes += bytes.size();
+        return true;
+    }
+    // The pending UP uploads, from the ring, in a copy pass: before the render pass of any draw that
+    // reads them (flush_pass), and before the ring is mapped anew (stage), whose cycling would give
+    // a later upload a different buffer than the one they were written to.
+    bool encode_up_copies() {
+        if (up_copies_.empty()) return true;
+        SDL_GPUCopyPass* pass = open_copy();
+        if (!pass) return false;
+        SDL_ClearError();
+        for (const UpCopy& u : up_copies_) {
+            SDL_GPUTransferBufferLocation source{ring_, u.offset};
+            SDL_GPUBufferRegion target{u.buffer, u.destination, u.size};
+            SDL_UploadToGPUBuffer(pass, &source, &target, u.cycle);
+        }
+        up_copies_.clear();
+        return check_encoding_error("SDL_UploadToGPUBuffer(UP)");
+    }
+
+    SDL_GPUCommandBuffer* cmd() {
+        if (poisoned_) return nullptr;
+        if (!cb_) {
+            if (!encode_call("SDL_AcquireGPUCommandBuffer", [&] { cb_ = SDL_AcquireGPUCommandBuffer(dev_); })) return nullptr;
+            if (!cb_) { err_ = std::string("SDL_AcquireGPUCommandBuffer: ") + SDL_GetError(); return nullptr; }
+            c_.command_buffers++;
+        }
+        return cb_;
+    }
+    SDL_GPUCopyPass* copy_pass() {
+        if (!end_render()) return nullptr;
+        return open_copy();
+    }
+    // A copy pass, the logical draw pass left as it is (no SDL render pass is open outside flush_pass).
+    SDL_GPUCopyPass* open_copy() {
+        if (poisoned_) return nullptr;
+        if (!copy_) {
+            SDL_GPUCommandBuffer* cb = cmd();
+            if (!cb) return nullptr;
+            if (!encode_call("SDL_BeginGPUCopyPass", [&] { copy_ = SDL_BeginGPUCopyPass(cb); })) return nullptr;
+            if (!copy_) err_ = std::string("SDL_BeginGPUCopyPass: ") + SDL_GetError();
+        }
+        return copy_;
+    }
+    bool end_copy() {
+        if (poisoned_) return false;
+        if (copy_) {
+            SDL_GPUCopyPass* pass = copy_; copy_ = nullptr;
+            return encode_call("SDL_EndGPUCopyPass", [&] { SDL_EndGPUCopyPass(pass); });
+        }
+        return true;
+    }
+    // `bytes` copied into the ring (or a transfer buffer of their own when larger); the
+    // buffer and offset to upload from.
+    bool stage(const void* data, size_t bytes, SDL_GPUTransferBuffer** tb, uint32_t* off, uint32_t align = 16) {
+        if (!data || !bytes || bytes > UINT32_MAX) { err_ = "invalid transfer input size"; return false; }
+        if (bytes > kRing) {
+            SDL_GPUTransferBufferCreateInfo ci{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, uint32_t(bytes), 0};
+            SDL_GPUTransferBuffer* t = nullptr;
+            if (!encode_call("SDL_CreateGPUTransferBuffer(stage)", [&] { t = SDL_CreateGPUTransferBuffer(dev_, &ci); })) {
+                if (t) SDL_ReleaseGPUTransferBuffer(dev_, t);
+                return false;
+            }
+            void* p = nullptr;
+            if (t && !encode_call("SDL_MapGPUTransferBuffer(stage)", [&] { p = SDL_MapGPUTransferBuffer(dev_, t, false); })) {
+                if (p) SDL_UnmapGPUTransferBuffer(dev_, t);
+                SDL_ReleaseGPUTransferBuffer(dev_, t);
+                return false;
+            }
+            if (!p) { err_ = std::string("a dedicated transfer buffer: ") + SDL_GetError(); if (t) SDL_ReleaseGPUTransferBuffer(dev_, t); return false; }
+            std::memcpy(p, data, bytes);
+            if (!encode_call("SDL_UnmapGPUTransferBuffer(stage)", [&] { SDL_UnmapGPUTransferBuffer(dev_, t); })) {
+                SDL_ReleaseGPUTransferBuffer(dev_, t); return false;
+            }
+            *tb = t;
+            *off = 0;
+            dedicated_ = t;
+            c_.dedicated_transfers++;
+            return true;
+        }
+        if (!ring_) { err_ = "no transfer ring"; return false; }
+        if (ring_map_ && uint64_t(ring_off_) + bytes > kRing) {
+            if (!encode_up_copies()) return false;
+            ring_map_ = nullptr;
+            if (!encode_call("SDL_UnmapGPUTransferBuffer(ring)", [&] { SDL_UnmapGPUTransferBuffer(dev_, ring_); })) return false;
+        }
+        if (!ring_map_) {
+            if (!encode_call("SDL_MapGPUTransferBuffer(ring)", [&] {
+                    ring_map_ = static_cast<uint8_t*>(SDL_MapGPUTransferBuffer(dev_, ring_, true));
+                })) return false;
+            if (!ring_map_) { err_ = std::string("SDL_MapGPUTransferBuffer: ") + SDL_GetError(); return false; }
+            ring_off_ = 0;
+            c_.ring_cycles++;
+        }
+        std::memcpy(ring_map_ + ring_off_, data, bytes);
+        *tb = ring_;
+        *off = ring_off_;
+        ring_off_ = uint32_t((uint64_t(ring_off_) + bytes + align - 1u) & ~uint64_t(align - 1u));
+        return true;
+    }
+    void release_dedicated(SDL_GPUTransferBuffer* tb) {
+        if (tb && tb == dedicated_) { SDL_ReleaseGPUTransferBuffer(dev_, tb); dedicated_ = nullptr; }
+    }
+    void release_pending_fences() {
+        for (uint32_t i = 0; i < pending_count_; ++i) SDL_ReleaseGPUFence(dev_, pending_[i]);
+        pending_count_ = 0;
+    }
+    bool submit(bool wait) {
+        if (!end_render() || !end_copy()) return false;
+        if (ring_map_) {
+            ring_map_ = nullptr;
+            if (!encode_call("SDL_UnmapGPUTransferBuffer(submit)", [&] { SDL_UnmapGPUTransferBuffer(dev_, ring_); })) return false;
+        }
+        if (!cb_) { release_up_chunks(); return true; }
+        // Swapchain acquisition throttles windowed frames, but a headless stream has no
+        // such wait. Bound submissions so command buffers and their transient resources
+        // cannot accumulate faster than the GPU completes them.
+        if (pending_count_ == pending_.size()) {
+            SDL_ClearError();
+            const bool ready = SDL_WaitForGPUFences(dev_, true, pending_.data(), 1);
+            c_.waits++;
+            if (!check_encoding_error("SDL_WaitForGPUFences(backpressure)")) return false;
+            if (!ready) {
+                err_ = "SDL_WaitForGPUFences(backpressure) failed";
+                discard_failed_commands();
+                return false;
+            }
+            SDL_ReleaseGPUFence(dev_, pending_[0]);
+            pending_[0] = pending_[1];
+            --pending_count_;
+        }
+        SDL_GPUCommandBuffer* cb = cb_;
+        cb_ = nullptr;
+        swapchain_acquired_ = false;
+        c_.submits++;
+        release_up_chunks();
+        SDL_ClearError();
+        SDL_GPUFence* f = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+        if (f) pending_[pending_count_++] = f;
+        if (!check_encoding_error("SDL_SubmitGPUCommandBufferAndAcquireFence")) return false;
+        if (!f) { err_ = "SDL_SubmitGPUCommandBufferAndAcquireFence failed"; discard_failed_commands(); return false; }
+        if (!wait) return true;
+        SDL_ClearError();
+        const bool ok = SDL_WaitForGPUFences(dev_, true, &f, 1);
+        const bool no_error = check_encoding_error("SDL_WaitForGPUFences");
+        // All earlier submissions on SDL's graphics queue completed before this fence.
+        if (ok && no_error) release_pending_fences();
+        c_.waits++;
+        if (!ok && no_error) { err_ = "SDL_WaitForGPUFences failed"; discard_failed_commands(); }
+        return ok && no_error;
+    }
+
+    SDL_GPUDevice* dev_;
+    SDL_Window* win_ = nullptr;
+    std::unordered_map<uint32_t, Tex> tex_;
+    std::unordered_map<uint32_t, Buf> buf_;
+    std::unordered_map<std::string, std::unique_ptr<ShaderObject>> shaders_;
+    std::unordered_map<const draw::ProgramImage*, ProgramObjects> programs_;
+    std::unordered_map<ShaderPair, std::unordered_map<uint64_t, std::vector<PipelineEntry>>, ShaderPairHash> pipelines_;
+    std::unordered_map<SamplerKey, SDL_GPUSampler*, SamplerKeyHash> samplers_;
+    std::vector<UpChunk> up_chunks_;
+    size_t up_cursor_ = 0;           // the command buffer's chunk, and its next free byte
+    uint32_t up_next_ = 0;
+    // draw()'s scratch: cleared at each draw, never read across draws
+    std::vector<SDL_GPUColorTargetInfo> draw_colours_;
+    std::string draw_attachment_key_;
+    std::vector<SDL_GPUTextureSamplerBinding> draw_vertex_samplers_, draw_pixel_samplers_;
+    uint32_t next_ = 1;
+    SDL_GPUCommandBuffer* cb_ = nullptr;
+    std::array<SDL_GPUFence*, 2> pending_{};
+    uint32_t pending_count_ = 0;
+    bool poisoned_ = false, swapchain_acquired_ = false;
+    SDL_GPUCopyPass* copy_ = nullptr;
+    // The open draw pass (open_pass, flush_pass): its attachments, and its draws' commands with
+    // their variable parts in the three arenas (a command's span of one, [at, at + n)).
+    bool pass_open_ = false, pass_has_depth_ = false;
+    std::string pass_key_;
+    std::vector<SDL_GPUColorTargetInfo> pass_colours_;
+    SDL_GPUDepthStencilTargetInfo pass_depth_{};
+    std::vector<Cmd> cmds_;
+    std::vector<SDL_GPUBufferBinding> rec_bindings_;
+    std::vector<SDL_GPUTextureSamplerBinding> rec_samplers_;
+    std::vector<uint8_t> rec_uniforms_;
+    // What the open pass's commands so far leave SDL holding (open_pass resets it): spans of the
+    // arenas for the vertex buffers, samplers and uniform slots.
+    struct Bound {
+        SDL_GPUGraphicsPipeline* pipeline = nullptr;
+        uint32_t vbs = 0, n_vbs = 0;
+        SDL_GPUBufferBinding index{};
+        SDL_GPUIndexElementSize index_size = SDL_GPU_INDEXELEMENTSIZE_16BIT;
+        bool has_index = false;
+        uint32_t samplers[2] = {0, 0}, n_samplers[2] = {0, 0};
+        uint32_t uniform_at[2][4] = {}, uniform_n[2][4] = {};
+        uint32_t uniform_valid = 0;               // bit stage * 4 + slot
+        SDL_GPUViewport viewport{};
+        SDL_Rect scissor{};
+        SDL_FColor blend{};
+        uint8_t stencil = 0;
+        bool has_dynamic = false;
+        void reset() { *this = Bound{}; }
+    } bound_;
+    std::vector<UpCopy> up_copies_;
+    SDL_GPUTransferBuffer* ring_ = nullptr;
+    SDL_GPUTransferBuffer* dedicated_ = nullptr;
+    uint8_t* ring_map_ = nullptr;
+    uint32_t ring_off_ = 0;
+    SDL_GPUTransferBuffer* down_ = nullptr;
+    uint32_t down_size_ = 0;
+    std::vector<uint8_t> zeros_;
+    GpuInfo info_;
+    GpuCounters c_;
+    std::string err_;
+    GFmt depth_ = GFmt::d24s8;
+};
+
+}  // namespace
+
+// One vkGetPhysicalDeviceProperties query of the device SDL_gpu chose, matched by its name, on
+// a throwaway instance through the loader SDL_gpu loaded (SDL_Vulkan_GetVkGetInstanceProcAddr):
+// the vendor ID and pointSizeRange[1] (R2b, d9g_gpu.h GpuInfo). It changes nothing SDL_gpu
+// holds; the x87 control word and MXCSR are recorded around it with SDL_CreateGPUDevice's.
+void query_vulkan_device(SdlGpu* gpu) {
+    GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
+    auto gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+    if (!gipa) { info.vk_query = std::string("no vkGetInstanceProcAddr: ") + SDL_GetError(); return; }
+    auto create = reinterpret_cast<PFN_vkCreateInstance>(gipa(VK_NULL_HANDLE, "vkCreateInstance"));
+    if (!create) { info.vk_query = "no vkCreateInstance"; return; }
+    VkApplicationInfo app{};
+    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app.apiVersion = VK_API_VERSION_1_0;
+    VkInstanceCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    ci.pApplicationInfo = &app;
+    VkInstance inst = VK_NULL_HANDLE;
+    const uint16_t x87 = x87_cw();
+    const uint32_t mx = mxcsr();
+    if (create(&ci, nullptr, &inst) != VK_SUCCESS) { info.vk_query = "vkCreateInstance failed"; return; }
+    auto enumerate = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(gipa(inst, "vkEnumeratePhysicalDevices"));
+    auto props = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(gipa(inst, "vkGetPhysicalDeviceProperties"));
+    auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(gipa(inst, "vkDestroyInstance"));
+    uint32_t n = 0;
+    if (enumerate && props && enumerate(inst, &n, nullptr) == VK_SUCCESS && n) {
+        std::vector<VkPhysicalDevice> devs(n);
+        if (enumerate(inst, &n, devs.data()) == VK_SUCCESS) {
+            int matches = 0;
+            for (VkPhysicalDevice pd : devs) {
+                VkPhysicalDeviceProperties p{};
+                props(pd, &p);
+                if (info.device_name != p.deviceName) continue;
+                if (matches++) continue;
+                info.vk_vendor_id = p.vendorID;
+                info.vk_device_id = p.deviceID;
+                info.vk_point_size_max = p.limits.pointSizeRange[1];
+            }
+            if (matches == 1) { info.vk_query_ok = true; info.vk_query = "vkGetPhysicalDeviceProperties"; }
+            else info.vk_query = std::to_string(matches) + " physical devices named " + info.device_name;
+        }
+    } else {
+        info.vk_query = "vkEnumeratePhysicalDevices found none";
+    }
+    if (destroy) destroy(inst, nullptr);
+    Report& r = report();
+    if (x87_cw() != x87 || mxcsr() != mx) {   // the device's fpu record reports any change
+        r.x87_after = x87_cw();
+        r.mxcsr_after = mxcsr();
+    }
+}
+
+// The facts DXVK's shader options are computed from (R1, d9g_shader_profile.h), read from the
+// device SDL_gpu chose, matched by its name, by d9g_shader_vulkan.cpp's own query on a throwaway
+// Vulkan 1.3 instance through the loader SDL_gpu loaded. It changes nothing SDL_gpu holds; the x87
+// control word and MXCSR are recorded around it as around the properties query above.
+void query_shader_facts(SdlGpu* gpu) {
+    GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
+    const uint16_t x87 = x87_cw();
+    const uint32_t mx = mxcsr();
+    const shader::DeviceFactsQuery q =
+        shader::query_device_facts(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), info.device_name);
+    info.shader_facts_ok = q.ok;
+    info.shader_facts_query = q.how;
+    info.shader_facts = q.facts;
+    Report& r = report();
+    if (x87_cw() != x87 || mxcsr() != mx) {
+        r.x87_after = x87_cw();
+        r.mxcsr_after = mxcsr();
+    }
+}
+
+namespace {
+
+// One SDL_CreateGPUDeviceWithProperties with `features`, the x87 control word and MXCSR recorded
+// around it (`first`: before this attempt; a retry keeps the first attempt's, so it hides no change).
+SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, bool first) {
+    Report& r = report();
+    SDL_GPUVulkanOptions vo{};
+    vo.vulkan_api_version = features.api_version();
+    vo.feature_list = features.feature_list();
+    vo.vulkan_10_physical_device_features = features.features10();
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debug);
+    SDL_SetStringProperty(props, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
+    SDL_SetPointerProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vo);
+    // SDL_gpu asks for shaderClipDistance itself unless told not to (SDL_gpu_vulkan.c
+    // VULKAN_INTERNAL_PrepareVulkan: an opt-out feature, on by default), so a device without it is
+    // refused whatever the options say: off with ours (the default request leaves SDL's default)
+    if (!features.clip_distance())
+        SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false);
+    if (first) {
+        r.x87_before = x87_cw();
+        r.mxcsr_before = mxcsr();
+    }
+    SDL_GPUDevice* dev = props ? SDL_CreateGPUDeviceWithProperties(props) : nullptr;
+    r.x87_after = x87_cw();
+    r.mxcsr_after = mxcsr();
+    r.fpu_measured = true;
+    if (props) SDL_DestroyProperties(props);
+    return dev;
+}
+
+// What each Vulkan physical device lacks of `features` (VulkanFeatures::lacking), through the loader
+// SDL loads for it; SDL_gpu refused every device, so this names why. *lacks: the optional groups
+// some device lacks; every optional group when the devices could not be read.
+std::string lacking_features(const shader::VulkanFeatures& features, bool* fits, shader::VulkanFeatures::Lacks* lacks) {
+    *fits = false;
+    *lacks = {true, true, true};
+    if (!SDL_Vulkan_LoadLibrary(nullptr)) return std::string("the Vulkan loader: ") + SDL_GetError();
+    std::string how;
+    shader::VulkanFeatures::Lacks read;
+    std::string out = features.lacking(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), fits, &how, &read);
+    SDL_Vulkan_UnloadLibrary();
+    if (!out.empty()) *lacks = read;
+    return out.empty() ? "the devices' features could not be read (" + how + ")" : out;
+}
+
+// The optional groups `features` asks for that `lacks` names, by name ("" none).
+std::string dropped_names(const shader::VulkanFeatures& features, const shader::VulkanFeatures::Lacks& lacks) {
+    std::string out;
+    if (features.sub_dword() && lacks.sub_dword) out = "the sub-dword features";
+    if (features.clip_distance() && lacks.clip_distance) out += std::string(out.empty() ? "" : ", ") + "shaderClipDistance";
+    if (features.scalar_layout() && lacks.scalar_layout) out += std::string(out.empty() ? "" : ", ") + "scalarBlockLayout";
+    return out;
+}
+
+}  // namespace
+
+// SDL_CreateGPUDeviceWithProperties with the Vulkan driver named (the critic's A26), SPIR-V as the
+// only shader format, and SDL_GPUVulkanOptions asking for Vulkan 1.3 and the features the
+// translated modules need (R1, shader::VulkanFeatures: R0's chain and what the validation layer
+// named on it). This is the change make_sdl_gpu's earlier comment said R1 would make; the host
+// comparison (test_d3d9gpu.sh steps 3 and 8) is rerun with it (the R1 plan's check C10). The x87
+// control word and MXCSR are recorded around the call.
+//
+// SDL_gpu refuses a device that lacks any feature asked for (SDL_gpu_vulkan.c
+// VULKAN_INTERNAL_ValidateOptInFeatures). When it refuses the full request, the features each device
+// lacks are read, and the device is asked for again without the optional groups some device lacks (all
+// of them when the devices could not be read): the sub-dword features (VulkanFeatures(false, ..)),
+// which many low-end GPUs and SwiftShader lack, the translator then reading the state buffer as 32-bit
+// words (DeviceFacts::sub_dword_access, ShaderProfile::state_words); shaderClipDistance
+// (VulkanFeatures(.., false), and SDL's own request of it off: create_device), which Mali GPUs lack
+// (the user's Pixel 9 Pro's Mali-G715, 2026-10-12), the translator then building no ClipDistance
+// output (DeviceFacts::clip_distance, ShaderProfile::no_clip_distance); and scalarBlockLayout, which no
+// module needs (d9g_shader_vulkan.cpp). If that is refused too while an optional group is still asked
+// for, once more without all three. A device that lacks any other feature, ours or SDL's own, is
+// refused with every device's list. A test run's override (CapsOff sub_dword) asks without the
+// sub-dword features from the start, and SA2_D3D9GPU_NO_CLIPDIST=1 (any run: the fallback a Mali GPU
+// takes, on a device that has the feature) without shaderClipDistance. On Android, where the app's
+// session gives the in-process player no game.env.extra line but SA2_PLAYER_PROF's, the system
+// property debug.sa2.no_clipdist=1 (adb shell setprop, no root) asks the same.
+std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* err) {
+    const char* no_clip = std::getenv("SA2_D3D9GPU_NO_CLIPDIST");
+    bool clip_forced_off = no_clip && std::strcmp(no_clip, "1") == 0;
+    const char* clip_switch = "SA2_D3D9GPU_NO_CLIPDIST=1";
+#ifdef __ANDROID__
+    char prop[PROP_VALUE_MAX] = {};
+    if (!clip_forced_off && __system_property_get("debug.sa2.no_clipdist", prop) > 0 && std::strcmp(prop, "1") == 0) {
+        clip_forced_off = true;
+        clip_switch = "debug.sa2.no_clipdist=1";
+    }
+#endif
+    if (clip_forced_off)
+        std::fprintf(stderr, "d3d9gpu: %s: the Vulkan device is made without shaderClipDistance and the vertex shaders "
+                             "write no ClipDistance\n", clip_switch);
+    // SA2_D3D9GPU_NO_BC=1 (on Android also debug.sa2.no_bc=1): no BC format is sampled, each DXT
+    // texture decoded to BGRA8 on the CPU as on a GPU without them (a Mali's), on any device.
+    const char* no_bc = std::getenv("SA2_D3D9GPU_NO_BC");
+    bool bc_forced_off = no_bc && std::strcmp(no_bc, "1") == 0;
+    const char* bc_switch = "SA2_D3D9GPU_NO_BC=1";
+#ifdef __ANDROID__
+    char bc_prop[PROP_VALUE_MAX] = {};
+    if (!bc_forced_off && __system_property_get("debug.sa2.no_bc", bc_prop) > 0 && std::strcmp(bc_prop, "1") == 0) {
+        bc_forced_off = true;
+        bc_switch = "debug.sa2.no_bc=1";
+    }
+#endif
+    if (bc_forced_off)
+        std::fprintf(stderr, "d3d9gpu: %s: no BC format is sampled; DXT textures are decoded to BGRA8 on the CPU\n",
+                     bc_switch);
+    std::unique_ptr<shader::VulkanFeatures> features =
+        std::make_unique<shader::VulkanFeatures>(!off.sub_dword, !clip_forced_off);
+    SDL_GPUDevice* dev = create_device(debug, *features, true);
+    std::string lacking;
+    if (!dev) {
+        std::string why = std::string("SDL_CreateGPUDeviceWithProperties (Vulkan 1.3, ") + features->describe() + "): " +
+                          SDL_GetError();
+        bool fits = false;
+        shader::VulkanFeatures::Lacks lacks;
+        lacking = lacking_features(*features, &fits, &lacks);
+        if (!fits) {
+            for (int attempt = 0; attempt < 2 && !dev; attempt++) {
+                if (attempt) lacks = {true, true, true};   // the second: without every optional group
+                const std::string names = dropped_names(*features, lacks);
+                if (names.empty()) continue;
+                features = std::make_unique<shader::VulkanFeatures>(features->sub_dword() && !lacks.sub_dword,
+                                                                    features->clip_distance() && !lacks.clip_distance,
+                                                                    features->scalar_layout() && !lacks.scalar_layout);
+                dev = create_device(debug, *features, false);
+                if (!dev) why += "; without " + names + " (" + features->describe() + "): " + SDL_GetError();
+            }
+        }
+        if (!dev) {
+            *err = why + "; the features each Vulkan device lacks: " + lacking;
+            return nullptr;
+        }
+        if (!features->sub_dword() && !off.sub_dword)
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks the sub-dword features (%s): the shaders read their "
+                                 "state as 32-bit words\n", lacking.c_str());
+        if (!features->scalar_layout())
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks scalarBlockLayout (%s): made without it, which no "
+                                 "shader needs\n", lacking.c_str());
+        if (!features->clip_distance() && !clip_forced_off)
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks shaderClipDistance (%s): the vertex shaders write no "
+                                 "ClipDistance, and a draw with a user clip plane enabled is refused\n", lacking.c_str());
+    }
+    auto gpu = std::make_unique<SdlGpu>(dev, debug, off);
+    // An SDL marked as patched reports the patch's properties, and an unmarked one none: either
+    // other way, the library is not the configuration it says it is (an unmarked patched SDL,
+    // or a mark without the patch), and nothing runs on it.
+    const GpuInfo& g = gpu->info();
+    if (g.sdl_patched != g.sdl_capabilities_present) {
+        *err = "the SDL3 loaded (" + g.sdl_revision + ") is " + (g.sdl_patched ? "marked as patched" : "not marked as patched") +
+               " but " + (g.sdl_capabilities_present ? "reports" : "does not report") +
+               " the patch's device properties (patches/sdl3)";
+        return nullptr;
+    }
+    query_vulkan_device(gpu.get());
+    GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
+    info.vulkan_options = features->describe();
+    info.sub_dword_access = features->sub_dword();
+    info.clip_distance = features->clip_distance();
+    info.clip_distance_forced_off = clip_forced_off;
+    info.bc_forced_off = bc_forced_off;
+    info.vulkan_lacking = lacking;
+    query_shader_facts(gpu.get());
+    // the profile's facts are what the device was made with, not what it could have been
+    info.shader_facts.sub_dword_access = features->sub_dword();
+    info.shader_facts.clip_distance = features->clip_distance();
+    if (!g.shader_facts_ok) {
+        *err = "the shader translator's device facts could not be read (" + g.shader_facts_query +
+               "): without them it cannot compile as DXVK compiles on this device";
+        return nullptr;
+    }
+    return gpu;
+}
+
+}  // namespace d9g

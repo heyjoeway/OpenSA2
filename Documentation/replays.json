@@ -1,0 +1,771 @@
+{
+  "schema": "sa2-replay-registry/v1",
+  "what": "The retained replays: native tick captures the lifted build is replayed against, one row per GameLoop return. Design 7.3 says a replay that has passed never silently stops being run; this list is what 'every retained replay' in S4's exit means, and tools/s4/tick_replay.py runs all of it.",
+  "tool": "tools/s4/tick_replay.py",
+  "replays": [
+    {
+      "name": "boot",
+      "question": "Does the lifted build, driven exactly as the reach run, reproduce the native game's GameLoop state tick for tick from the first frame?",
+      "tick": "one row per return of GameLoop (0x00433EE0). Natively that is the Mod Loader's OnFrame, which InitOnFrame hooks at all five exits (0x0043405D, 0x0043407E, 0x004340B6, 0x004340CC, 0x004340E7); lifted it is harness/replay/wrap_tick_probe.c, linked with -wrap sub_433ee0.",
+      "fields": "harness/replay/tick_fields.h, then one digest column per 64 KiB block of .dataa listed in harness/replay/masks/boot.h, the replay's own mask, computed by the host from each side's word log (tools/s4/wordlog.py capture_csv; the game no longer computes them), less the words compared by identity and the words of its residue classes (residue_classes, which are compared and reported by class); the mask chosen word by word by tools/s4/snapshot_fields.py --word-logs from native runs of this entry's own build and configuration: every word the source runs agree on at every tick that varies, is not flagged as an address by every source run's own region maps for a value outside the executable's image (since 2026-09-27), and is not an identity word or a word the exclusion record drops for this build, and a held-out run reproducing it (Documentation/receipts/s4-mask-boot-v1.json)",
+      "input": "none; the boot runs unattended, so there is no input script to replay",
+      "native": {
+        "capture": "private/generated/oracle/captures/boot-ticks-v15a/sa2-tick-capture.csv",
+        "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+        "receipt": "private/generated/oracle/captures/boot-ticks-v15a/receipt.json",
+        "word_log": {
+          "file": "private/generated/oracle/captures/boot-ticks-v15a/sa2-word-log.bin.zst",
+          "sha256": "67236e8305e8f25057b21d23dd816c7127f49c872bede208b2a5afed04834d68"
+        },
+        "device_profile": {
+          "path": "private/generated/oracle/captures/boot-ticks-v15a/sa2-device-profile.txt",
+          "sha256": "ce8985de404f6efa2a69b04f882dff9ee35763a2408fd344061e7025a9887aea"
+        },
+        "repeats": [
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15b/sa2-tick-capture.csv",
+            "sha256": "a46005ef50ada4b6bb9fc7d73e469b123a88ce63e5ec60da17f3978167f27867",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15b/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15b/sa2-word-log.bin.zst",
+              "sha256": "5b3a1208a5f3537fe24c573a5b633034e4ee3e08db786f4b87690b9b34f65284"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15d/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15d/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15d/sa2-word-log.bin.zst",
+              "sha256": "d3f63035d5b04177322849ac52242c2c69fc9b43417f5733e295f9847fdd59bb"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15e/sa2-tick-capture.csv",
+            "sha256": "9bdf93794e319241d8c1a7a83eaf1a4149e4dbdcc79fdbaffebe043770d03c92",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15e/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15e/sa2-word-log.bin.zst",
+              "sha256": "54395296ef0b48dd19513f5401c403e5fdb8aec98728b3c9b9cc3e133329fb48"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15f/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15f/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15f/sa2-word-log.bin.zst",
+              "sha256": "4a5ee1df0d18b3faf1b0fce5757a6466279c5172ea99ddc0d564671ee1825f32"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15g/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15g/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15g/sa2-word-log.bin.zst",
+              "sha256": "e90a5b133312b97f4c1c00b625e22ba46b06063da24283a3774273c4d0e84858"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15h/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15h/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15h/sa2-word-log.bin.zst",
+              "sha256": "c479969131d3325fd1fe1e509cbc1162b940e20e8e5408dbb05aec2e2312b973"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15i/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15i/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15i/sa2-word-log.bin.zst",
+              "sha256": "f856e6100f5b68449843486f4ca18fdc5a79f7217cd4ae85cffe0b3f2625fa85"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15j/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15j/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15j/sa2-word-log.bin.zst",
+              "sha256": "01ac9f68abcc564eece84452f5459011e9443b958c82ee1519dd39b8b217352c"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15k/sa2-tick-capture.csv",
+            "sha256": "6eb8a9a0e54aef64febf86109145bc03ed11c6439d8bfe31ecb33963a7b1ef67",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15k/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15k/sa2-word-log.bin.zst",
+              "sha256": "49e8a6fcce069b40b2a0acccf92abba7bfb1721d7de83269977162a170b31b67"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15l/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15l/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15l/sa2-word-log.bin.zst",
+              "sha256": "52d35ea6c013f3096591004fd5bd1603efcc8787419b3131edc48a2b5dd560cf"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15m/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15m/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15m/sa2-word-log.bin.zst",
+              "sha256": "9b79897cd69787c7ec679ff467dbce8922149385a8da9407bb9c29876f109a8e"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15n/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15n/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15n/sa2-word-log.bin.zst",
+              "sha256": "624e1e5268fe14802038415e1bd610beaeb2e580cbdf4ce70c58be6aa5135e81"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/boot-ticks-v15o/sa2-tick-capture.csv",
+            "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+            "receipt": "private/generated/oracle/captures/boot-ticks-v15o/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/boot-ticks-v15o/sa2-word-log.bin.zst",
+              "sha256": "2a952d7471516a76d6a4a1d7ba02f6240b60f8c308b9576b798395d4be7eb40a"
+            }
+          }
+        ],
+        "how": "tools/oracle/boot_capture.py (tools/oracle/run_oracle_probe.py --timeout 200 --no-skip-intro --build vanilla_probe=harness/replay/native_vanilla_probe.c --build import_probe=harness/replay/native_import_probe.c --define import_probe:TICK_LIMIT=1200 --build tick_probe=harness/replay/native_tick_probe.c --define tick_probe:TICK_LIMIT=1200 --device-profile --capture sa2-vanilla.csv --capture sa2-import-calls.csv --capture sa2-tick-capture.csv --capture-policy sa2-vanilla.csv=1 --capture-policy sa2-import-calls.csv=251:calls --min-rows 1200 --require-varying frame_count --binary-capture sa2-word-log.bin) (the vanilla probe first, the import probe before the tick probe so its OnFrame reads the counts before the tick probe's ExitProcess, the device-profile probe last); The stack control (--define tick_probe:STACK_PAD=8192, boot-ticks-v15c-stackpad) is not a repeat: it is another probe build than the mask's sources, which oracle_mode.require_mask_configuration refuses as a comparison run under the mask rule (Documentation/decisions/2026-09-24-S4-halt-220h.md). It is kept as a checked control (controls below): what it shows against the mask is its recorded verdict, recomputed on every pass of the replay-results gate (tools/s4/tick_replay.py control_problems). The runs are the re-take batch's (tools/oracle/retake_batch.py, private/generated/oracle/batches/retake-batch-20260926-205224.json): fourteen plain boots, boot-ticks-v15a, v15b and v15d to v15o, 5 of them cold (v15a, v15e, v15h, v15k, v15n), each launched at a one-minute load below 1.0 on the user's live desktop, unlocked, after the device-profile control pair passed (devprofile-control-off-v2a and devprofile-control-on-v2a: tick captures byte-identical, harness/replay/native_device_profile.c's criterion). The mask, harness/replay/masks/boot.h (Documentation/receipts/s4-mask-boot-v1.json), was chosen from v15a, v15b, v15d, v15e, v15f, v15g, v15h and held to v15i, and v15j, v15k, v15l, v15m, v15n, v15o reproduce it too. The runner's profile is option A's (StretchToWindow and the frame limiter on, every other game patch and the pause on focus loss off), the game's environment is the runner's fixed one, and the installation held the pinned saves (Documentation/save-state.json); each receipt records all three.",
+        "imports": {
+          "log": "private/generated/oracle/captures/boot-ticks-v15a/sa2-import-calls.csv",
+          "sha256": "012457277b271d1154f4cef1ce2ca66d2e6e115b64b99a5ff4c4ad8ae20ab8b4",
+          "receipt": "private/generated/oracle/captures/boot-ticks-v15a/receipt.json",
+          "repeats": [
+            {
+              "log": "private/generated/oracle/captures/boot-ticks-v15b/sa2-import-calls.csv",
+              "sha256": "ae29eb8df01da9727e0e6f69251d604bade994c433fe7f4d710f4709d872ee80",
+              "receipt": "private/generated/oracle/captures/boot-ticks-v15b/receipt.json"
+            }
+          ],
+          "what": "M4's native side: every import-address-table slot's calls during this replay's native run, counted by harness/replay/native_import_probe.c and read at the replay's last tick. The same run's tick capture hashes to this replay's registered one, and its receipt records the replay's device profile and the host's HID devices, which tools/s4/native_imports.py replay_profile holds to the traced native boots'. tools/s4/native_imports.py reads and verifies it. What it cannot see, and who covers it: calls before the Mod Loader's Init (the CRT's start-up, window, device and audio set-up) are the lifted log's, and the traced native boots' (Documentation/receipts/s4-native-outcomes-v1.json, native_pre_init), which M4 adds only while every registered replay's device set is theirs (tools/s4/import_status.py replay_reach refuses the whole set otherwise); with the recording devices on in the reach configuration (tools/s4/reach_receipt.py DEVICES), the lifted log sees the success paths of DirectInput8Create, CoCreateInstance and the DirectDraw query. Calls through a slot value copied before Init are lost. The vanilla probe restores the game's own code in the ranges it lists; what the Mod Loader does to the process that it cannot undo (the vanilla decision's 'Known leftovers of vanilla mode', the window procedure among them) is the loader's, not the game's.",
+          "how": "tools/oracle/run_oracle_probe.py --timeout 200 --no-skip-intro --build vanilla_probe=harness/replay/native_vanilla_probe.c --build import_probe=harness/replay/native_import_probe.c --define import_probe:TICK_LIMIT=1200 --build tick_probe=harness/replay/native_tick_probe.c --define tick_probe:TICK_LIMIT=1200 --device-profile --capture sa2-vanilla.csv --capture sa2-import-calls.csv --capture sa2-tick-capture.csv --capture-policy sa2-vanilla.csv=1 --capture-policy sa2-import-calls.csv=251:calls --min-rows 1200 --require-varying frame_count (the vanilla probe first, the import probe before the tick probe so its OnFrame reads the counts before the tick probe's ExitProcess, the device-profile probe last); the stack control adds --define tick_probe:STACK_PAD=8192. The runner's profile is option A's (StretchToWindow and the frame limiter on, every other game patch and the pause on focus loss off), the game's environment is the runner's fixed one, and the installation held the pinned saves (Documentation/save-state.json); each receipt records all three."
+        }
+      },
+      "field_policy": {
+        "g_01a557c0": {
+          "compare": "identity",
+          "evidence": "a heap object pointer: GameLoop loads it and calls through its vtable (0x00433F5A mov ecx,[1A557C0h]; 0x00433F65 mov edx,[ecx]; 0x00434004 mov edx,[ecx]; 0x00434006 mov eax,[edx+2Ch]; 0x00434009 call eax). Its value is where the allocator placed the object, which Wine's heap and the runtime's HeapAlloc arena (0x04000000 up) choose differently."
+        },
+        "g_01af19f0": {
+          "compare": "identity",
+          "evidence": "a heap pointer GameLoop allocates on first use: 0x00433FA2 mov eax,[1AF19F0h]; 0x00433FA7 cmp eax,ebx (ebx is 0 from 0x00433EE5 xor ebx,ebx); 0x00433FAB push 80h; 0x00433FB0 call 007A5DA1h; 0x00433FC5 mov [1AF19F0h],eax. 0x007A5DA1 is unnamed in the analyzer map (CRT region) and loops on _malloc (0x007A84A5) and __callnewh (0x007ACF67), which is the shape of MSVC's operator new. Its value is an allocation address, as above."
+        }
+      },
+      "word_policy": {
+        "identity": "harness/replay/masks/identity-words.json",
+        "compare": "identity",
+        "evidence": "The user's rulings of 2026-09-24, decisions 1 and 2 (Documentation/decisions/2026-09-24-S4-handles-identity-stage-mask.md): a value the host chooses -- an allocation address or a Win32 handle number -- is compared by what it names, heap-pointer identity and the handle mapping one rule on M5. The record names the words: the two heap words the field policy above has compared by identity since 2026-09-22 (it must name exactly those, tools/s4/tick_replay.py identity_spec), and the handle words of CRI's file table (80 entries of 0x2D8 bytes from 0x01755008, +0x218, +0x24C, +0x268 and +0x27C). tools/s4/tick_replay.py compares this replay from both sides' word logs -- each capture's word_log below, and the lifted run's SA2_REPLAY_WORDS -- with the digest columns recomputed under the replay's own mask, harness/replay/masks/boot.h (chosen from word logs; it holds no identity word), and the identity words compared by the one rule's three checks: the pairing, the open tick and the close tick. The panel's evidence that the handle words show every open and close without per-tick logs is agents-journals/s4/2026-09-25-word-observation.md, 'What the panel measured on the way'."
+      },
+      "residues": [],
+      "residue_classes": [
+        "host-services-steam-stats-v1",
+        "host-timing-v1",
+        "host-thread-race-sofdec-v1"
+      ],
+      "oracle": "vanilla",
+      "controls": [
+        {
+          "capture": "private/generated/oracle/captures/boot-ticks-v15c-stackpad/sa2-tick-capture.csv",
+          "sha256": "9d850a5ac8298453a29904682f143126b0f931e1927434b69245a18533934ed7",
+          "receipt": "private/generated/oracle/captures/boot-ticks-v15c-stackpad/receipt.json",
+          "word_log": {
+            "file": "private/generated/oracle/captures/boot-ticks-v15c-stackpad/sa2-word-log.bin.zst",
+            "sha256": "56e0f2d19fedd82d0471dc7152da2c8c7c2a70cb04f7e377bb762ad2a07a0be0"
+          },
+          "what": "the stack control: the boot's probe set with the tick probe filling 8 KiB of dead stack with a pattern each tick (STACK_PAD=8192), so that a read of dead stack would move what the game computes. Its verdict is every word the boot replay judges (its own mask less the identity and residue words) that it holds apart from the registered capture at some tick. Taken in the re-take batch of 2026-09-26 (private/generated/oracle/batches/retake-batch-20260926-205224.json, cold, its own series) with the locale take's probe, as the plain boots were; re-derived then (unit IN) against the mask chosen from them: no word: it holds every judged word of the boot's own mask as the registered capture does. Why it moved from the v14 control's 216 words: those were 54 of the 61 workspace offsets of Sofdec's four MPV decoder contexts, a worker-thread race and not dead stack, as unit SF settled (private/evidence-packets/residue-classes-v1/sf/evidence/stackpad-race.json), and the v15 plain boots split that race among themselves: every one of them differs from boot-ticks-v15a on some of the 244 words, so the mask rule leaves all 244 out of this mask as unstable among its sources (Documentation/receipts/s4-mask-boot-v1.json; agents-journals/s4/2026-09-26-integration.md). Since the user's ruling of 2026-09-27 those 244 are the host-thread-race class's (Documentation/receipts/residues/host-thread-race-sofdec-v1.json), compared on both sides by its rule whatever the mask holds, and this control, fed as the lifted side against the registered capture, keeps that rule on every tick (private/evidence-packets/thread-race-class-v1/evidence/race-check.json). It judges nothing, and a verdict that moves is re-derived and said why (the U6 reviews, masks W3 and registration W6). Re-derived by fold:final (2026-09-27): only its mask_sha256 moved, because the boot mask's header now cites the exclusion record's new sha256 (the same 689,440 words; Documentation/receipts/s4-mask-boot-v1.json). Re-derived again by the G4 interrogation's first fold (2026-09-27): only its mask_sha256 moved; the boot's mask judges 71,171 more words since the pointer test stopped counting a value inside the executable's image as an address (760,611 words), and the control holds every one of them as the registered capture does.",
+          "verdict": {
+            "mask_sha256": "ae38a34497b9ecc0843c20a5f408d07acbb9b3e54be0dd13bff5bcd610c128a3",
+            "compared_through": 1200,
+            "words": 0,
+            "first_tick": null,
+            "last_tick": null,
+            "blocks": [],
+            "listing_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ]
+    },
+    {
+      "name": "metalharbor",
+      "question": "Does the lifted build, started in Metal Harbor through the test spawn and fed the user's recorded controller, reproduce the native replays of the recording tick for tick, and reach the goal on their goal tick?",
+      "stage": {
+        "name": "metalharbor",
+        "level": 10
+      },
+      "tick": "one row per return of GameLoop (0x00433EE0). Natively that is the Mod Loader's OnFrame, which InitOnFrame hooks at all five exits (0x0043405D, 0x0043407E, 0x004340B6, 0x004340CC, 0x004340E7); lifted it is harness/replay/wrap_tick_probe.c, linked with -wrap sub_433ee0.",
+      "fields": "harness/replay/tick_fields.h, then one digest column per 64 KiB block of .dataa listed in harness/replay/masks/metalharbor.h, the replay's own mask, computed by the host from each side's word log (tools/s4/wordlog.py capture_csv; the game no longer computes them), less the words compared by identity and the words of its residue classes (residue_classes, which are compared and reported by class); the mask chosen word by word by tools/s4/snapshot_fields.py --word-logs from native runs of this entry's own build and configuration: every word the source runs agree on at every tick that varies, is not flagged as an address by every source run's own region maps for a value outside the executable's image (since 2026-09-27), and is not an identity or excluded word, and a held-out run reproducing it (Documentation/receipts/s4-mask-metalharbor-v1.json)",
+      "input": {
+        "script": "private/generated/oracle/captures/mh-record-20260924-202305/sa2-input.csv",
+        "sha256": "951031a52a4b0fd0b9aa0bfe84877f7f4c6c8af8fffafc1650d6d208f51417e9",
+        "what": "the recording mh-record-20260924-202305's sa2-input.csv, the user's run (tools/oracle/record_stage.py), replayed natively by the input probe and lifted by harness/replay/wrap_input_replay.c"
+      },
+      "oracle": "vanilla",
+      "native": {
+        "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-tick-capture.csv",
+        "sha256": "8d834fb31585accfab5cec56a94899df7436567940dbaee3b1e6f1c099cacdbc",
+        "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/receipt.json",
+        "word_log": {
+          "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-word-log.bin.zst",
+          "sha256": "103c6503191c5742d9c4f52cacb0084f1c0dbea22571d8e7f3027d6bc4df423e"
+        },
+        "end": {
+          "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-input-end.csv",
+          "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+        },
+        "stage_trace": {
+          "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-stage-trace.csv",
+          "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+        },
+        "input_applied": {
+          "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-input-applied.csv",
+          "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+        },
+        "device_profile": {
+          "path": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-device-profile.txt",
+          "sha256": "ce8985de404f6efa2a69b04f882dff9ee35763a2408fd344061e7025a9887aea"
+        },
+        "repeats": [
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-tick-capture.csv",
+            "sha256": "503181cb229a7a7a705dc2dca9229def669bd516a0fa7142335a7cd20bc88b95",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-word-log.bin.zst",
+              "sha256": "566fb945a885d36e5e8600e62dbc3b91fe4be7c0896be47b7ef05340d53ed9af"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-tick-capture.csv",
+            "sha256": "38e9895d8c6d255b2421d11e05125392c6720e06128e1f1537aab7f81dccf7f6",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-word-log.bin.zst",
+              "sha256": "924b47c0c0658aa2c38ff17afc039f654de66e99d325917186f1bd34c9ea8e51"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-tick-capture.csv",
+            "sha256": "288b8e50db9c50d0b349c4e122c26a17d85f892e8779a3ced9b368e306e91fb1",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-word-log.bin.zst",
+              "sha256": "5df95dcf8c076edfaa6c7a581d2974ab000cd40bc8e3cdb1c339deae16b7b839"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-tick-capture.csv",
+            "sha256": "7b3c5f8c983ddff1038a2056cfa4080416c4845efaa5cde5af3e6ef216e5a6b8",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-word-log.bin.zst",
+              "sha256": "66770f64645a668b557bf64223b5716083875cfacf3b235236f7b74bc07f9cea"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-tick-capture.csv",
+            "sha256": "0f0827caffd8538791e232fe9b90b0646b5df82163315c7aaddeb35fa8ccb3f4",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-word-log.bin.zst",
+              "sha256": "1af3dcf2f4f0ba9fbf34ad8fd053f463cde5563e56bd5ec74233a14054b28d08"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-tick-capture.csv",
+            "sha256": "e99de2d11020d1e38b1227bbfb15d6f82e2ad85687d38ce88a862d4e25b0778e",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-word-log.bin.zst",
+              "sha256": "445f9bf380fd064352c0f152605424586ddbde9e33c14feab9cfc1cb8fbb390a"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-tick-capture.csv",
+            "sha256": "8953e7e6cd90fc45794de9831b9689f80f1ecfb7071d6b8d6158b99b50c536b4",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-word-log.bin.zst",
+              "sha256": "cedd9216812a02c468f87028a2f25ca17da3f9de9c92e9fdeb054c81a1bf63d8"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-tick-capture.csv",
+            "sha256": "28d3bd219a4949f8cda5d4080274aa892965662fa390f12cd1ceb0f27025ea29",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-word-log.bin.zst",
+              "sha256": "b464edb7e227acf9e29085340da57a2224278abf83f311f6c585c2de47054ebb"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-tick-capture.csv",
+            "sha256": "d5ece82249a9590c0f7fb2d34f85a895a6e8559d26ce10b3f13197134a33a80b",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-word-log.bin.zst",
+              "sha256": "a2e7cd9a4c51e1871d530208dd923c558d4c34aea7ccbf06a9e91b66c20f60c6"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-tick-capture.csv",
+            "sha256": "684c8707852e8a7785c25de96e3d28ef0adb552255d8fc392b9b6d5c5852a536",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-word-log.bin.zst",
+              "sha256": "c86fd1a5a3fed6ee46a0b8b2e775ab5f3fa983b452cb9062844fab3ff4fc73a4"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-tick-capture.csv",
+            "sha256": "c2dfabb42e49823278f42c296fd41a390d9e21c5413e163505d6818d7f797b86",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-word-log.bin.zst",
+              "sha256": "28d68630bddab5adfcb91c9bcbaace7b101e0d8d71cd3cff7892c6d479aaf139"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-tick-capture.csv",
+            "sha256": "a4a6591aa96107f2a881552c3d914422a75bffe877ebe6ba44a42ca9a3dacfb5",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-word-log.bin.zst",
+              "sha256": "5eae23d5bc31a17310a07515479350dec6177b7d1f13111f2167336778c1bf82"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-tick-capture.csv",
+            "sha256": "2ec5e9467026dbe4a579063f7bad6e7807e016dc89045d8b8e2ba61ede65ec92",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-word-log.bin.zst",
+              "sha256": "ddc439456969a7d329914e901cddcc3092b4563e2bc724aec23d80a27c82140a"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-tick-capture.csv",
+            "sha256": "4d074d3f88df7cf232282bac63fd5f2cfaa4301f6db6359f266e4e2e212e2e47",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-word-log.bin.zst",
+              "sha256": "c47349ff4dc2b2abde2b773c305814a14e817208a922eea8e856bac4f48c36fb"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-tick-capture.csv",
+            "sha256": "3aa752a5fe578eabc90700559fb7075ca7727b3f78438feee1b7a508104cbd9c",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-word-log.bin.zst",
+              "sha256": "83f7ade6dda69e99c82e0819a1eb821b9429c682a4af2286d067de3e698e38e5"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-tick-capture.csv",
+            "sha256": "18b9f134ce8473c5ef4f223fadcd7c058068293702a5fc5e79aad8f3a8912b3a",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-word-log.bin.zst",
+              "sha256": "0cab805a1c4569bd84390839e3c043dee2b331794bfb09648482268747b76b6a"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-tick-capture.csv",
+            "sha256": "10f40880b77a213d20ecd7f98fb5e09f16899af2174ac9d7ba56176d01ffe7fa",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-word-log.bin.zst",
+              "sha256": "f3adcfbc415429d46970b5ccda7c0055c49a808135a11b15d23cb4e88b259136"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-tick-capture.csv",
+            "sha256": "7410dfe7d0713c4af6a1424e0bfcd3b14885cfaa6ec33ccd0691ce4e50590ce5",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-word-log.bin.zst",
+              "sha256": "2c57e3423695967abefffef5359f6ec44b9a192a2f8578cba62b6c5c56e4b3d3"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          },
+          {
+            "capture": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-tick-capture.csv",
+            "sha256": "8497263ed86cf9d49d9b725da01f46a876579c3ed6c8cbb020e0b5a7e2bedf15",
+            "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/receipt.json",
+            "word_log": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-word-log.bin.zst",
+              "sha256": "2de3dd9c1ee41f1917f98c0dbe49d9c416452d18746a5f6ca065219dde871f9b"
+            },
+            "end": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-input-end.csv",
+              "sha256": "26bb84c66673014bb1b137afa4b6c26589081671e5f994577aff752e5ba728ea"
+            },
+            "stage_trace": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-stage-trace.csv",
+              "sha256": "2ebb0336bc204f9c036bd5d6504a0a9fa5cc42fb17f32d1416edb41febae2be7"
+            },
+            "input_applied": {
+              "file": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-input-applied.csv",
+              "sha256": "2ddabac9830a681c1165303e8b4f7d5fc9e1967c7db767afcb1008d9391837d9"
+            }
+          }
+        ],
+        "imports": {
+          "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/sa2-import-calls.csv",
+          "sha256": "896ab883a4b53a78480a5888d2e453560d734e1392bcd6b6aa305b1b8f1e2749",
+          "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-211237/receipt.json",
+          "repeats": [
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/sa2-import-calls.csv",
+              "sha256": "933701f215fed255d3bc6b515c5a7ef939955c1ee85f461ec4563a6325cccc7b",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-211237/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/sa2-import-calls.csv",
+              "sha256": "da213372995077ecb143ba9d1227d26991d511710f36d24cdf64ba19e3484575",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-211237/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/sa2-import-calls.csv",
+              "sha256": "bbe29b8bab0a0ba06eb908bcd9e89037b73e7256413212ad984ffc07c90ab26f",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-212756/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/sa2-import-calls.csv",
+              "sha256": "d53c3864062e14ae96c0a9faa6a7c9c864b5d0ae36456cefeadd629e2dca7c05",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-212756/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/sa2-import-calls.csv",
+              "sha256": "f728bd2a0362d4c11d191a3dbef9bb55646ae08d0e20813e4d12ba352479d52f",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-212756/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/sa2-import-calls.csv",
+              "sha256": "bc3889c5ac1dd65bdf5869c55e83d91b7980dd2930ecc8089a1efce4d19ba0de",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-214315/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/sa2-import-calls.csv",
+              "sha256": "6e52f4b3831d3482c478f394c92a12561a0292b7e7acff48cbeece4dd7a378a8",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-214315/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/sa2-import-calls.csv",
+              "sha256": "d038d0dfad765761bc2996818193bb7e845158ee68bb570723eb0e7bb0963f91",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-214315/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/sa2-import-calls.csv",
+              "sha256": "64fe85b737d45c44a596d0e6a7b54166712d8cf82a48720195ed7d4453825ff9",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-215833/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/sa2-import-calls.csv",
+              "sha256": "cc9edb8ed228cf0083a17c1e6036d179315e1aef387a4947f228f2be3705b3e8",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-215833/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/sa2-import-calls.csv",
+              "sha256": "bb69b5fa6e8bfceed5372220d371059825eebefaddca4b5b7ea94395b6ac82f4",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-215833/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/sa2-import-calls.csv",
+              "sha256": "c97d4824f80580dfe624a992a947e37258cc5b55d416d285b7c420c6ac711ef4",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-221353/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/sa2-import-calls.csv",
+              "sha256": "c8d10a6d7c4828950f299d1ebe1f22723afa7290edbe10f42f51bcba5b9c2998",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-221353/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/sa2-import-calls.csv",
+              "sha256": "4c0578d270ca3bd2da2fabea4f34615227d7f7e9881dcb6226c0510ad59652d8",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-221353/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/sa2-import-calls.csv",
+              "sha256": "7058ec5b2317734ae81f941a5d717a148b3bf368130f380849a2935a1e0b01d2",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-222912/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/sa2-import-calls.csv",
+              "sha256": "9bbd0b1b759df68401ed859a599ab56d6193d11a4c572df4fdb9e5ee0ccb4b0f",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-222912/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/sa2-import-calls.csv",
+              "sha256": "331dd486ca401229b3d6b9fa8afad6046fa773c77caa2445e242b55a7c754799",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake3-20260926-222912/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/sa2-import-calls.csv",
+              "sha256": "e3ebecea29d53773808363edead2cca0fbc3c5af178a13bea514e594fb5b9497",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake1-20260926-224430/receipt.json"
+            },
+            {
+              "log": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/sa2-import-calls.csv",
+              "sha256": "871d8adc5c8c4705803c2ef598bc72e6156b7ad827f0620700eaa666be8f51b8",
+              "receipt": "private/generated/oracle/captures/mh-record-20260924-202305-retake2-20260926-224430/receipt.json"
+            }
+          ]
+        }
+      },
+      "field_policy": {
+        "g_01a557c0": {
+          "compare": "identity",
+          "evidence": "a heap object pointer: GameLoop loads it and calls through its vtable (0x00433F5A mov ecx,[1A557C0h]; 0x00433F65 mov edx,[ecx]; 0x00434004 mov edx,[ecx]; 0x00434006 mov eax,[edx+2Ch]; 0x00434009 call eax). Its value is where the allocator placed the object, which Wine's heap and the runtime's HeapAlloc arena (0x04000000 up) choose differently."
+        },
+        "g_01af19f0": {
+          "compare": "identity",
+          "evidence": "a heap pointer GameLoop allocates on first use: 0x00433FA2 mov eax,[1AF19F0h]; 0x00433FA7 cmp eax,ebx (ebx is 0 from 0x00433EE5 xor ebx,ebx); 0x00433FAB push 80h; 0x00433FB0 call 007A5DA1h; 0x00433FC5 mov [1AF19F0h],eax. 0x007A5DA1 is unnamed in the analyzer map (CRT region) and loops on _malloc (0x007A84A5) and __callnewh (0x007ACF67), which is the shape of MSVC's operator new. Its value is an allocation address, as above."
+        }
+      },
+      "word_policy": {
+        "identity": "harness/replay/masks/identity-words.json",
+        "compare": "identity",
+        "evidence": "The user's rulings of 2026-09-24, decisions 1 to 3 (Documentation/decisions/2026-09-24-S4-handles-identity-stage-mask.md): a value the host chooses -- an allocation address or a Win32 handle number -- is compared by what it names, heap-pointer identity and the handle mapping one rule on M5, and Metal Harbor's acceptance is strict, under the stage's own mask chosen word by word from runs configured exactly like the comparison runs. The record names the words, as for the boot: the two heap words the field policy compares by identity and the handle words of CRI's file table. tools/s4/tick_replay.py compares this replay from both sides' word logs -- each native capture's word_log below, and the lifted run's SA2_REPLAY_WORDS -- with the digest columns recomputed under harness/replay/masks/metalharbor.h (Documentation/receipts/s4-mask-metalharbor-v1.json), which holds no identity word, and the identity words compared by the one rule's three checks: the pairing, the open tick and the close tick."
+      },
+      "residues": [],
+      "residue_classes": [
+        "host-services-steam-stats-v1",
+        "host-timing-v1"
+      ],
+      "how": "tools/oracle/retake_replays.py mh-record-20260924-202305 through tools/oracle/retake_batch.py (the re-take batch of 2026-09-26, private/generated/oracle/batches/retake-batch-20260926-205224.json), 7 series, 20 re-takes, A1, A2, A3, B1, B2, B3, C1, C2, C3, D1, D2, D3, E1, E2, E3, F1, F2, F3, G1, G2 (their summaries private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-211237.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-212756.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-214315.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-215833.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-221353.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-222912.json, private/generated/oracle/captures/mh-record-20260924-202305/retakes-20260926-224430.json, each judged when taken under the tree's boot mask), each run record_stage's probe set as the tree builds it with the locale take's device-profile probe, the input probe replaying the recording, from the pinned saves, with the recording's game environment and device profile sections; the first of each series after at least 90 s idle (A1, B1, C1, D1, E1, F1, G1 cold), every one launched at a one-minute load of 0.14 to 0.79 on the user's live desktop, unlocked. D1, D2, E3 exited 247 at Wine's teardown with every capture whole, which the re-take tool accepts as a teardown exit; the others exited 0. The mask, harness/replay/masks/metalharbor.h (Documentation/receipts/s4-mask-metalharbor-v1.json), was chosen from A1, A2, A3, B1, B2, B3, C1, C2, C3, D1, D2, D3, E1, E2, E3, F1, F2 and held to F3, and G1, G2 reproduce it too (the U6 procedure: sources the first k runs in the order taken, a mask taken only when its held-out run and every later run reproduce it). The boot's two loading-screen counters 0x01a557ec and 0x01af1970 take two paths at tick 5 among the twenty, 11 re-takes 0x1b and 9 re-takes 0x1c in 0x01a557ec, at launch loads of 0.14 to 0.79, so they are unstable among the sources and not in the mask (Documentation/risks.json, a_native_second_path_narrows_the_mask); they are host-timing-v1's loading-screen-frames group, whose lifted rule every comparison still evaluates. Stage-route item 5 was judged on every re-take by tools/oracle/retake_replays.py --rejudge, launching nothing, under that mask (Documentation/receipts/s4-retake-metalharbor-item5-v1.json: judged_under_mask source \"stage\", stage_route_item_5_met): the tick captures are byte-identical under it and every re-take sets the goal latch on the recording's tick. 17 of the 20 are the mask's sources and agree under it by construction; 3 (F3 held out, G1, G2) confirm it. The seventeen re-takes of 2026-09-25 and 26 registered before (U6) are another probe build, so they are neither sources nor repeats; the item-5 receipt they gave is replaced by this batch's."
+    }
+  ],
+  "retired": [],
+  "retired_note": "A replay leaves the list above only by moving here with a reason: design 7.3 says a retained replay never silently stops being run, and check_replay_results.py fails when a replay the last committed receipt held is in neither list."
+}

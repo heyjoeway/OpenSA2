@@ -1,0 +1,359 @@
+{
+  "schema": "sa2-recomp-handle-regions/v1",
+  "about": [
+    "Every range of synthetic values this runtime hands the guest: handles",
+    "outside the guest address space, synthetic COM objects and vtables inside",
+    "it, and the thunk regions imports and interface methods are dispatched on.",
+    "",
+    "They must not overlap. Two kinds sharing a range means a value of the",
+    "wrong kind is a plausible one rather than a recognisable one, which is",
+    "exactly what each of these regions exists to prevent. On 2026-09-21 the",
+    "first open file handle and the first window handle were bit-identical",
+    "because SA2_VFS_HANDLE_BASE and SA2_WND_HWND_BASE were both 0x7e000000,",
+    "and the collision was found by a unit adding a fourth set of tokens, not",
+    "by anything looking for it.",
+    "",
+    "Checked by Documentation/scripts/check_handle_regions.py, which reads each",
+    "constant out of its header so a moved constant cannot pass, and fails on",
+    "any *_BASE in the handle space that is not declared here."
+  ],
+  "regions": [
+    {
+      "name": "SteamMetricsSDK MetricsAgent token",
+      "header": "runtime/sa2_iface.c",
+      "base": "SA2_METRICS_AGENT_TOKEN",
+      "stride": 16,
+      "count": 1,
+      "space": "handle",
+      "note": "One value, not a range: MetricsAgent is a singleton and GetInstance always answers the same token. It is declared anyway so that nothing else can be placed on it, which is the whole point of the undeclared-base clause."
+    },
+    {
+      "name": "VFS file and find handles",
+      "header": "runtime/sa2_files.h",
+      "base": "SA2_VFS_HANDLE_BASE",
+      "stride": "SA2_VFS_HANDLE_STRIDE",
+      "count": "SA2_VFS_HANDLE_MAX",
+      "space": "handle"
+    },
+    {
+      "name": "HWND",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HWND_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HICON",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HICON_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HCURSOR",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HCURSOR_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HBRUSH",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HBRUSH_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HDC",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HDC_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HMENU",
+      "header": "runtime/sa2_window.h",
+      "base": "SA2_WND_HMENU_BASE",
+      "stride": "SA2_WND_TOKEN_STRIDE",
+      "count": "SA2_WND_MAX_TOKENS",
+      "space": "handle"
+    },
+    {
+      "name": "HFONT and GDI objects",
+      "header": "runtime/sa2_gdi.h",
+      "base": "SA2_GDI_HFONT_BASE",
+      "stride": "SA2_GDI_TOKEN_STRIDE",
+      "count": "SA2_GDI_MAX_TOKENS",
+      "space": "handle",
+      "note": "sa2_gdi.c deliberately reuses sa2_window.h's HDC and HBRUSH kinds rather than minting its own, so this is the only region it owns."
+    },
+    {
+      "name": "HMONITOR",
+      "header": "runtime/sa2_d3d9.h",
+      "base": "SA2_D3D9_HMONITOR_BASE",
+      "stride": 16,
+      "count": 32,
+      "space": "handle"
+    },
+    {
+      "name": "kernel objects",
+      "header": "runtime/sa2_imports.c",
+      "base": "SA2_HANDLE_BASE",
+      "stride": "SA2_HANDLE_STRIDE",
+      "count": "SA2_HANDLE_MAX",
+      "space": "handle",
+      "note": "sa2_imports.c owns this one and defines its base, stride and count there rather than in a header. Until 2026-09-23 they were declared as the literals 16 and 4096, 0x10000 bytes, while the code's region was 64 rows of 0x1000, 0x40000 bytes; the rule-5 review found the mismatch when the code's count was raised to 4096 (0x1000000 bytes), and the constants are now read from the code."
+    },
+    {
+      "name": "synthetic COM interfaces",
+      "header": "runtime/sa2_iface.h",
+      "base": "SA2_IFACE_BASE",
+      "stride": "SA2_IFACE_STRIDE",
+      "count": "SA2_IFACE_MAX",
+      "space": "guest"
+    },
+    {
+      "name": "d3d9 objects",
+      "header": "runtime/sa2_d3d9.h",
+      "base": "SA2_D3D9_OBJ_BASE",
+      "stride": "SA2_D3D9_OBJ_STRIDE",
+      "count": "SA2_D3D9_OBJ_FIRST_COUNT",
+      "space": "guest",
+      "note": "The pool's first block, indices 0 to 16383; the overflow block below holds the rest."
+    },
+    {
+      "name": "d3d9 overflow objects",
+      "header": "runtime/sa2_d3d9.h",
+      "base": "SA2_D3D9_OBJ_OVF_BASE",
+      "stride": "SA2_D3D9_OBJ_STRIDE",
+      "count": "SA2_D3D9_OBJ_OVF_COUNT",
+      "space": "guest",
+      "note": "The pool's second block, indices 16384 and up, in the low free space below the import thunks (runtime/sa2_d3d9.h). The first 16384 objects keep the first block's addresses, so a run that builds no more is unchanged by it."
+    },
+    {
+      "name": "d3d9 vtables",
+      "header": "runtime/sa2_d3d9.h",
+      "base": "SA2_D3D9_VT_BASE",
+      "stride": [
+        "SA2_D3D9_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_D3D9_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "dsound objects",
+      "header": "runtime/sa2_dsound.h",
+      "base": "SA2_DS_OBJ_BASE",
+      "stride": "SA2_DS_OBJ_STRIDE",
+      "count": "SA2_DS_MAX_OBJECTS",
+      "space": "guest"
+    },
+    {
+      "name": "xaudio2 objects",
+      "header": "runtime/sa2_xaudio2.h",
+      "base": "SA2_XA2_OBJ_BASE",
+      "stride": "SA2_XA2_OBJ_STRIDE",
+      "count": "SA2_XA2_MAX_OBJECTS",
+      "space": "guest"
+    },
+    {
+      "name": "dsound vtables",
+      "header": "runtime/sa2_dsound.h",
+      "base": "SA2_DS_VT_BASE",
+      "stride": [
+        "SA2_DS_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_DS_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "ddraw interfaces",
+      "header": "runtime/sa2_ddraw.h",
+      "base": "SA2_DD_OBJ_BASE",
+      "stride": "SA2_DD_OBJ_STRIDE",
+      "count": "SA2_DD_MAX_OBJECTS",
+      "space": "guest"
+    },
+    {
+      "name": "ddraw enumeration records",
+      "header": "runtime/sa2_ddraw.h",
+      "base": "SA2_DD_ENUM_BASE",
+      "stride": "SA2_DD_ENUM_STRIDE",
+      "count": "SA2_DD_MAX_DEVICES",
+      "space": "guest",
+      "note": "One record per DirectDraw device the capture's device profile lists: the GUID the enumeration callback is pointed at, then the description and name the profile recorded. The profile's readers refuse more than SA2_DP_MAX_DDRAW devices at configuration, and runtime/sa2_ddraw.c asserts SA2_DP_MAX_DDRAW <= SA2_DD_MAX_DEVICES, so no profile a run loads overflows it."
+    },
+    {
+      "name": "ddraw vtables",
+      "header": "runtime/sa2_ddraw.h",
+      "base": "SA2_DD_VT_BASE",
+      "stride": [
+        "SA2_DD_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_DD_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "xaudio2 vtables",
+      "header": "runtime/sa2_xaudio2.h",
+      "base": "SA2_XA2_VT_BASE",
+      "stride": [
+        "SA2_XA2_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_XA2_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "import thunks",
+      "header": "runtime/guest_memory.h",
+      "base": "SA2_GUEST_IMPORT_BASE",
+      "stride": "SA2_GUEST_IMPORT_STRIDE",
+      "count": "SA2_GUEST_IMPORT_SLOTS",
+      "space": "thunk"
+    },
+    {
+      "name": "interface method thunks",
+      "header": "runtime/sa2_iface.h",
+      "base": "SA2_IFACE_THUNK_BASE",
+      "stride": "SA2_IFACE_THUNK_STRIDE",
+      "count": [
+        "SA2_IFACE_MAX",
+        "runtime/sa2_d3d9.h:SA2_D3D9_MAX_SLOTS"
+      ],
+      "space": "thunk",
+      "note": "The thunk block is IFACE_MAX interfaces by the widest slot table, which is d3d9's 128; SA2_IFACE_THUNK_END in the header computes the same product from the same two constants."
+    },
+    {
+      "name": "d3d9 method thunks",
+      "header": "runtime/sa2_d3d9.h",
+      "base": "SA2_D3D9_THUNK_BASE",
+      "stride": "SA2_D3D9_THUNK_STRIDE",
+      "count": [
+        "SA2_D3D9_MAX_TYPES",
+        "SA2_D3D9_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    },
+    {
+      "name": "dsound method thunks",
+      "header": "runtime/sa2_dsound.h",
+      "base": "SA2_DS_THUNK_BASE",
+      "stride": "SA2_DS_THUNK_STRIDE",
+      "count": [
+        "SA2_DS_MAX_TYPES",
+        "SA2_DS_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    },
+    {
+      "name": "ddraw method thunks",
+      "header": "runtime/sa2_ddraw.h",
+      "base": "SA2_DD_THUNK_BASE",
+      "stride": "SA2_DD_THUNK_STRIDE",
+      "count": [
+        "SA2_DD_MAX_TYPES",
+        "SA2_DD_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    },
+    {
+      "name": "xaudio2 method thunks",
+      "header": "runtime/sa2_xaudio2.h",
+      "base": "SA2_XA2_THUNK_BASE",
+      "stride": "SA2_XA2_THUNK_STRIDE",
+      "count": [
+        "SA2_XA2_MAX_TYPES",
+        "SA2_XA2_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    },
+    {
+      "name": "standard pipe handles",
+      "header": "runtime/sa2_imports.c",
+      "base": "SA2_STD_HANDLE_BASE",
+      "stride": "SA2_STD_HANDLE_STRIDE",
+      "count": 3,
+      "space": "handle",
+      "note": "stdin, stdout and stderr, handed out where the capture's device profile records a handle, typed as it records (runtime/sa2_devprofile.h, \"The standard handles\"; natively character devices, the runner's pipes as Wine types them), or as pipes under SA2_STD_HANDLES=pipe or SA2_STDIO_BREAK=pipe. Without either, GetStdHandle answers NULL."
+    },
+    {
+      "name": "dinput objects",
+      "header": "runtime/sa2_dinput.h",
+      "base": "SA2_DI_OBJ_BASE",
+      "stride": "SA2_DI_OBJ_STRIDE",
+      "count": "SA2_DI_MAX_OBJECTS",
+      "space": "guest"
+    },
+    {
+      "name": "dinput enumeration scratch",
+      "header": "runtime/sa2_dinput.h",
+      "base": "SA2_DI_SCRATCH_BASE",
+      "stride": "SA2_DI_SCRATCH_BYTES",
+      "count": 1,
+      "space": "guest",
+      "note": "One DIDEVICEINSTANCEA (0x244 bytes), rebuilt from the device profile for each controller EnumDevices hands the game's callback."
+    },
+    {
+      "name": "dinput vtables",
+      "header": "runtime/sa2_dinput.h",
+      "base": "SA2_DI_VT_BASE",
+      "stride": [
+        "SA2_DI_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_DI_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "dinput method thunks",
+      "header": "runtime/sa2_dinput.h",
+      "base": "SA2_DI_THUNK_BASE",
+      "stride": "SA2_DI_THUNK_STRIDE",
+      "count": [
+        "SA2_DI_MAX_TYPES",
+        "SA2_DI_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    },
+    {
+      "name": "wbem objects",
+      "header": "runtime/sa2_wbem.h",
+      "base": "SA2_WBEM_OBJ_BASE",
+      "stride": "SA2_WBEM_OBJ_STRIDE",
+      "count": "SA2_WBEM_OBJ_SLOTS",
+      "space": "guest",
+      "note": "Fixed slots: the locator, the services object, the enumerator, then one class object per Win32_PNPEntity entity of the device profile."
+    },
+    {
+      "name": "wbem vtables",
+      "header": "runtime/sa2_wbem.h",
+      "base": "SA2_WBEM_VT_BASE",
+      "stride": [
+        "SA2_WBEM_MAX_SLOTS",
+        4
+      ],
+      "count": "SA2_WBEM_MAX_TYPES",
+      "space": "guest"
+    },
+    {
+      "name": "wbem method thunks",
+      "header": "runtime/sa2_wbem.h",
+      "base": "SA2_WBEM_THUNK_BASE",
+      "stride": "SA2_WBEM_THUNK_STRIDE",
+      "count": [
+        "SA2_WBEM_MAX_TYPES",
+        "SA2_WBEM_MAX_SLOTS"
+      ],
+      "space": "thunk"
+    }
+  ]
+}

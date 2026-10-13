@@ -1,0 +1,28 @@
+name: Feature or build improvement
+description: Propose a focused change to the port, tools, or documentation.
+title: "[Request] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [current status](https://github.com/kittycache9/OpenSA2/blob/main/docs/status.md) before requesting platform support or a playable download. Development results do not imply full-game parity.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the task or behavior that the current project does not support.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the behavior you want and which platform or component needs it.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How to check the result
+      description: Suggest a reproduction, synthetic test, or comparison that would show the change works.

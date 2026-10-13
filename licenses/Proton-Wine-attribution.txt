@@ -1,0 +1,11 @@
+This software contains a modified version of Wine licensed under the LGPL 2.1. Wine is
+
+    Copyright (c) 1993-2022 the Wine project authors
+
+Visit Wine at
+
+    https://winehq.org
+
+View our modifications at
+
+    https://github.com/ValveSoftware/wine

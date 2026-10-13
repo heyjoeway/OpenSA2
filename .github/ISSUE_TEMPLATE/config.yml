@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Current status and known limitations
+    url: https://github.com/kittycache9/OpenSA2/blob/main/docs/status.md
+    about: Check platform status and unfinished game paths before opening an issue.

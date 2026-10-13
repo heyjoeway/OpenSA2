@@ -1,0 +1,14 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_SA2_validation_probe",
+    "type": "GLOBAL",
+    "library_path": "@LIBRARY@",
+    "api_version": "1.4.309",
+    "implementation_version": "1",
+    "description": "SA2 live validation library checkpoint",
+    "functions": {
+      "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+    }
+  }
+}

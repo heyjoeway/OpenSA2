@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="sa2_blue">#FF1C3F94</color>
+    <color name="sa2_night">#FF101830</color>
+    <style name="SetupTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/sa2_blue</item>
+        <item name="android:colorAccent">#FFFFC21A</item>
+        <item name="android:windowBackground">@color/sa2_night</item>
+        <item name="android:statusBarColor">@color/sa2_night</item>
+        <item name="android:navigationBarColor">@color/sa2_night</item>
+    </style>
+    <style name="PlayTheme" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

@@ -1,0 +1,21 @@
+{
+ "schema": "sa2-digest-exclusions/v1",
+ "what": "Words of .dataa that plain native repeats of the boot take one of two values in, from tick 369, and that no snapshot run can show: every run with harness/replay/native_snapshot_probe.c loaded took the same value (18 runs, boot-two-v2a to v2i and boot-after-v2a to v2i, the latter snapshotting only from tick 372), while about one plain run in three took the other. tools/s4/snapshot_fields.py --exclude-words drops each from the digest mask's candidates, and harness/replay/tick_digest.h cites this file.",
+ "found": "2026-09-24, re-deriving the boot mask from vanilla option-A runs (Documentation/decisions/2026-09-23-S4-vanilla-oracle.md, the mask). The mask the twelve-run recipe gave kept these two words; the loader-mode mask it replaces did not. A first attempt named two other addresses, read from the header by a parser that skipped the entries the header writes as a plain 0; they were not in the mask, and are not here.",
+ "words": [
+  {
+   "address": "0x01a557ec",
+   "disagree": [
+    "private/generated/oracle/captures/boot-ticks-v12a and boot-ticks-v12b: d_01a50000 differs on every row from tick 369 to 1200 (832 rows); the same between boot-ticks-v11a and boot-ticks-v11b. It is the one word of that block the vanilla mask kept and the loader-mode mask it replaces did not."
+   ],
+   "agree_without": "private/generated/oracle/captures/boot-trial-v3a to v3i: nine plain boots, the boot replay's probe set, whose tick probe digested this mask less 0x01a557ec and 0x01af1970, gave one tick capture, sha256 9d850a5ac829...; the full mask split them about one run in three (boot-ticks-v11a against v11b and v11c, v12a against v12b and v12c)."
+  },
+  {
+   "address": "0x01af1970",
+   "disagree": [
+    "private/generated/oracle/captures/boot-ticks-v12a and boot-ticks-v12b: d_01af0000 differs on every row from tick 369 to 1200 (832 rows); the same between boot-ticks-v11a and boot-ticks-v11b. The vanilla decision's evidence names 0x01AF1970 a loading-screen counter that differs between native runs (Documentation/decisions/2026-09-23-S4-vanilla-oracle.md)."
+   ],
+   "agree_without": "as for 0x01a557ec: the same nine plain boots"
+  }
+ ]
+}

@@ -1,0 +1,316 @@
+{
+ "schema": "sa2-s7-drm-unwrap/v1",
+ "id": "s7-drm-unwrap-v1",
+ "generated_by": "tools/s7/drm_unwrap.py",
+ "question": "Do the bytes the runtime reads at run time from the game executable (the data sections, and the code bytes the emulated instructions and jump tables read) match between the shipped executable and the unpacked one?",
+ "authority": "the user's ruling of 2026-10-09, Documentation/decisions/2026-10-09-S5-user-rulings.md, item 3",
+ "command": "source tools/env.sh && .venv/bin/python tools/s7/drm_unwrap.py",
+ "inputs": {
+  "shipped": {
+   "path": "private/exe/sonic2app.exe",
+   "sha256": "4b1e09d782a2d919cbed2324ba2c0c78ef5fbe1677d400edab39608191f12c16"
+  },
+  "unpacked": {
+   "path": "private/exe/sonic2app-unpacked.exe",
+   "sha256": "c97b116fbd1d64108cbc8ec403b4a59ba6f815159b9a0ad896668d6c19c1bfe9"
+  },
+  "pins": {
+   "path": "tools/pins.json",
+   "sha256": "02ab8a5a5ad06635a0d4a68cb3700ac7da498546c08f8c8b3a8cef31dc16ab93",
+   "match": true
+  },
+  "replays": {
+   "path": "Documentation/replays.json",
+   "sha256": "594e2b26d7c761e830215b6a64d4859d509dc6774a37d47763b3c20776026e6f"
+  },
+  "tick_replay": {
+   "path": "Documentation/receipts/s4-tick-replay-v1.json",
+   "sha256": "fb37ae2ee82212b9127a5b1ee76c5865c3cf9ba50b78105f49475dc94973a9d7"
+  },
+  "tools": {
+   "tools/s7/drm_unwrap.py": "97953a504c91c67daf7636154c8b9662693e457c9a060751bfa38b6574c7a993",
+   "tools/s4/switches.py": "4a4f3f23e32451c32739c27a4aaea333b438057cd425c62a705b0e7d4b0e736d",
+   "tools/s4/emulated.py": "ccde3ae349df997a6a4d20f3572eb13a5e53d748104e8e2bb5e8bad3af33063c",
+   "tools/s4/image.py": "132c07c1bf70ed655048d2e47a9fad0df6b266da406a322cf0fbd24ad9a38ae0",
+   "tools/s3/whole_image/common.py": "33bf074b73e1b7943bdd6a366438a9785f119b717ba160393aa90399d70da1f4",
+   "tools/s3/arms/cost.py": "ba8ffc38f389748735b8bc1b6de9844c200af4514a799e5d8cbdb9162356c0b6",
+   "Documentation/lifted-extras.json": "8003b59147372ec300a6bec29b57cb3572bee3b74d9626dec5d9ed69a9329f8a",
+   "runtime/guest_memory.c": "eb1103756b6425d30e26e5402b2f9ff542ecb3b6c2d9567d98846e7d048e1e3a",
+   "runtime/sa2_emulate.cpp": "fdc15d4721478a93aa50ea789151644af7c62c1c67ac9cfd54f691207655e7bc",
+   "runtime/sa2_imports.c": "7174276beb72ad7454a926c91358e36830d9baa91622fa0553204a24259b418a",
+   "runtime/sa2_dialog.c": "36e54b096a1f4847a05fdd158edf72fc324d94de24e64260fe6c06cbbd8da6ff",
+   "runtime/guest_memory.h": "34a60d1240a2325a781aed7943cac12c5139517003ecb4fd75b4b237d81b56b6"
+  }
+ },
+ "runtime_maps": {
+  "shipped": "yes",
+  "unpacked": "yes"
+ },
+ "regions": [
+  {
+   "va": "0x00400000",
+   "end": "0x00400400",
+   "kind": "header",
+   "shipped": [
+    "(headers)"
+   ],
+   "unpacked": [
+    "(headers)"
+   ],
+   "bytes": 1024,
+   "differing": 165
+  },
+  {
+   "va": "0x00401000",
+   "end": "0x00870600",
+   "kind": "executable",
+   "shipped": [
+    ".text"
+   ],
+   "unpacked": [
+    ".text"
+   ],
+   "bytes": 4650496,
+   "differing": 4632149
+  },
+  {
+   "va": "0x00871000",
+   "end": "0x00872e00",
+   "kind": "executable",
+   "shipped": [
+    "PSFD00"
+   ],
+   "unpacked": [
+    "PSFD00"
+   ],
+   "bytes": 7680,
+   "differing": 0
+  },
+  {
+   "va": "0x00873000",
+   "end": "0x00916200",
+   "kind": "data",
+   "shipped": [
+    ".rdata"
+   ],
+   "unpacked": [
+    ".rdata"
+   ],
+   "bytes": 668160,
+   "differing": 0
+  },
+  {
+   "va": "0x00917000",
+   "end": "0x02670598",
+   "kind": "data",
+   "shipped": [
+    ".data"
+   ],
+   "unpacked": [
+    ".dataa"
+   ],
+   "bytes": 30774680,
+   "differing": 0
+  },
+  {
+   "va": "0x02671000",
+   "end": "0x026d4e00",
+   "kind": "data",
+   "shipped": [
+    ".rsrc"
+   ],
+   "unpacked": [
+    ".rsrca"
+   ],
+   "bytes": 409088,
+   "differing": 0
+  },
+  {
+   "va": "0x026d5000",
+   "end": "0x02773000",
+   "kind": "data",
+   "shipped": [
+    ".reloc"
+   ],
+   "unpacked": [
+    ".reloc"
+   ],
+   "bytes": 647168,
+   "differing": 0
+  },
+  {
+   "va": "0x02773000",
+   "end": "0x02775000",
+   "kind": "data",
+   "shipped": [
+    ".extra"
+   ],
+   "unpacked": [
+    ".extra"
+   ],
+   "bytes": 8192,
+   "differing": 0
+  },
+  {
+   "va": "0x02775000",
+   "end": "0x027fc000",
+   "kind": "one file",
+   "shipped": [
+    ".bind"
+   ],
+   "unpacked": [],
+   "bytes": 552960,
+   "differing": 547209
+  }
+ ],
+ "data_sections": {
+  "read": "every mapped byte",
+  "bytes": 32507288,
+  "differing_bytes": 0
+ },
+ "header_fields": {
+  "compared": 17,
+  "differing": [
+   "section 0x02775000",
+   "sections_count",
+   "size_of_image"
+  ]
+ },
+ "readsets": {
+  "jump_tables": {
+   "dispatches": 1021,
+   "bytes": 38614,
+   "differing_bytes": 38186,
+   "dispatches_with_a_differing_byte": 1020,
+   "dispatches_not_exact": 85,
+   "arms_in_no_near_dword": 0,
+   "dispatches_outside_executable": 1
+  },
+  "emulated_sites": {
+   "sites": 265,
+   "bytes": 884,
+   "differing_bytes": 879,
+   "window": "the instruction's own bytes, which decide the decode",
+   "by_kind": {
+    "cvtps2pi": {
+     "sites": 16,
+     "differing_sites": 16
+    },
+    "paddusw": {
+     "sites": 32,
+     "differing_sites": 32
+    },
+    "paddusb": {
+     "sites": 172,
+     "differing_sites": 172
+    },
+    "psubsw xmm": {
+     "sites": 13,
+     "differing_sites": 13
+    },
+    "psubsw": {
+     "sites": 26,
+     "differing_sites": 26
+    },
+    "fnsave": {
+     "sites": 1,
+     "differing_sites": 1
+    },
+    "frstor": {
+     "sites": 1,
+     "differing_sites": 1
+    },
+    "fnstenv": {
+     "sites": 2,
+     "differing_sites": 2
+    },
+    "fldenv": {
+     "sites": 2,
+     "differing_sites": 2
+    }
+   }
+  },
+  "union": {
+   "bytes": 39498,
+   "differing_bytes": 39065
+  }
+ },
+ "replays": {
+  "boot": {
+   "runs": [
+    {
+     "run_record": "private/generated/s4/run/replay-boot.ticks.json",
+     "sha256": "cc9ed6545615c83b0cd54200f4cf9805f28cc2c6c768ef929d4a68308d1c408a",
+     "pinned": false,
+     "emulated_by_kind": {
+      "paddusb": 0,
+      "paddusw": 0,
+      "cvtps2pi": 2128672,
+      "fnstenv": 0,
+      "fldenv": 0,
+      "fnsave": 0,
+      "frstor": 0,
+      "psubsw": 0,
+      "psubsw xmm": 0
+     },
+     "executed_kinds_every_site_differs": [
+      "cvtps2pi"
+     ],
+     "executed_kinds_undecided": [],
+     "executed_kinds_without_census_sites": [],
+     "witness_basis": "emulated counts only",
+     "differing_read_witnessed": true
+    }
+   ],
+   "differing_read_witnessed": true
+  },
+  "metalharbor": {
+   "runs": [
+    {
+     "run_record": "private/generated/s4/run/replay-metalharbor.ticks.json",
+     "sha256": "4e443600b8c4d6014938bbed72cfbf27d0d80d1c600a20261f00e041fbaf2598",
+     "pinned": true,
+     "emulated_by_kind": {
+      "paddusb": 0,
+      "paddusw": 0,
+      "cvtps2pi": 0,
+      "fnstenv": 0,
+      "fldenv": 0,
+      "fnsave": 0,
+      "frstor": 0,
+      "psubsw": 0,
+      "psubsw xmm": 0
+     },
+     "executed_kinds_every_site_differs": [],
+     "executed_kinds_undecided": [],
+     "executed_kinds_without_census_sites": [],
+     "witness_basis": "emulated counts only",
+     "differing_read_witnessed": false
+    }
+   ],
+   "differing_read_witnessed": false
+  }
+ },
+ "not_measured": [
+  "lifted reads of the executable sections other than jump tables (data in code)",
+  "guest reads of the header page other than the fields the runtime's loader, import binding and resource lookup read",
+  "the bytes the emulator's decoder peeks past an emulated instruction's end",
+  "guest file reads of the executable itself (no registered replay's run record opens it)"
+ ],
+ "verdict": "differs",
+ "differs_in": [
+  "exact jump tables",
+  "emulated sites",
+  "header fields",
+  "a witnessed run",
+  "estimated jump-table extents"
+ ],
+ "conclusive": true,
+ "bytes_match": false,
+ "companion": {
+  "path": "private/generated/s7/drm-unwrap/readset.json",
+  "sha256": "0550bb84c4d4b33a070b9115468eb09d2c79e26f6370161ebded50bf642f096d"
+ },
+ "written": "2026-10-12T00:03:20+00:00",
+ "rewritten": "2026-10-12T00:03:20+00:00"
+}

@@ -1,0 +1,4730 @@
+{
+ "schema": "sa2-recomp-receipt/v1",
+ "id": "s1-import-classification-v1",
+ "date": "2026-09-19",
+ "question": "Which of the executable's imports are OS services, presentation, Steam or DRM (design 3.5), and how many static call sites does each have?",
+ "inputs": {
+  "executable": "private/exe/sonic2app-unpacked.exe",
+  "executable_sha256": "c97b116fbd1d64108cbc8ec403b4a59ba6f815159b9a0ad896668d6c19c1bfe9",
+  "image_base": "0x00400000",
+  "function_map": {
+   "path": "private/generated/function-map.json",
+   "sha256": "11b82ae844467a97ff6d9e99faa827f6ab8f2411e942fb415344ed12c96e622e",
+   "functions": 12683,
+   "regions": [
+    "cri",
+    "crt",
+    "game",
+    "other"
+   ]
+  },
+  "tools": {
+   "python": {
+    "pinned": "3.13.5",
+    "observed": "3.13.5",
+    "match": true
+   },
+   "pefile": {
+    "pinned": "2024.8.26",
+    "observed": "2024.8.26",
+    "match": true
+   },
+   "iced-x86": {
+    "pinned": "1.21.0",
+    "observed": "1.21.0",
+    "match": true
+   }
+  }
+ },
+ "command": ".venv/bin/python Documentation/scripts/s1_import_classification.py --exe private/exe/sonic2app-unpacked.exe --function-map private/generated/function-map.json --out Documentation/receipts/s1-import-classification-v1.json --metrics-out Documentation/receipts/import-classification.json --date 2026-09-19",
+ "method": "pefile reads the import directory; each dll!name is classified by a table keyed on DLL, with per-name groups for kernel32 and user32 (subclass) and a name override for user32!wvsprintfA. A linear iced-x86 decode of .text (padding skipped, one-byte resync on error) records every absolute memory operand equal to an IAT slot: call [slot] is a direct call site, jmp [slot] is a thunk, anything else a pointer load; every call rel32 or jmp rel32 targeting a thunk counts as a call to the thunk's import, and a 32-bit immediate equal to a thunk's address as a pointer load. Limits: static and linear, so data-in-code can hide or fabricate a reference and the counts are an upper bound on distinct sites, not a reachability proof; register-indirect calls through a loaded pointer are counted as pointer loads, not calls; PSFD00 is not swept; ordinal imports carry conventional names from public export tables that are not part of the input.",
+ "authority": "statically-translated",
+ "outputs": {
+  "import_count": 251,
+  "design_2_3_import_count": 251,
+  "import_count_agrees": true,
+  "dlls": {
+   "ADVAPI32.dll": 3,
+   "d3d9.dll": 1,
+   "d3dx9_42.dll": 11,
+   "DINPUT8.dll": 1,
+   "DSOUND.dll": 1,
+   "GDI32.dll": 9,
+   "KERNEL32.dll": 129,
+   "ole32.dll": 5,
+   "OLEAUT32.dll": 2,
+   "SHELL32.dll": 1,
+   "SHLWAPI.dll": 1,
+   "steam_api.dll": 12,
+   "SteamMetricsSDK.dll": 4,
+   "USER32.dll": 65,
+   "WINMM.dll": 3,
+   "XINPUT1_3.dll": 3
+  },
+  "design_2_3_dlls_agree": true,
+  "by_class": {
+   "os-service": 142,
+   "presentation": 93,
+   "steam": 16,
+   "drm": 0,
+   "other": 0
+  },
+  "by_subclass": {
+   "os-service/arithmetic": 1,
+   "os-service/com": 5,
+   "os-service/console": 5,
+   "os-service/environment": 9,
+   "os-service/files": 24,
+   "os-service/locale": 18,
+   "os-service/memory": 18,
+   "os-service/process": 21,
+   "os-service/registry": 3,
+   "os-service/string": 1,
+   "os-service/sync": 14,
+   "os-service/threads": 15,
+   "os-service/time": 8,
+   "presentation/audio": 1,
+   "presentation/clipboard": 4,
+   "presentation/cursor": 3,
+   "presentation/dialog": 7,
+   "presentation/gdi": 9,
+   "presentation/graphics": 1,
+   "presentation/graphics-d3dx": 11,
+   "presentation/input": 4,
+   "presentation/keyboard": 2,
+   "presentation/message": 11,
+   "presentation/paint": 11,
+   "presentation/time": 3,
+   "presentation/window": 26,
+   "steam/steam-api": 12,
+   "steam/steam-metrics": 4
+  },
+  "unclassified": [],
+  "drm_note": "no import names a CEG or DRM entry point; the unpacked executable is the lifter's input and CEG is never reached (design 3.5 d)",
+  "d3dx9_42_imports": [
+   "D3DXCreateCubeTexture",
+   "D3DXCreateCubeTextureFromFileInMemoryEx",
+   "D3DXCreateTexture",
+   "D3DXCreateTextureFromFileInMemoryEx",
+   "D3DXCreateVolumeTexture",
+   "D3DXCreateVolumeTextureFromFileInMemoryEx",
+   "D3DXFilterTexture",
+   "D3DXGetShaderConstantTable",
+   "D3DXLoadSurfaceFromSurface",
+   "D3DXSaveSurfaceToFileA",
+   "D3DXSaveTextureToFileA"
+  ],
+  "sweep": {
+   "decode_errors": 178,
+   "direct_call_instructions": 75979,
+   "distinct_direct_call_targets": 9298,
+   "design_2_3_distinct_direct_call_targets": 9297,
+   "import_thunks": 24,
+   "static_call_sites_total": 989,
+   "pointer_loads_total": 230
+  },
+  "zero_static_call_sites_unreferenced": [
+   "USER32.dll!DefWindowProcW"
+  ],
+  "zero_static_call_sites_pointer_loads_only": [
+   "steam_api.dll!SteamApps",
+   "KERNEL32.dll!SuspendThread",
+   "KERNEL32.dll!MulDiv",
+   "KERNEL32.dll!VirtualFree",
+   "KERNEL32.dll!GetEnvironmentStringsW",
+   "KERNEL32.dll!GetExitCodeThread",
+   "USER32.dll!SetTimer",
+   "USER32.dll!GetParent",
+   "USER32.dll!GetWindow",
+   "USER32.dll!GetSystemMetrics",
+   "USER32.dll!GetKeyState",
+   "OLEAUT32.dll!SysFreeString",
+   "OLEAUT32.dll!SysAllocString"
+  ],
+  "imports": [
+   {
+    "dll": "ADVAPI32.dll",
+    "name": "RegCloseKey",
+    "class": "os-service",
+    "subclass": "registry",
+    "iat_slot": "0x00873004",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ADVAPI32.dll",
+    "name": "RegCreateKeyExW",
+    "class": "os-service",
+    "subclass": "registry",
+    "iat_slot": "0x00873008",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ADVAPI32.dll",
+    "name": "RegSetValueExW",
+    "class": "os-service",
+    "subclass": "registry",
+    "iat_slot": "0x00873000",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "d3d9.dll",
+    "name": "Direct3DCreate9",
+    "class": "presentation",
+    "subclass": "graphics",
+    "iat_slot": "0x008733A8",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AAC"
+    ],
+    "calls_to_thunks": 3,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateCubeTexture",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733D4",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4ADC"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateCubeTextureFromFileInMemoryEx",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733C0",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AEE"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateTexture",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733C4",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AE8"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateTextureFromFileInMemoryEx",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733D8",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AE2"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateVolumeTexture",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733CC",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AD0"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXCreateVolumeTextureFromFileInMemoryEx",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733D0",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AD6"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXFilterTexture",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733B8",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4ABE"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXGetShaderConstantTable",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733C8",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4ACA"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXLoadSurfaceFromSurface",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733BC",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AC4"
+    ],
+    "calls_to_thunks": 3,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXSaveSurfaceToFileA",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733B0",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AB2"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "d3dx9_42.dll",
+    "name": "D3DXSaveTextureToFileA",
+    "class": "presentation",
+    "subclass": "graphics-d3dx",
+    "iat_slot": "0x008733B4",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007A4AB8"
+    ],
+    "calls_to_thunks": 2,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "DINPUT8.dll",
+    "name": "DirectInput8Create",
+    "class": "presentation",
+    "subclass": "input",
+    "iat_slot": "0x00873010",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007C0CE0"
+    ],
+    "calls_to_thunks": 1,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "DSOUND.dll",
+    "name": "ordinal#11",
+    "class": "presentation",
+    "subclass": "audio",
+    "iat_slot": "0x00873018",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007C0CC8"
+    ],
+    "calls_to_thunks": 2,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {},
+    "conventional_name": "DirectSoundCreate8"
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "CreateDCW",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873030",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "CreateFontIndirectW",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873028",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "CreateSolidBrush",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x0087303C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "DeleteDC",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873024",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "DeleteObject",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873034",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "GetTextExtentPoint32W",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873040",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "SelectObject",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873038",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "SetBkColor",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x0087302C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "GDI32.dll",
+    "name": "SetTextColor",
+    "class": "presentation",
+    "subclass": "gdi",
+    "iat_slot": "0x00873020",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CloseHandle",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873088",
+    "direct_call_sites": 21,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 5,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 5,
+    "static_call_sites": 21,
+    "direct_call_sites_by_region": {
+     "cri": 10,
+     "crt": 5,
+     "game": 4,
+     "unmapped": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CompareStringA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x008730DC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CompareStringW",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873074",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateDirectoryA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008730B8",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "game": 1,
+     "unmapped": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateEventA",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x0087310C",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateEventW",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x0087311C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateFileA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873104",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 2,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateFileW",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008731F4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateMutexW",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873078",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "CreateThread",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873058",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 1,
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "DeleteCriticalSection",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873200",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "crt": 2,
+     "game": 1,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "DeleteFileA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008730CC",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "game": 1,
+     "unmapped": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "EnterCriticalSection",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x008731EC",
+    "direct_call_sites": 22,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 22,
+    "direct_call_sites_by_region": {
+     "cri": 6,
+     "crt": 7,
+     "game": 9
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "EnumSystemLocalesA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873114",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "crt": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "ExitProcess",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873180",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "ExitThread",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x008731F0",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FileTimeToLocalFileTime",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008731FC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FileTimeToSystemTime",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008731F8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FindClose",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873230",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "game": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FindFirstFileA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x0087322C",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "game": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FindNextFileA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873234",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "game": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FlushFileBuffers",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008730F8",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "crt": 1,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FreeEnvironmentStringsA",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x00873154",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FreeEnvironmentStringsW",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x0087314C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "FreeLibrary",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008730D0",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 2,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetACP",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x0087317C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCPInfo",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x008731A8",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "crt": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCommandLineA",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x00873214",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetConsoleCP",
+    "class": "os-service",
+    "subclass": "console",
+    "iat_slot": "0x00873130",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetConsoleMode",
+    "class": "os-service",
+    "subclass": "console",
+    "iat_slot": "0x0087312C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetConsoleOutputCP",
+    "class": "os-service",
+    "subclass": "console",
+    "iat_slot": "0x008730F0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCurrentDirectoryA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008730BC",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCurrentProcess",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873248",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "crt": 2,
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCurrentProcessId",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873138",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetCurrentThreadId",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873188",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetEnvironmentStrings",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x00873150",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetEnvironmentStringsW",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x00873148",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetExitCodeThread",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x008731E0",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetFileAttributesA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873048",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "game": 2,
+     "unmapped": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetFileSize",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008731C8",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetFileType",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873168",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetFullPathNameA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008731CC",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetLastError",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873084",
+    "direct_call_sites": 51,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 51,
+    "direct_call_sites_by_region": {
+     "cri": 18,
+     "crt": 27,
+     "game": 1,
+     "unmapped": 5
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetLocaleInfoA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873118",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "crt": 7
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetLocaleInfoW",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x008730FC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetModuleFileNameA",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x0087315C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetModuleFileNameW",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008730A4",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetModuleHandleA",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008731E8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetModuleHandleW",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873094",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "crt": 6,
+     "game": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetOEMCP",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873178",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetProcAddress",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008730D4",
+    "direct_call_sites": 209,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 134,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 134,
+    "static_call_sites": 209,
+    "direct_call_sites_by_region": {
+     "crt": 4,
+     "game": 154,
+     "unmapped": 51
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetProcessAffinityMask",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873060",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetProcessHeap",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008730E0",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "cri": 5,
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetStartupInfoA",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x008731C4",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetStdHandle",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x0087316C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetStringTypeA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873128",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetStringTypeW",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873124",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetSystemInfo",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x008731E4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetSystemTimeAsFileTime",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008731B4",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetThreadPriority",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x008731D4",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetTickCount",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x0087313C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetTimeZoneInformation",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008730E8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetUserDefaultLCID",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873224",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GetVersionExW",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x0087309C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GlobalAlloc",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873098",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GlobalLock",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873090",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "GlobalUnlock",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008730A8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "HeapAlloc",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008731BC",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "HeapCreate",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873144",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "HeapFree",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008731C0",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "crt": 3,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "HeapReAlloc",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008731B8",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "crt": 2,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "HeapSize",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873184",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "InitializeCriticalSection",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873204",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "crt": 1,
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "InitializeCriticalSectionAndSpinCount",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873108",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "InterlockedDecrement",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873244",
+    "direct_call_sites": 21,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 4,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 4,
+    "static_call_sites": 21,
+    "direct_call_sites_by_region": {
+     "cri": 7,
+     "crt": 12,
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "InterlockedExchange",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x0087320C",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "cri": 6,
+     "crt": 1,
+     "other": 1,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "InterlockedIncrement",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873240",
+    "direct_call_sites": 11,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 11,
+    "direct_call_sites_by_region": {
+     "cri": 7,
+     "crt": 3,
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "IsDebuggerPresent",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873218",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "IsValidCodePage",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873174",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "IsValidLocale",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873110",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LCMapStringA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x008731A4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LCMapStringW",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x008731A0",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LeaveCriticalSection",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x00873120",
+    "direct_call_sites": 21,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 21,
+    "direct_call_sites_by_region": {
+     "cri": 6,
+     "crt": 6,
+     "game": 9
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LoadLibraryA",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008730D8",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "crt": 1,
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LocalAlloc",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008730B0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LocalFree",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008730B4",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LocalLock",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x008730AC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "LocalUnlock",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x0087308C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "MoveFileA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x0087304C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "MulDiv",
+    "class": "os-service",
+    "subclass": "arithmetic",
+    "iat_slot": "0x008730A0",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "MultiByteToWideChar",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x00873208",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 5,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 5,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "OutputDebugStringA",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008730C0",
+    "direct_call_sites": 13,
+    "thunks": [
+     "0x0040A73A",
+     "0x0040A753",
+     "0x0040A771",
+     "0x0040A77F"
+    ],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 13,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "game": 8,
+     "unmapped": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "QueryPerformanceCounter",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008730C4",
+    "direct_call_sites": 14,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 14,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 1,
+     "game": 5,
+     "unmapped": 6
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "QueryPerformanceFrequency",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x008730C8",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "game": 2,
+     "unmapped": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "RaiseException",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008731B0",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "crt": 2,
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "ReadFile",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873164",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 4
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "ResetEvent",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x008731DC",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "cri": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "ResumeThread",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x0087305C",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 4,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 4,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 2,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "RtlUnwind",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x008731AC",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x00827C84"
+    ],
+    "calls_to_thunks": 3,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetEndOfFile",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x008730E4",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetEnvironmentVariableA",
+    "class": "os-service",
+    "subclass": "environment",
+    "iat_slot": "0x00873070",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetEvent",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x008731D0",
+    "direct_call_sites": 6,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 6,
+    "direct_call_sites_by_region": {
+     "cri": 6
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetFilePointer",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873158",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetFileTime",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873050",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetHandleCount",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873170",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetLastError",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x0087318C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 1,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetStdHandle",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873100",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetThreadAffinityMask",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x008731D8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetThreadExecutionState",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873080",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetThreadIdealProcessor",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873064",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetThreadPriority",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873068",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 4,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 4,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "game": 2,
+     "unmapped": 5
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SetUnhandledExceptionFilter",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x0087321C",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "crt": 3,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "Sleep",
+    "class": "os-service",
+    "subclass": "time",
+    "iat_slot": "0x00873238",
+    "direct_call_sites": 13,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 5,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 5,
+    "static_call_sites": 13,
+    "direct_call_sites_by_region": {
+     "cri": 5,
+     "crt": 5,
+     "game": 2,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "SuspendThread",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873054",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "TerminateProcess",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873210",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "TlsAlloc",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873198",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 1,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "TlsFree",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873190",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "TlsGetValue",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x0087319C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 4,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 4,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "TlsSetValue",
+    "class": "os-service",
+    "subclass": "threads",
+    "iat_slot": "0x00873194",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "UnhandledExceptionFilter",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x00873220",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "crt": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "VirtualAlloc",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873134",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "crt": 2
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "VirtualFree",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873140",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "VirtualQuery",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873228",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "WaitForSingleObject",
+    "class": "os-service",
+    "subclass": "sync",
+    "iat_slot": "0x0087306C",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 3,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 3,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "cri": 3,
+     "game": 1,
+     "unmapped": 3
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "WideCharToMultiByte",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x0087323C",
+    "direct_call_sites": 11,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 4,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 4,
+    "static_call_sites": 11,
+    "direct_call_sites_by_region": {
+     "cri": 1,
+     "crt": 10
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "WriteConsoleA",
+    "class": "os-service",
+    "subclass": "console",
+    "iat_slot": "0x008730F4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "WriteConsoleW",
+    "class": "os-service",
+    "subclass": "console",
+    "iat_slot": "0x008730EC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "crt": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "WriteFile",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873160",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "crt": 6,
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "KERNEL32.dll",
+    "name": "lstrcmpA",
+    "class": "os-service",
+    "subclass": "locale",
+    "iat_slot": "0x0087307C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ole32.dll",
+    "name": "CoCreateInstance",
+    "class": "os-service",
+    "subclass": "com",
+    "iat_slot": "0x008733EC",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "ole32.dll",
+    "name": "CoInitialize",
+    "class": "os-service",
+    "subclass": "com",
+    "iat_slot": "0x008733E0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ole32.dll",
+    "name": "CoInitializeEx",
+    "class": "os-service",
+    "subclass": "com",
+    "iat_slot": "0x008733F0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ole32.dll",
+    "name": "CoSetProxyBlanket",
+    "class": "os-service",
+    "subclass": "com",
+    "iat_slot": "0x008733E8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "ole32.dll",
+    "name": "CoUninitialize",
+    "class": "os-service",
+    "subclass": "com",
+    "iat_slot": "0x008733E4",
+    "direct_call_sites": 2,
+    "thunks": [
+     "0x00784275"
+    ],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "OLEAUT32.dll",
+    "name": "SysAllocString",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873254",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "OLEAUT32.dll",
+    "name": "SysFreeString",
+    "class": "os-service",
+    "subclass": "memory",
+    "iat_slot": "0x00873250",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "SHELL32.dll",
+    "name": "ShellExecuteW",
+    "class": "os-service",
+    "subclass": "process",
+    "iat_slot": "0x0087325C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "SHLWAPI.dll",
+    "name": "PathFileExistsA",
+    "class": "os-service",
+    "subclass": "files",
+    "iat_slot": "0x00873264",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_Init",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873420",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_RegisterCallResult",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x008733FC",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_RegisterCallback",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873410",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "game": 7
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_RunCallbacks",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x0087341C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_Shutdown",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873418",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_UnregisterCallResult",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873400",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamAPI_UnregisterCallback",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873408",
+    "direct_call_sites": 9,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 9,
+    "direct_call_sites_by_region": {
+     "game": 7,
+     "unmapped": 2
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamApps",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873424",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamFriends",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873404",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "game": 5
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamUser",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x00873414",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamUserStats",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x008733F8",
+    "direct_call_sites": 10,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 10,
+    "direct_call_sites_by_region": {
+     "game": 10
+    }
+   },
+   {
+    "dll": "steam_api.dll",
+    "name": "SteamUtils",
+    "class": "steam",
+    "subclass": "steam-api",
+    "iat_slot": "0x0087340C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "SteamMetricsSDK.dll",
+    "name": "?CleanInstance@MetricsAgent@SteamMetricsSDK@@SAXXZ",
+    "class": "steam",
+    "subclass": "steam-metrics",
+    "iat_slot": "0x00873278",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "SteamMetricsSDK.dll",
+    "name": "?GetInstance@MetricsAgent@SteamMetricsSDK@@SAPAV12@XZ",
+    "class": "steam",
+    "subclass": "steam-metrics",
+    "iat_slot": "0x00873270",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "SteamMetricsSDK.dll",
+    "name": "?Initialize@MetricsAgent@SteamMetricsSDK@@QAEXPBDH0@Z",
+    "class": "steam",
+    "subclass": "steam-metrics",
+    "iat_slot": "0x0087326C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "SteamMetricsSDK.dll",
+    "name": "?LogEvent@MetricsAgent@SteamMetricsSDK@@QAEXPBD00@Z",
+    "class": "steam",
+    "subclass": "steam-metrics",
+    "iat_slot": "0x00873274",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "BeginPaint",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x008732B4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "CheckDlgButton",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x00873378",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "CloseClipboard",
+    "class": "presentation",
+    "subclass": "clipboard",
+    "iat_slot": "0x00873284",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "CreateDialogIndirectParamW",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x008732C0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "CreateWindowExW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x0087335C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DefWindowProcW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873368",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x004018B1"
+    ],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DestroyIcon",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x00873314",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DestroyWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873280",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DispatchMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x0087336C",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DrawIcon",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x008732AC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "DrawTextW",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x00873298",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "EmptyClipboard",
+    "class": "presentation",
+    "subclass": "clipboard",
+    "iat_slot": "0x008732D8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "EnableMenuItem",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732D4",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "EnableWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873308",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "EndPaint",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x008732F4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "FillRect",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x00873294",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetActiveWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732F8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetAsyncKeyState",
+    "class": "presentation",
+    "subclass": "keyboard",
+    "iat_slot": "0x008732C4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetClassNameW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732D0",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetClientRect",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732B0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetCursorPos",
+    "class": "presentation",
+    "subclass": "cursor",
+    "iat_slot": "0x00873374",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetDialogBaseUnits",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x0087331C",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetDlgItem",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x008732DC",
+    "direct_call_sites": 14,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 14,
+    "direct_call_sites_by_region": {
+     "game": 14
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetKeyState",
+    "class": "presentation",
+    "subclass": "keyboard",
+    "iat_slot": "0x00873380",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetLastActivePopup",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732A0",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x00873328",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetParent",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732A4",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetSysColor",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x008732E8",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetSystemMenu",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873288",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetSystemMetrics",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x00873364",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 5,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 5,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873320",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetWindowLongW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x0087334C",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetWindowRect",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873290",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "GetWindowTextW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732CC",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "IsDialogMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x008732BC",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "IsWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732FC",
+    "direct_call_sites": 13,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 13,
+    "direct_call_sites_by_region": {
+     "game": 13
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "KillTimer",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x0087329C",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "game": 4
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "LoadCursorW",
+    "class": "presentation",
+    "subclass": "cursor",
+    "iat_slot": "0x00873338",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "LoadIconW",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x0087337C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "LoadStringW",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x008732F0",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "MessageBeep",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x008732A8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "MessageBoxA",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x00873348",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "game": 5
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "MoveWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873324",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "OpenClipboard",
+    "class": "presentation",
+    "subclass": "clipboard",
+    "iat_slot": "0x00873300",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "PeekMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x00873354",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 2,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 2,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "PostMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x00873330",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "PostQuitMessage",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x0087332C",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "game": 5
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "RedrawWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732E4",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "RegisterClassW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873360",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SendMessageW",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x00873304",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "game": 7
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetClipboardData",
+    "class": "presentation",
+    "subclass": "clipboard",
+    "iat_slot": "0x0087330C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetFocus",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x0087333C",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetForegroundWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873334",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetRect",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732C8",
+    "direct_call_sites": 7,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 7,
+    "direct_call_sites_by_region": {
+     "game": 7
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetTimer",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x0087328C",
+    "direct_call_sites": 0,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 0,
+    "direct_call_sites_by_region": {}
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetWindowLongW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732E0",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetWindowPos",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x008732EC",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SetWindowTextW",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873310",
+    "direct_call_sites": 5,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {
+     "game": 5
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "ShowCursor",
+    "class": "presentation",
+    "subclass": "cursor",
+    "iat_slot": "0x00873344",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "ShowWindow",
+    "class": "presentation",
+    "subclass": "window",
+    "iat_slot": "0x00873358",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "SystemParametersInfoW",
+    "class": "presentation",
+    "subclass": "paint",
+    "iat_slot": "0x00873350",
+    "direct_call_sites": 2,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 1,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 1,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {
+     "game": 2
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "TranslateMessage",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x00873340",
+    "direct_call_sites": 3,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 3,
+    "direct_call_sites_by_region": {
+     "game": 3
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "WaitMessage",
+    "class": "presentation",
+    "subclass": "message",
+    "iat_slot": "0x008732B8",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "WinHelpW",
+    "class": "presentation",
+    "subclass": "dialog",
+    "iat_slot": "0x00873318",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "USER32.dll",
+    "name": "wvsprintfA",
+    "class": "os-service",
+    "subclass": "string",
+    "iat_slot": "0x00873370",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "cri": 1
+    }
+   },
+   {
+    "dll": "WINMM.dll",
+    "name": "timeGetTime",
+    "class": "presentation",
+    "subclass": "time",
+    "iat_slot": "0x00873388",
+    "direct_call_sites": 4,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 4,
+    "direct_call_sites_by_region": {
+     "cri": 2,
+     "game": 2
+    }
+   },
+   {
+    "dll": "WINMM.dll",
+    "name": "timeKillEvent",
+    "class": "presentation",
+    "subclass": "time",
+    "iat_slot": "0x00873390",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "unmapped": 1
+    }
+   },
+   {
+    "dll": "WINMM.dll",
+    "name": "timeSetEvent",
+    "class": "presentation",
+    "subclass": "time",
+    "iat_slot": "0x0087338C",
+    "direct_call_sites": 1,
+    "thunks": [],
+    "calls_to_thunks": 0,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 1,
+    "direct_call_sites_by_region": {
+     "game": 1
+    }
+   },
+   {
+    "dll": "XINPUT1_3.dll",
+    "name": "ordinal#2",
+    "class": "presentation",
+    "subclass": "input",
+    "iat_slot": "0x008733A0",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007C0CD4"
+    ],
+    "calls_to_thunks": 2,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {},
+    "conventional_name": "XInputGetState"
+   },
+   {
+    "dll": "XINPUT1_3.dll",
+    "name": "ordinal#3",
+    "class": "presentation",
+    "subclass": "input",
+    "iat_slot": "0x0087339C",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007C0CDA"
+    ],
+    "calls_to_thunks": 2,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 2,
+    "direct_call_sites_by_region": {},
+    "conventional_name": "XInputSetState"
+   },
+   {
+    "dll": "XINPUT1_3.dll",
+    "name": "ordinal#4",
+    "class": "presentation",
+    "subclass": "input",
+    "iat_slot": "0x00873398",
+    "direct_call_sites": 0,
+    "thunks": [
+     "0x007C0CCE"
+    ],
+    "calls_to_thunks": 5,
+    "jumps_to_thunks": 0,
+    "slot_pointer_loads": 0,
+    "thunk_pointer_loads": 0,
+    "pointer_loads": 0,
+    "static_call_sites": 5,
+    "direct_call_sites_by_region": {},
+    "conventional_name": "XInputGetCapabilities"
+   }
+  ]
+ }
+}

@@ -1,0 +1,31 @@
+{
+  "schema": "sa2-recomp-lifted-extras-backfill/v1",
+  "about": [
+    "Reasons for blocks that tools/s4/lift_extra.py registered before it required",
+    "one. Its --entry path took `args.why[k] if k < len(args.why) else \"\"`, so an",
+    "--entry without a matching --why was lifted silently with an empty reason.",
+    "Two of 958 rows were in that state; the tool now refuses.",
+    "",
+    "Each reason below was RECOVERED from surviving run evidence, not written from",
+    "memory, and each says where it came from. That recovery was only possible",
+    "because those runs happened to still be on disk, which is the argument for",
+    "the record rather than a reassurance about it.",
+    "",
+    "This file should never grow. A new row with no reason is now a hard failure",
+    "in lift_extra.py itself."
+  ],
+  "rows": [
+    {
+      "va": "0x007c5910",
+      "why": "a guest thread start routine: CreateThread targets it, so a created thread has nowhere to begin unless it is lifted as its own module",
+      "recovered": "Documentation/receipts/s4-suspension-and-fls-v1.json records it as `guest_start_routine` for a created thread, one of eight distinct start routines that receipt names. It is also the address the S4 slice-12 journal tabulates while diagnosing the process-wide FLS defect.",
+      "owner": "inside FUN_007c5820 (0x007c5820..0x007c5950), so it is a mid-function entry rather than a function the map missed"
+    },
+    {
+      "va": "0x007ebb90",
+      "why": "a dispatch target the function table had no row for: a driven run ended on it, so it is lifted as its own module to give the table an entry",
+      "recovered": "private/generated/s4/run/sus6.matrix.json records the run `sus6.on` ending with `exit_pc: 0x007ebb90` and the note `function table miss at 0x007ebb90 (region .text, table 21953/65536 entries)`, during the suspension and FLS investigation.",
+      "owner": "inside FUN_007ebb40 (0x007ebb40..0x007ebc80), so it is a mid-function entry rather than a function the map missed"
+    }
+  ]
+}

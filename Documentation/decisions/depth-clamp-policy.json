@@ -1,0 +1,9 @@
+{
+  "schema": "sa2-residue-ruling/v1",
+  "residue": "DEPTH_CLAMP",
+  "decided_by": "user",
+  "ruling": "patch",
+  "decision": "Documentation/decisions/depth-clamp.md",
+  "policy": "Use the project SDL3 depth-clamp patch where supported. Devices without the capability require the shader fallback and its rendering measurements.",
+  "what_the_check_does_with_it": "On a device reporting depth clip and clamp, require the mapped depth-clamp property. Otherwise report the shader fallback as owed."
+}

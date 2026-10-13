@@ -1,0 +1,10 @@
+{
+  "schema": "sa2-parallel-tests-serial/v1",
+  "note": "Tests Documentation/scripts/parallel_tests.py holds out of the parallel part and runs after it, in one process with nothing else running. Each entry is a node id, or a test file for all of its tests, and why it cannot run beside other tests. A test that cannot run beside others is listed here, never skipped (the user's decision of 2026-10-11, Documentation/decisions/2026-10-11-S7-gate-speed.md). An entry that matches no collected test fails the run. The list was found on 2026-10-11 by comparing a parallel run with a serial run of the tests that failed in it: each failed serially as well, so none is held out for interference; the one entry is held out for memory.",
+  "serial": [
+    {
+      "test": "Documentation/scripts/tests/test_replay_results_report.py",
+      "reason": "It recomputes both replays' comparisons (check_replay_results.falsifications under kept()), and its resident peak is most of this machine's memory, so beside other workers it would leave less than the 8 GB the runner keeps free; the machine ran out of memory on 2026-10-11 with several heavy jobs side by side. Alone after the parallel part, it runs as the serial gate ran it. The runner records its peak (peak_mib) in the timing record, private/generated/script-tests/timings.rec, after every run."
+    }
+  ]
+}

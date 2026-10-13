@@ -1,0 +1,33 @@
+{
+ "schema": "sa2-identity-words/v1",
+ "what": "The words of .dataa a replay compares by what they identify, not by their bits: values the host chooses, an allocation address or an OS handle number, which the native and the lifted run each choose their own way (the user's ruling of 2026-09-24, decisions 1 and 2, Documentation/decisions/2026-09-24-S4-handles-identity-stage-mask.md). A digest mask leaves every one of them out (tools/s4/snapshot_fields.py --word-logs), and the comparer holds them by canonical mapping and lifecycle instead. One record for every replay: the mask tool and the comparer read the same words.",
+ "words": [
+  {
+   "address": "0x01a557c0",
+   "name": "g_01a557c0",
+   "kind": "heap",
+   "evidence": "a heap address the boot replay has compared by which allocation it names since 2026-09-22 (Documentation/replays.json, field_policy identity), confirmed by the user on 2026-09-24 (decision 2)"
+  },
+  {
+   "address": "0x01af19f0",
+   "name": "g_01af19f0",
+   "kind": "heap",
+   "evidence": "as g_01a557c0: Documentation/replays.json field_policy identity, confirmed by the user on 2026-09-24 (decision 2)"
+  }
+ ],
+ "tables": [
+  {
+   "name": "XECI file table",
+   "base": "0x01755008",
+   "stride": "0x2d8",
+   "count": 80,
+   "offsets": {
+    "0x218": "handle",
+    "0x24c": "handle",
+    "0x268": "handle",
+    "0x27c": "handle"
+   },
+   "evidence": "CRI's Win32 file layer (XECI/PCx86 Ver.1.84) keeps 80 entries of 0x2D8 bytes from 0x01755008 (agents-journals/s4/2026-09-24-tick-380-xeci.md); each entry holds its file handle at +0x218, +0x24C and +0x268 and its event handle at +0x27C. Handle numbers are the host's choice and are compared by the user's canonical mapping (decision 1). At every close the panel saw, the handle words went to zero on the same tick as the entry's in-use word (agents-journals/s4/2026-09-25-word-observation.md, 'What the panel measured on the way'), but an open does not always set all four: in wordlog-u1-mh-a, +0x24C stayed 0 through entry 2's first open and entry 0's last (the U4 build's MANIFEST, request 2). The in-use word at +0x0 is not here: it is a flag the game writes (1 at an open, 0 at the close), not a value the host chooses, so a mask compares it by its bits, as tick_digest.h does."
+  }
+ ]
+}

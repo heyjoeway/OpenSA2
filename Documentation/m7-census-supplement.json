@@ -1,0 +1,175 @@
+{
+ "schema": "sa2-recomp-m7-census-supplement/v1",
+ "id": "m7-census-supplement",
+ "note": "A declared, hand-written input of M7's denominator, not a measurement: the methods unit C read by eye off unreached renderer call sites the static scan cannot attribute (tail jumps through the renderer's device field, and constant-table calls whose receiver the dataflow does not type). It is outside Documentation/receipts/ because nothing generates it. tools/s4/m7_inputs.py counts each row's method in `called`, never as the scan's (a supplement row cannot shrink what the scan is shown to miss, and its sites stay in the scan's ceiling). check_m7_inputs.py re-decodes every row in the pinned executable on every push: the site lies in the renderer module, the load at load_va is `mov r,[base+displacement]`, nothing between them writes r, the site is `call r` or `jmp r` as `shape` says, and displacement is 4 times the named method's slot in runtime/sa2_d3d9.c. Which interface the receiver is, is what a person read; `evidence` says where. Sunset: phase 2 of the M7 plan teaches the scan these shapes, and this file is deleted when the scan attributes every row.",
+ "source": "private/generated/s5/next/C/M7.md",
+ "read_by": "unit C, 2026-10-03, read-only, at HEAD development_snapshot",
+ "renderer_module": {
+  "start": "0x00865BA0",
+  "end": "0x0086A000"
+ },
+ "rows": [
+  {
+   "va": "0x00866F34",
+   "load_va": "0x00866F2A",
+   "shape": "jmp",
+   "displacement": "0x180",
+   "interface": "IDirect3DDevice9",
+   "method": "SetVertexShaderConstantI",
+   "evidence": "a COM-shaped tail jump through the renderer's device field ([renderer+38h]) in renderer vtable slot +0xFC; unit C's census, \"IDirect3DDevice9::SetVertexShaderConstantI: tail jump 0x00866F34\""
+  },
+  {
+   "va": "0x00866F4E",
+   "load_va": "0x00866F44",
+   "shape": "jmp",
+   "displacement": "0x1BC",
+   "interface": "IDirect3DDevice9",
+   "method": "SetPixelShaderConstantI",
+   "evidence": "the second tail jump of renderer vtable slot +0xFC, through the device field; unit C's census, \"IDirect3DDevice9::SetPixelShaderConstantI: tail jump 0x00866F4E\""
+  },
+  {
+   "va": "0x00869759",
+   "load_va": "0x00869754",
+   "shape": "call",
+   "displacement": "0x64",
+   "interface": "IDirect3DDevice9",
+   "method": "CreateCubeTexture",
+   "evidence": "unit C's census, \"IDirect3DDevice9::CreateCubeTexture: 0x00869759, the cube branch of the render-target creator +0x180\""
+  },
+  {
+   "va": "0x00868F56",
+   "load_va": "0x00868F53",
+   "shape": "call",
+   "displacement": "0x48",
+   "interface": "IDirect3DCubeTexture9",
+   "method": "GetCubeMapSurface",
+   "evidence": "unit C's census, \"IDirect3DCubeTexture9::GetCubeMapSurface: 0x00868F56, in +0x90, followed by SetRenderTarget\""
+  },
+  {
+   "va": "0x008660D2",
+   "load_va": "0x008660CE",
+   "shape": "call",
+   "displacement": "0x8",
+   "interface": "IDirect3DIndexBuffer9",
+   "method": "Release",
+   "evidence": "unit C's census, \"IDirect3DIndexBuffer9::Release: 0x008660D2\" (renderer vtable slot [78])"
+  },
+  {
+   "va": "0x00866DC9",
+   "load_va": "0x00866DC6",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x00867262",
+   "load_va": "0x0086725E",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x008672B2",
+   "load_va": "0x008672AE",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x00867302",
+   "load_va": "0x008672FE",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x00867352",
+   "load_va": "0x0086734E",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x008673A2",
+   "load_va": "0x0086739E",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x00867402",
+   "load_va": "0x008673FE",
+   "shape": "call",
+   "displacement": "0x24",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantByName",
+   "evidence": "one of the seven calls unit C read at displacement 0x24 on a constant table in the renderer's constant setters, \"ID3DXConstantTable::GetConstantByName: 7 sites\""
+  },
+  {
+   "va": "0x00867423",
+   "load_va": "0x0086741F",
+   "shape": "call",
+   "displacement": "0x18",
+   "interface": "ID3DXConstantTable",
+   "method": "GetConstantDesc",
+   "evidence": "unit C's census, \"ID3DXConstantTable::GetConstantDesc: 0x00867423\""
+  },
+  {
+   "va": "0x008673C5",
+   "load_va": "0x008673B2",
+   "shape": "call",
+   "displacement": "0x34",
+   "interface": "ID3DXConstantTable",
+   "method": "SetBool",
+   "evidence": "unit C's census, \"ID3DXConstantTable::SetBool, SetInt, SetFloat, SetVector, SetMatrix: 0x008673C5, 0x00867370, 0x00867323, 0x008672D0, 0x00867280\""
+  },
+  {
+   "va": "0x00867370",
+   "load_va": "0x00867366",
+   "shape": "call",
+   "displacement": "0x3C",
+   "interface": "ID3DXConstantTable",
+   "method": "SetInt",
+   "evidence": "as SetBool's row: the second of the five setter sites unit C listed"
+  },
+  {
+   "va": "0x00867323",
+   "load_va": "0x0086731E",
+   "shape": "call",
+   "displacement": "0x44",
+   "interface": "ID3DXConstantTable",
+   "method": "SetFloat",
+   "evidence": "as SetBool's row: the third of the five setter sites unit C listed"
+  },
+  {
+   "va": "0x008672D0",
+   "load_va": "0x008672C6",
+   "shape": "call",
+   "displacement": "0x4C",
+   "interface": "ID3DXConstantTable",
+   "method": "SetVector",
+   "evidence": "as SetBool's row: the fourth of the five setter sites unit C listed"
+  },
+  {
+   "va": "0x00867280",
+   "load_va": "0x00867276",
+   "shape": "call",
+   "displacement": "0x54",
+   "interface": "ID3DXConstantTable",
+   "method": "SetMatrix",
+   "evidence": "as SetBool's row: the fifth of the five setter sites unit C listed"
+  }
+ ]
+}

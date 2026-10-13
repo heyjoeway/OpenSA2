@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Extract DXVK's legacy-input lowering pass, verbatim, for host 2's shader translator.
+
+Subtitle: the build-time extractor of ruling 2's "lowering pass that follows DXVK's"
+(Documentation/decisions/2026-10-04-S5-user-rulings.md). It cuts
+`D3D9ShaderLowerLegacyInputPass` out of the pinned DXVK checkout's src/d3d9/d3d9_shader.cpp, with
+the file's own includes and namespace opening, and writes a translation unit that holds that text
+with zero substitutions, followed by one entry function host 2 calls. It also reads the flags
+DXVK's own build compiled d3d9_shader.cpp with, so the unit is compiled as DXVK compiled it.
+
+This is deliberately not test/extract_refs.py: an instrument and the game-side code it measures
+must not share a generator (AGENTS.md rule 5's separation of what checks from what is checked).
+
+  extract_dxvk_shader.py lower --dxvk DIR --out FILE.cpp --record FILE.json
+  extract_dxvk_shader.py flags --compile-commands FILE --source REL [--record FILE.json]
+  extract_dxvk_shader.py compiler --compile-commands FILE --source REL [--source REL ...]
+  extract_dxvk_shader.py identity --compiler CXX --archive A --repo DIR --dxvk DIR --out FILE.json
+                         --unit FLAGS.json:SOURCE [--unit ...] [--include DIR ...] [--extra FILE ...]
+
+`lower` refuses unless the checkout is at the pinned commit (tools/pins.json, dxvk.commit), the
+file on disk is the blob that commit records, and every anchor holds: the span starts at the
+file's first line, the class opens at `  class D3D9ShaderLowerLegacyInputPass {`, and the span
+ends at the `  };` that precedes `  class D3D9ShaderConverter`. The record names the span's
+lines and sha256. `flags` prints one flag per line: the source's compile command from DXVK's
+compile_commands.json without the compiler, its output, dependency and colour options and the
+source itself, with every relative include path made absolute from the command's directory.
+`compiler` prints the compiler those commands name (one, or it refuses), resolved to its real
+file, so the translator is built by the compiler DXVK's own objects were.
+
+`identity` is the translator's identity, the shader cache's key: the dxbc-spirv archive (a thin
+archive by its members' contents and names), the compiler (its real file, version and sha256),
+every unit's flags, and the content of every file each unit's preprocessing reads (the compiler's
+-M list: the translator's sources, DXVK's sources and headers, the system headers), each named
+relative to the repository, the DXVK checkout or the tool tree so the identity is the same from
+any clone of the repository. It writes the manifest it hashed and prints
+"dxbc-spirv:<16 hex>+translator:<16 hex>".
+"""
+import argparse
+import hashlib
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+SOURCE = "src/d3d9/d3d9_shader.cpp"
+FIRST_LINE = '#include "d3d9_shader.h"'
+CLASS_OPEN = "  class D3D9ShaderLowerLegacyInputPass {"
+NEXT_CLASS = "  class D3D9ShaderConverter : public DxvkIrShaderConverter {"
+ENTRY = """
+  // ---- host 2 (sa2-recomp host/d3d9gpu): the one entry point, outside the extracted span ----
+  void d9gDxvkLowerLegacyInput(
+          dxbc_spv::ir::Builder&  builder,
+    const D3D9ShaderOptions&      options,
+    const D3D9ShaderAnalysis&     analysis) {
+    D3D9ShaderLowerLegacyInputPass pass(builder, options, analysis);
+    pass.run();
+  }
+
+}
+"""
+
+
+class Refusal(Exception):
+    pass
+
+
+def git(checkout, *args):
+    r = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, text=True)
+    if r.returncode:
+        raise Refusal(f"git {' '.join(args)} in {checkout}: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def pinned_commit(repo):
+    pins = json.loads((repo / "tools" / "pins.json").read_text())
+    return pins["tools"]["dxvk"]["commit"]
+
+
+def lower(args):
+    dxvk = Path(args.dxvk).resolve()
+    repo = Path(args.repo).resolve()
+    head = git(dxvk, "rev-parse", "HEAD")
+    if head != pinned_commit(repo):
+        raise Refusal(f"{dxvk} is at {head}, not the pinned DXVK commit {pinned_commit(repo)}")
+    data = (dxvk / SOURCE).read_bytes()
+    blob = git(dxvk, "rev-parse", f"HEAD:{SOURCE}")
+    on_disk = subprocess.run(["git", "hash-object", "--stdin"], input=data, capture_output=True).stdout.decode().strip()
+    if blob != on_disk:
+        raise Refusal(f"{SOURCE} on disk ({on_disk}) is not the blob the pinned commit records ({blob})")
+    lines = data.decode("utf-8").split("\n")
+    if lines[0] != FIRST_LINE:
+        raise Refusal(f"{SOURCE} does not start with {FIRST_LINE!r}")
+    if lines.count(CLASS_OPEN) != 1 or lines.count(NEXT_CLASS) != 1:
+        raise Refusal(f"{SOURCE}: the class anchors do not occur exactly once")
+    open_at, next_at = lines.index(CLASS_OPEN), lines.index(NEXT_CLASS)
+    end = max(i for i in range(open_at, next_at) if lines[i] == "  };")
+    span = "\n".join(lines[:end + 1]) + "\n"
+    header = ("// GENERATED by host/d3d9gpu/shader/extract_dxvk_shader.py from the pinned DXVK checkout.\n"
+              f"// {SOURCE} lines 1-{end + 1} (blob {blob}), verbatim, then host 2's entry point.\n"
+              "// DXVK is zlib-licensed (Copyright (c) 2017 Philip Rebohle, Copyright (c) 2019 Joshua Ashton);\n"
+              "// this unit is generated into the build directory and never tracked.\n")
+    out = header + span + ENTRY
+    Path(args.out).write_text(out)
+    record = {"source": SOURCE, "dxvk_commit": head, "blob": blob, "first_line": 1, "last_line": end + 1,
+              "class_line": open_at + 1, "span_sha256": hashlib.sha256(span.encode()).hexdigest(),
+              "substitutions": 0, "out": str(Path(args.out).resolve()),
+              "out_sha256": hashlib.sha256(out.encode()).hexdigest()}
+    Path(args.record).write_text(json.dumps(record, indent=1) + "\n")
+    print(f"DXVK_LOWER_EXTRACTED lines 1-{end + 1} span {record['span_sha256'][:16]}")
+    return 0
+
+
+DROP_WITH_ARG = {"-o", "-MQ", "-MF", "-MT"}
+DROP = {"-c", "-MD", "-MMD", "-fdiagnostics-color=always", "-Winvalid-pch"}
+
+
+def flags(args):
+    cc = json.loads(Path(args.compile_commands).read_text())
+    entries = [e for e in cc if os.path.normpath(os.path.join(e["directory"], e["file"])).endswith(args.source)]
+    if len(entries) != 1:
+        raise Refusal(f"{args.compile_commands} holds {len(entries)} commands for {args.source}")
+    e = entries[0]
+    argv = e["arguments"] if "arguments" in e else shlex.split(e["command"])
+    out, skip = [], False
+    src = os.path.normpath(os.path.join(e["directory"], e["file"]))
+    for a in argv[1:]:
+        if skip:
+            skip = False
+            continue
+        if a in DROP_WITH_ARG:
+            skip = True
+            continue
+        if a in DROP or os.path.normpath(os.path.join(e["directory"], a)) == src:
+            continue
+        if a.startswith("-I"):
+            a = "-I" + os.path.normpath(os.path.join(e["directory"], a[2:]))
+        out.append(a)
+    if args.record:
+        Path(args.record).write_text(json.dumps({"compile_commands": str(Path(args.compile_commands).resolve()),
+            "compile_commands_sha256": hashlib.sha256(Path(args.compile_commands).read_bytes()).hexdigest(),
+            "source": args.source, "flags": out}, indent=1) + "\n")
+    print("\n".join(out))
+    return 0
+
+
+def resolve_compiler(argv0):
+    path = argv0 if os.path.isabs(argv0) else shutil.which(argv0)
+    if not path:
+        raise Refusal(f"the compiler {argv0} is not on PATH")
+    return os.path.realpath(path)
+
+
+def compiler(args):
+    cc = json.loads(Path(args.compile_commands).read_text())
+    found = set()
+    for src in args.source:
+        entries = [e for e in cc if os.path.normpath(os.path.join(e["directory"], e["file"])).endswith(src)]
+        if len(entries) != 1:
+            raise Refusal(f"{args.compile_commands} holds {len(entries)} commands for {src}")
+        e = entries[0]
+        argv = e["arguments"] if "arguments" in e else shlex.split(e["command"])
+        found.add(resolve_compiler(argv[0]))
+    if len(found) != 1:
+        raise Refusal(f"DXVK's units name more than one compiler: {sorted(found)}")
+    print(found.pop())
+    return 0
+
+
+def file_sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def identity(args):
+    # Generated units live beside the manifest (the build directory), named "build:".
+    # The deepest root names a file: in the main tree DXVK and s5-tools lie inside the repository
+    # (in a clone they resolve outside it), and the name must not depend on which.
+    roots = sorted([("build", os.path.realpath(os.path.dirname(os.path.abspath(args.out)))),
+                    ("repo", os.path.realpath(args.repo)), ("dxvk", os.path.realpath(args.dxvk)),
+                    ("s5-tools", os.path.realpath(os.path.join(args.repo, "private", "s5-tools")))],
+                   key=lambda root: len(root[1]), reverse=True)
+
+    def name_of(path):
+        real = os.path.realpath(path)
+        for tag, root in roots:
+            if real == root or real.startswith(root + os.sep):
+                return f"{tag}:{os.path.relpath(real, root)}"
+        return real
+
+    cxx = resolve_compiler(args.compiler)
+    version = subprocess.run([cxx, "-dumpfullversion"], capture_output=True, text=True, check=True).stdout.strip()
+    archive = os.path.realpath(args.archive)
+    data = Path(archive).read_bytes()
+    if data.startswith(b"!<thin>\n"):
+        members = subprocess.run(["ar", "t", archive], capture_output=True, text=True, check=True,
+                                 cwd=os.path.dirname(archive)).stdout.split()
+        arch = {"thin": True, "members": [[os.path.basename(m), file_sha(os.path.join(os.path.dirname(archive), m))]
+                                          for m in members]}
+    else:
+        arch = {"thin": False, "sha256": hashlib.sha256(data).hexdigest()}
+    units, deps = [], {}
+    for spec in args.unit:
+        record, source = spec.split(":", 1)
+        flags = json.loads(Path(record).read_text())["flags"]
+        cmd = [cxx, *flags, *[f"-I{d}" for d in args.include], "-M", "-MT", "x", source]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Refusal(f"the dependency pass over {source} failed: {r.stderr[-400:]}")
+        files = r.stdout.replace("\\\n", " ").split(":", 1)[1].split()
+        for f in files:
+            deps[name_of(f)] = file_sha(f)
+        units.append({"source": name_of(source), "flags": flags, "files": len(files)})
+    extra = {name_of(f): file_sha(f) for f in args.extra}
+    manifest = {"compiler": {"path": cxx, "version": version, "sha256": file_sha(cxx)},
+                "archive": arch, "units": units, "includes": [name_of(d) for d in args.include],
+                "files": dict(sorted(deps.items())), "extra": dict(sorted(extra.items()))}
+    arch_id = hashlib.sha256(json.dumps(arch, sort_keys=True).encode()).hexdigest()[:16]
+    rest = {k: v for k, v in manifest.items() if k != "archive"}
+    tr_id = hashlib.sha256(json.dumps(rest, sort_keys=True).encode()).hexdigest()[:16]
+    manifest["id"] = f"dxbc-spirv:{arch_id}+translator:{tr_id}"
+    Path(args.out).write_text(json.dumps(manifest, indent=1) + "\n")
+    print(manifest["id"])
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    lw = sub.add_parser("lower")
+    lw.add_argument("--dxvk", required=True)
+    lw.add_argument("--repo", default=str(Path(__file__).resolve().parents[3]))
+    lw.add_argument("--out", required=True)
+    lw.add_argument("--record", required=True)
+    fl = sub.add_parser("flags")
+    fl.add_argument("--compile-commands", required=True)
+    fl.add_argument("--source", required=True)
+    fl.add_argument("--record")
+    co = sub.add_parser("compiler")
+    co.add_argument("--compile-commands", required=True)
+    co.add_argument("--source", action="append", required=True)
+    idn = sub.add_parser("identity")
+    idn.add_argument("--compiler", required=True)
+    idn.add_argument("--archive", required=True)
+    idn.add_argument("--repo", required=True)
+    idn.add_argument("--dxvk", required=True)
+    idn.add_argument("--out", required=True)
+    idn.add_argument("--unit", action="append", required=True)
+    idn.add_argument("--include", action="append", default=[])
+    idn.add_argument("--extra", action="append", default=[])
+    args = ap.parse_args(argv)
+    try:
+        return {"lower": lower, "flags": flags, "compiler": compiler, "identity": identity}[args.cmd](args)
+    except Refusal as e:
+        print(f"extract_dxvk_shader.py: REFUSED {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

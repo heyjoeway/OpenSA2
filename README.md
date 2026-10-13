@@ -16,6 +16,14 @@ Windows ZIP, Android APK, and Linux DEB packages are available from [GitHub Rele
 
 This is an experimental prerelease. A known event crash and incomplete stage coverage remain. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
 
+## Screenshots
+
+City Escape running in development builds. The Windows capture runs under Wine; the Android capture runs in an emulator with touch controls.
+
+| Windows | Android |
+| --- | --- |
+| ![Sonic snowboarding through City Escape in the Windows build](docs/screenshots/city-escape-windows.png) | ![Sonic snowboarding through City Escape with Android touch controls](docs/screenshots/city-escape-android.png) |
+
 ## Build and contribute
 
 This source repository includes no game executable, assets, or translated game code. **The source cannot build a playable game on its own.** A complete build needs your own game files and generated inputs that this checkout does not include. The public bootstrap is still in development. Start with the [developer guide](docs/getting-started.md) to run checks with synthetic files and find the build entry points.

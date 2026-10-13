@@ -1,8 +1,11 @@
 # OpenSA2 contributor commands
 
-Keep this repository source-only. Game files, captures, translated game code,
+Keep this repository source-only. Game files, replay captures, translated game code,
 device records, and compiled output belong in ignored local directories.
 Preserve upstream attribution and licenses.
+
+Documentation screenshots belong under `docs/screenshots/`. Inspect the visible
+content for personal details and strip PNG metadata before publishing them.
 
 Read README.md, docs/architecture.md, and docs/status.md before changing a subsystem.
 Run `python3 tools/public_check.py` before committing. Create `private/generated`

@@ -13,7 +13,9 @@ import ast
 import hashlib
 import json
 import re
+import struct
 import subprocess
+import zlib
 from pathlib import Path
 from urllib.parse import unquote
 from xml.etree import ElementTree
@@ -23,6 +25,68 @@ FORBIDDEN_ROOTS = {"private", "build", ".venv", ".claude", "agents-journals"}
 FORBIDDEN_SUFFIXES = set(".exe .dll .so .a .o .obj .apk .zip .7z .jsonl .prs .pak .adx .ahx .gvr .gvm .pvr .pvm .sfd .csb .dds .afs .sa2s .y4m .mp4".split())
 TOKEN = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9]{40,})\b")
 LINK = re.compile(r"\[[^\]]*\]\(([^\s)]+)(?:\s+[^)]*)?\)|(?:src|href)=[\"']([^\"']+)[\"']")
+
+
+def validate_screenshot_png(data: bytes) -> None:
+    """Accept only bounded RGB/RGBA PNG pixels without metadata chunks."""
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("invalid PNG signature")
+    offset = 8
+    header = None
+    compressed = bytearray()
+    has_idat = False
+    while offset < len(data):
+        if len(data) - offset < 12:
+            raise ValueError("truncated PNG chunk")
+        length = struct.unpack_from(">I", data, offset)[0]
+        end = offset + 12 + length
+        if end > len(data):
+            raise ValueError("truncated PNG chunk")
+        kind = data[offset + 4:offset + 8]
+        payload = data[offset + 8:end - 4]
+        crc = struct.unpack_from(">I", data, end - 4)[0]
+        if zlib.crc32(kind + payload) != crc:
+            raise ValueError("invalid PNG chunk checksum")
+        if kind == b"IHDR":
+            if offset != 8 or length != 13:
+                raise ValueError("invalid PNG header order or length")
+            header = struct.unpack(">IIBBBBB", payload)
+            width, height, depth, color, compression, filtering, interlace = header
+            if not (1 <= width <= 4096 and 1 <= height <= 4096):
+                raise ValueError("PNG dimensions must be between 1 and 4096")
+            if (depth != 8 or color not in {2, 6} or
+                    (compression, filtering, interlace) != (0, 0, 0)):
+                raise ValueError("PNG must use noninterlaced 8-bit RGB or RGBA")
+        elif kind == b"IDAT":
+            if header is None:
+                raise ValueError("PNG image data precedes its header")
+            compressed.extend(payload)
+            has_idat = True
+        elif kind == b"IEND":
+            if length or header is None or not has_idat:
+                raise ValueError("invalid PNG end chunk")
+            if end != len(data):
+                raise ValueError("PNG has trailing bytes")
+            break
+        else:
+            raise ValueError("PNG contains metadata or an unsupported chunk")
+        offset = end
+    else:
+        raise ValueError("PNG end chunk is missing")
+
+    width, height, _, color, _, _, _ = header
+    row_bytes = 1 + width * (3 if color == 2 else 4)
+    expected_bytes = height * row_bytes
+    decoder = zlib.decompressobj()
+    try:
+        pixels = decoder.decompress(compressed, expected_bytes + 1)
+    except zlib.error as error:
+        raise ValueError("invalid PNG pixel compression") from error
+    if (len(pixels) != expected_bytes or not decoder.eof or
+            decoder.unused_data or decoder.unconsumed_tail):
+        raise ValueError("invalid PNG pixel data length or stream")
+    if any(pixels[index] > 4 for index in range(0, expected_bytes, row_bytes)):
+        raise ValueError("invalid PNG row filter")
 
 
 def source_paths(root: Path) -> list[Path]:
@@ -61,6 +125,15 @@ def check(root: Path, paths: list[Path], terms: list[str]) -> list[str]:
             failures.append(f"{rel}: lifted output filename")
         if data.startswith(b"/* sa2-recomp lifted */"):
             failures.append(f"{rel}: lifted output banner")
+        private_name = any(term.casefold() in str(rel).casefold() for term in terms)
+        if private_name:
+            failures.append(f"{rel}: private identity term")
+        if rel.parts[:2] == ("docs", "screenshots") and path.suffix == ".png":
+            try:
+                validate_screenshot_png(data)
+            except ValueError as error:
+                failures.append(f"{rel}: {error}")
+            continue
         try:
             text = data.decode("utf-8")
         except UnicodeError:
@@ -68,7 +141,7 @@ def check(root: Path, paths: list[Path], terms: list[str]) -> list[str]:
             continue
         if TOKEN.search(text) or "-----BEGIN " + "PRIVATE KEY-----" in text:
             failures.append(f"{rel}: credential-shaped text")
-        if any(term.casefold() in text.casefold() or term.casefold() in str(rel).casefold() for term in terms):
+        if not private_name and any(term.casefold() in text.casefold() for term in terms):
             failures.append(f"{rel}: private identity term")
         try:
             if path.suffix == ".py":

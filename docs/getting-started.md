@@ -2,7 +2,7 @@
 
 This guide sets up the source preview and runs installer and launcher checks without game files. It also identifies the build tools for developers who already have the required local inputs.
 
-There is no playable download in this repository. A complete game build needs your own supported 2012 PC installation of *Sonic Adventure 2*, an analyzed executable, translated modules, and built host dependencies. The public checkout does not yet provide a complete bootstrap for those inputs.
+To play the experimental prebuilt version, follow the [download and setup guide](downloads.md). A complete source build needs your own supported 2012 PC installation of *Sonic Adventure 2*, an analyzed executable, translated modules, and built host dependencies. The public checkout does not yet provide a complete bootstrap for those inputs.
 
 ## Set up the checkout
 

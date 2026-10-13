@@ -40,4 +40,18 @@ The analyzer can read the X-Hax SA2 Mod Loader headers as an external community 
 
 The source repository does not distribute the game's executable, assets, captures, lifted output, or generated executable overlay bytes. The handwritten native kernels in `runtime/sa2_ninja_math.c` and `runtime/sa2_cri_dsp.c` implement the original game's behavior; this project license does not assert ownership of the original game or third-party rights.
 
-Binary distributions need a notice set for the components they actually contain. Depending on the target, builds use SDL, DXVK, dxbc-spirv, Remill, libpng, zlib, Zstandard, musl, MinGW-w64, LLVM runtimes, and other platform components. This source notice file is not a complete notice set for every prebuilt distribution. Those distributions must retain their component-specific notices and altered-source marks.
+The experimental desktop and Android packages include this notice, the project license, and the component license texts. SDL is modified by the project's patches. DXVK and dxbc-spirv code are compiled into the GPU player. Remill headers and generated semantics form part of the runtime. The Wine-derived locale tables retain their original terms.
+
+The additional component notices are:
+
+| Component | Notice | Use |
+| --- | --- | --- |
+| libpng | [libpng license](licenses/libpng.txt) | Image decoding. Linux also carries its bundled distribution library's copyright file. |
+| zlib | [zlib license](licenses/zlib.txt) | Compression and PNG support. |
+| Zstandard | [Zstandard license](licenses/zstd.txt) | Stream decompression. |
+| musl | [musl copyright](licenses/musl-COPYRIGHT.txt) | Linux game runtime. |
+| MinGW-w64 | [MinGW-w64 notices](licenses/mingw-w64.txt) | Windows runtime support. |
+| LLVM C++ runtimes | [libc++](licenses/LLVM-libcxx.txt), [libc++abi](licenses/LLVM-libcxxabi.txt), [libunwind](licenses/LLVM-libunwind.txt) | Statically linked desktop C++ support and Android NDK C++ support. |
+| HIDAPI | [original HIDAPI notice](licenses/SDL-HIDAPI-original.txt) | Controller support within SDL. |
+
+The desktop packages are a tested development snapshot. Their matching project source is provided as a separate release asset. Android uses the project source at the release tag. Original game files remain the player's responsibility and are not included. Dependency source references and build instructions remain in the repository's tools and pinned metadata. Platform system libraries and graphics drivers are supplied by the operating system.

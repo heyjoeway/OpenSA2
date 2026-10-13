@@ -35,5 +35,7 @@ jobs:
         run: python tools/public_check.py
       - name: Verify the public-source checks
         run: python -m unittest discover -s tools/tests -v
+      - name: Verify the release package checks
+        run: python -m unittest discover -s tools/release -p 'test_*.py' -v
       - name: Test the installer and launcher with synthetic files
         run: python tools/test_source.py

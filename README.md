@@ -8,13 +8,17 @@ OpenSA2 is an experimental native port of the 2012 PC release of *Sonic Adventur
 
 The aim is to preserve the game's original logic while making that logic run on new platforms. Linux and Windows builds have reached live gameplay. Android builds have run on real devices with touch input, and external-controller support is implemented. Work continues on game coverage and platform behavior.
 
-[Get started](docs/getting-started.md) · [Architecture](docs/architecture.md) · [Current status](docs/status.md) · [Contribute](CONTRIBUTING.md)
+[Download and play](docs/downloads.md) · [Architecture](docs/architecture.md) · [Current status](docs/status.md) · [Contribute](CONTRIBUTING.md)
 
-## Source preview
+## Download the experimental builds
 
-This repository contains the project's source and tools. It includes no game executable, game assets, translated game code, or playable download. **The source cannot build a playable game on its own.** You need your own supported copy of the 2012 PC game, and the complete build needs generated inputs that this checkout does not include.
+Windows ZIP, Android APK, and Linux DEB packages are available from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.1). You need your own supported copy of the 2012 PC game. The packages include recompiled logic and the port's runtime; you supply the original executable and assets through the installer.
 
-The public build setup is still in development. Start with the [developer guide](docs/getting-started.md) to run checks that use synthetic files and find the existing build entry points.
+This is an experimental prerelease. A known event crash and incomplete stage coverage remain. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
+
+## Build and contribute
+
+This source repository includes no game executable, assets, or translated game code. **The source cannot build a playable game on its own.** A complete build needs your own game files and generated inputs that this checkout does not include. The public bootstrap is still in development. Start with the [developer guide](docs/getting-started.md) to run checks with synthetic files and find the build entry points.
 
 ## What runs today
 
@@ -26,7 +30,7 @@ The public build setup is still in development. Start with the [developer guide]
 | Linux, arm64 | Cross-build and replay work under QEMU. General native-device support is unverified. |
 | macOS | Future work. No supported build or compatibility promise. |
 
-These are development results, not a claim of full-game parity. A known missing block in the CRT `_CItan` fallback can stop an event after a stage. Broad stage, boss, and event coverage remains unfinished. See the [status page](docs/status.md) before testing.
+These are development results, not a claim of full-game parity. A known missing block in the CRT `_CItan` fallback can stop an event after a stage. Broad stage, boss, and event coverage remains unfinished. Desktop downloads use an earlier tested snapshot than Android. See the [status page](docs/status.md) before testing.
 
 ## How the port works
 

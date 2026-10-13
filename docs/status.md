@@ -1,8 +1,8 @@
 # Current development status
 
-OpenSA2 is a source preview of an experimental port. It has reached live gameplay on desktop and Android development builds. It has not completed a full-game compatibility pass.
+OpenSA2 is an experimental port with Windows, Android, and Linux downloads. It has reached live gameplay on desktop and Android devices. It has not completed a full-game compatibility pass.
 
-This status reflects development on 2026-10-13. The repository does not provide a playable download or a complete fresh-checkout game build.
+This status reflects development on 2026-10-13. The first [prerelease](downloads.md) uses a tested desktop development snapshot and a later Android snapshot. A complete fresh-checkout game build remains unfinished.
 
 ## Platforms
 

@@ -8,7 +8,7 @@ You need your own supported, unmodified **2012 PC release of Sonic Adventure 2**
 | --- | --- | --- |
 | Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
 | Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and compatible Vulkan graphics. Device support is experimental. |
-| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/opensa2_0.1.0~alpha1_amd64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
+| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
 
 ## Windows
 
@@ -33,7 +33,7 @@ This release uses a new release signing key. If you previously installed a devel
 Download the DEB, then install it from that directory:
 
 ```bash
-sudo apt install './opensa2_0.1.0~alpha1_amd64.deb'
+sudo apt install './OpenSA2-v0.1.0-alpha.1-linux-x86_64.deb'
 ```
 
 Open OpenSA2 from your application menu, or run `opensa2`. The first start finds a Steam copy or offers a game-folder picker. A controller is optional.

@@ -43,3 +43,9 @@ frame-[0-9]*.png
 
 # Claude Code session state.
 /.claude/scheduled_tasks.lock
+
+# Local run logs and distribution archives.
+*.jsonl
+*.apk
+*.zip
+*.7z

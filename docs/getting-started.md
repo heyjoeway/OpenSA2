@@ -6,7 +6,7 @@ There is no playable download in this repository. A complete game build needs yo
 
 ## Set up the checkout
 
-Use a Linux development machine with Bash and a C++17 compiler available as `g++`. Python 3.13 matches the current development environment. The commands below run from the repository root.
+Use a Linux development machine with Bash, GCC, a C++17 compiler available as `g++`, Binutils, and Bubblewrap. The sandbox cases use `bwrap` and require working unprivileged user namespaces. Python 3.13 matches the current development environment. Install your distribution's Python virtual-environment package if `python3 -m venv` reports that `ensurepip` is missing. The commands below run from the repository root.
 
 1. Clone the repository.
 

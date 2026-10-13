@@ -20,7 +20,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_ROOTS = {"private", "build", ".venv", ".claude", "agents-journals"}
-FORBIDDEN_SUFFIXES = set(".exe .dll .so .a .o .obj .apk .zip .7z .prs .pak .adx .ahx .gvr .gvm .pvr .pvm .sfd .csb .dds .afs .sa2s .y4m .mp4".split())
+FORBIDDEN_SUFFIXES = set(".exe .dll .so .a .o .obj .apk .zip .7z .jsonl .prs .pak .adx .ahx .gvr .gvm .pvr .pvm .sfd .csb .dds .afs .sa2s .y4m .mp4".split())
 TOKEN = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9]{40,})\b")
 LINK = re.compile(r"\[[^\]]*\]\(([^\s)]+)(?:\s+[^)]*)?\)|(?:src|href)=[\"']([^\"']+)[\"']")
 

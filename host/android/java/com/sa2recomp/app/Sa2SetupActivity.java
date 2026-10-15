@@ -44,6 +44,10 @@ import java.util.Map;
  *
  * Intent extras: sa2.stream (and Sa2Activity's other extras) start the play screen's stream mode
  * at once, the renderer's check with no game; sa2.no_autoplay keeps this screen up.
+ *
+ * The app's files folder is private on a release build, so this screen copies each kept
+ * session's logs and records, and last-session.txt, into the external files folder's sessions/
+ * when it opens and when a session ends, where adb and a computer's file manager can read them.
  */
 public class Sa2SetupActivity extends Activity {
     private static final String TAG = "sa2recomp";
@@ -68,6 +72,7 @@ public class Sa2SetupActivity extends Activity {
             importZip().delete();
             takeIntent(getIntent());
         }
+        exportSessions();
     }
 
     @Override
@@ -192,6 +197,7 @@ public class Sa2SetupActivity extends Activity {
             mZip.setText("Install again from a ZIP");
             mCheck.setText("Install again");
             if (last != null) {
+                exportSessions();
                 setLog("The last session:\n" + last);
             } else if (!mAutoPlayDone) {
                 mAutoPlayDone = true;
@@ -221,6 +227,66 @@ public class Sa2SetupActivity extends Activity {
             mInstallTried = true;
             install();
         }
+    }
+
+    // ------------------------------------------------------------ session records
+
+    private static void copyFile(File from, File to) throws java.io.IOException {
+        File tmp = new File(to.getPath() + ".part");
+        try (InputStream in = new FileInputStream(from); OutputStream out = new FileOutputStream(tmp)) {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        if (!tmp.renameTo(to)) throw new java.io.IOException("cannot rename " + tmp);
+    }
+
+    private static void removeTree(File f) {
+        File[] subs = f.listFiles();
+        if (subs != null) for (File s : subs) removeTree(s);
+        f.delete();
+    }
+
+    /** Mirrors files/sessions/<stamp>/* (regular files only: the FIFOs and play/ are left) and
+     * files/last-session.txt into the external files folder's sessions/, removing the copies of
+     * sessions the native side has since dropped. */
+    private void exportSessions() {
+        final File ext = getExternalFilesDir(null);
+        if (ext == null) return;
+        new Thread(() -> {
+            File out = new File(ext, "sessions");
+            File[] dirs = new File(getFilesDir(), "sessions").listFiles(File::isDirectory);
+            java.util.HashSet<String> kept = new java.util.HashSet<>();
+            if (dirs != null) {
+                for (File d : dirs) {
+                    kept.add(d.getName());
+                    File[] files = d.listFiles(File::isFile);
+                    if (files == null) continue;
+                    File o = new File(out, d.getName());
+                    if (!o.isDirectory() && !o.mkdirs()) continue;
+                    for (File f : files) {
+                        File t = new File(o, f.getName());
+                        if (t.length() == f.length() && t.lastModified() >= f.lastModified()) continue;
+                        try {
+                            copyFile(f, t);
+                        } catch (Exception e) {
+                            Log.w(TAG, "cannot copy " + f + ": " + e);
+                        }
+                    }
+                }
+            }
+            File[] old = out.listFiles(File::isDirectory);
+            if (old != null) for (File o : old) if (!kept.contains(o.getName())) removeTree(o);
+            File last = new File(getFilesDir(), "last-session.txt");
+            if (last.isFile()) {
+                try {
+                    out.mkdirs();
+                    copyFile(last, new File(out, "last-session.txt"));
+                } catch (Exception e) {
+                    Log.w(TAG, "cannot copy " + last + ": " + e);
+                }
+            }
+        }).start();
     }
 
     private void setLog(String text) {

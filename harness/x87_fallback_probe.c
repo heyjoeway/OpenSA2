@@ -14,6 +14,9 @@
  * __tmainCRTStartup does, because the NaN and infinity paths set errno through the
  * per-thread data, whose FLS accessors that start-up encodes.
  *
+ * Then _CIatan2 and _CIfmod with NaN operands, whose dispatch reaches the NaN-operand tail at
+ * 0x0082c10f (lifted as an extra block; without it, a function table miss).
+ *
  * One line per call: the trap status, ST(0) as the guest left it and the host libm's value
  * ("same" when they agree to 1e-12 relative, or are both NaN), each call made once with C2
  * clear and once with C2 set on entry (c2_then_native below). The last line is
@@ -127,6 +130,38 @@ int main(int argc, char **argv) {
                        ok ? "same" : "DIFFERS",
                        r.status ? " note=" : "", r.status ? r.note : "");
             }
+
+    /* The two-operand intrinsics, _CIatan2 (0x00859b6a) and _CIfmod (0x008599fa): y in ST(1)
+     * and x in ST(0), as the compiler pushes atan2(y, x) and fmod(y, x). Their dispatch
+     * (__cintrindisp2, __trandisp2's jmp through the descriptor at 0x00938b70 or 0x00938b10)
+     * reaches 0x0082c10f, the NaN-operand tail, for a NaN in ST(0) with ST(1) normal, zero or
+     * infinite; the tail is lifted as an extra block. */
+    static const struct { const char *name; uint32_t va; double (*ref)(double, double); } fn2[] = {
+        {"atan2", 0x00859b6au, atan2}, {"fmod", 0x008599fau, fmod}};
+    static const double ys[] = {1.5, -0.0, INFINITY, NAN, 7.25};
+    static const double x2[] = {2.0, NAN, NAN, 1.0, -3.0};
+    for (unsigned f = 0; f < sizeof fn2 / sizeof fn2[0]; f++)
+        for (unsigned i = 0; i < sizeof ys / sizeof ys[0]; i++) {
+            sa2_cpu_state_reset(&st);
+            st.x87_cw = 0x027F;
+            const uint32_t esp = SA2_GUEST_STACK_TOP - 0x2000u;
+            st.gpr[SA2_ESP] = esp;
+            sa2_call_place_return(&st, SA2_CALL_SENTINEL);
+            st.st80[0] = sa2_f80_from_f64(x2[i]);
+            st.st80[1] = sa2_f80_from_f64(ys[i]);
+            memset(&r, 0, sizeof r);
+            sa2_call(fn2[f].va, &st, 5, &r);
+            const double got = sa2_f80_to_f64(st.st80[0]), want = fn2[f].ref(ys[i], x2[i]);
+            const int ok = !r.status && ((isnan(got) && isnan(want)) || got == want ||
+                                         fabs(got - want) <= 1e-12 * fmax(1.0, fabs(want)));
+            total++;
+            same += ok;
+            trapped += r.status != 0;
+            printf("%s(%g, %g) status=%u exit_pc=%#010x st0=%-24.17g libm=%-24.17g %s%s%s\n",
+                   fn2[f].name, ys[i], x2[i], r.status, r.exit_pc, got, want, ok ? "same" : "DIFFERS",
+                   r.status ? " note=" : "", r.status ? r.note : "");
+        }
+
     sa2_runtime_shutdown();
     printf("%s %u of %u same, %u trapped\n", same == total ? "X87_FALLBACK_PROBE_OK" : "X87_FALLBACK_PROBE_FAIL",
            same, total, trapped);

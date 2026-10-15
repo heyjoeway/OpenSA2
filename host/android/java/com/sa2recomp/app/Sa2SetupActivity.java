@@ -2,14 +2,18 @@ package com.sa2recomp.app;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -18,16 +22,20 @@ import android.widget.TextView;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Map;
 
 /**
- * The app's first screen. With no installation it says where to copy the game folder (the app's
- * external files folder, game/), and verifies it with the installer (lib/arm64-v8a/
- * libsa2install.so, host/install's folder route: every file the game reads hashed against the
- * install table) into the app's private config and overlay. With one it runs the installer's
+ * The app's first screen. With no installation it asks for a ZIP of the game folder, picked with
+ * the system file picker, copied into the app's cache and verified and extracted by the installer
+ * (lib/arm64-v8a/libsa2install.so, host/install's ZIP route: every file the game reads hashed
+ * against the install table) into the app's private store, config and overlay; or it verifies a
+ * game folder copied into the app's external files folder, game/ (the folder route). With one it runs the installer's
  * quick check (--verify) and starts the play screen (Sa2Activity). When a session ends it shows
  * what the session wrote to files/last-session.txt.
  *
@@ -41,9 +49,10 @@ public class Sa2SetupActivity extends Activity {
     private static final String TAG = "sa2recomp";
     public static final String EXTRA_NO_AUTOPLAY = "sa2.no_autoplay";
     private static final String GAME_EXE = "sonic2app.exe";
+    private static final int PICK_ZIP = 1;
 
     private TextView mStatus, mLog;
-    private Button mCheck, mPlay;
+    private Button mZip, mCheck, mPlay;
     private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched;
     private final ArrayDeque<String> mLines = new ArrayDeque<>();
 
@@ -55,7 +64,10 @@ public class Sa2SetupActivity extends Activity {
             mInstallTried = state.getBoolean("install_tried");
         }
         buildUi();
-        if (state == null) takeIntent(getIntent());
+        if (state == null) {
+            importZip().delete();
+            takeIntent(getIntent());
+        }
     }
 
     @Override
@@ -98,6 +110,11 @@ public class Sa2SetupActivity extends Activity {
 
     private File configFile() {
         return new File(getFilesDir(), "config/sa2recomp/sa2recomp.cfg");
+    }
+
+    /** Where a picked ZIP is copied for the installer, which reads a path; removed after the run. */
+    private File importZip() {
+        return new File(getCacheDir(), "import.zip");
     }
 
     private File installer() {
@@ -172,6 +189,7 @@ public class Sa2SetupActivity extends Activity {
             String root = configValue("read_root");
             mStatus.setText("Sonic Adventure 2 is installed from\n" + root + "\n\nTap Play to start.");
             mPlay.setEnabled(true);
+            mZip.setText("Install again from a ZIP");
             mCheck.setText("Install again");
             if (last != null) {
                 setLog("The last session:\n" + last);
@@ -182,19 +200,21 @@ public class Sa2SetupActivity extends Activity {
             return;
         }
         mPlay.setEnabled(false);
+        mZip.setText("Choose game ZIP");
         mCheck.setText("Check game folder");
         File root = findGameRoot();
         String where = g == null ? "(no external storage)" : g.getAbsolutePath();
         mStatus.setText(
                 "First run: this app needs your own copy of Sonic Adventure 2 (the 2012 PC version, Steam).\n\n"
                 + "1. On your computer, open the game's folder (Steam: right-click Sonic Adventure 2, "
-                + "Manage, Browse local files).\n"
-                + "2. Connect this phone by USB (File transfer) and copy everything in that folder into\n"
+                + "Manage, Browse local files) and put everything in it into a ZIP.\n"
+                + "2. Copy the ZIP to this phone: USB, a cloud drive, or any other way.\n"
+                + "3. Tap Choose game ZIP and pick it. Every file the game reads is checked against the "
+                + "known hashes and copied into the app's own storage; the ZIP can be deleted afterwards.\n\n"
+                + "Or copy the folder itself into\n"
                 + "   Internal storage/Android/data/" + getPackageName() + "/files/game/\n"
-                + "   or with adb:\n"
-                + "   adb push \"Sonic Adventure 2/.\" " + where.replace("/storage/emulated/0", "/sdcard") + "/\n"
-                + "3. Tap Check game folder. Every file the game reads is checked against the known "
-                + "hashes; nothing in the folder is changed.\n\n"
+                + "   (adb push \"Sonic Adventure 2/.\" " + where.replace("/storage/emulated/0", "/sdcard") + "/)\n"
+                + "and tap Check game folder.\n\n"
                 + (root != null ? "Found " + GAME_EXE + " in " + root.getAbsolutePath()
                                  : "No " + GAME_EXE + " under " + where + " yet."));
         if (root != null && !mInstallTried) {
@@ -219,6 +239,9 @@ public class Sa2SetupActivity extends Activity {
 
     private void setBusy(boolean busy) {
         mBusy = busy;
+        if (busy) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        mZip.setEnabled(!busy);
         mCheck.setEnabled(!busy);
         mPlay.setEnabled(!busy && configFile().isFile());
     }
@@ -297,6 +320,114 @@ public class Sa2SetupActivity extends Activity {
         });
     }
 
+    // ------------------------------------------------------------ the ZIP route
+
+    private void pickZip() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("*/*");
+        pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"application/zip", "application/x-zip-compressed",
+                      "application/x-zip", "multipart/x-zip", "application/octet-stream"});
+        try {
+            startActivityForResult(pick, PICK_ZIP);
+        } catch (android.content.ActivityNotFoundException e) {
+            setLog("This device has no file picker: copy the game folder instead (see above).");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_ZIP || result != RESULT_OK || data == null || data.getData() == null) return;
+        mAutoPlayDone = true;
+        installZip(data.getData());
+    }
+
+    /** The picked document's display name and size in bytes (-1 when the provider does not say). */
+    private Object[] describe(Uri uri) {
+        String name = uri.getLastPathSegment();
+        long size = -1;
+        try (Cursor c = getContentResolver().query(uri, new String[] {OpenableColumns.DISPLAY_NAME,
+                                                   OpenableColumns.SIZE}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                if (!c.isNull(0)) name = c.getString(0);
+                if (!c.isNull(1)) size = c.getLong(1);
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "cannot describe " + uri + ": " + e);
+        }
+        return new Object[] {name, size};
+    }
+
+    private static String gb(long bytes) {
+        return String.format(java.util.Locale.US, "%.2f GB", bytes / 1e9);
+    }
+
+    /** Copies the picked ZIP into the cache (the installer reads a path, and a provider's stream
+     * may not seek), then runs the installer's ZIP route on the copy and removes it. */
+    private void installZip(final Uri uri) {
+        final File copy = importZip();
+        Object[] d = describe(uri);
+        final String name = (String) d[0];
+        final long size = (Long) d[1];
+        long free = getCacheDir().getUsableSpace();
+        if (size > 0 && free < size + (64L << 20)) {
+            setLog("Not enough free space to copy " + name + " (" + gb(size) + "; " + gb(free) + " free). "
+                   + "The import needs room for the ZIP and the extracted game together.");
+            return;
+        }
+        setBusy(true);
+        setLog("Copying " + name + (size > 0 ? " (" + gb(size) + ")" : "") + "...");
+        new Thread(() -> {
+            String err = null;
+            long done = 0;
+            try (InputStream in = getContentResolver().openInputStream(uri);
+                 OutputStream out = new FileOutputStream(copy)) {
+                if (in == null) throw new java.io.IOException("the provider gave no stream");
+                byte[] buf = new byte[1 << 20];
+                long shown = 0;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                    done += n;
+                    if (done - shown >= (64L << 20)) {
+                        shown = done;
+                        final String line = "  copied " + gb(done) + (size > 0 ? " of " + gb(size) : "");
+                        runOnUiThread(() -> addLine(line));
+                    }
+                }
+            } catch (Exception e) {
+                err = e.toString();
+            }
+            final String failure = err;
+            final long copied = done;
+            runOnUiThread(() -> {
+                setBusy(false);
+                if (failure != null) {
+                    copy.delete();
+                    addLine("Cannot copy " + name + ": " + failure);
+                    return;
+                }
+                addLine("Copied " + gb(copied) + ".");
+                File logs = new File(getFilesDir(), "logs");
+                runInstaller("Checking the game ZIP", new String[] {"--source", "zip", copy.getAbsolutePath(), "--yes",
+                             "--threads", "0", "--record", new File(logs, "install.runrec").getAbsolutePath()}, code -> {
+                    copy.delete();
+                    if (code == 0) {
+                        addLine("The game ZIP verified. Starting the game.");
+                        mAutoPlayDone = true;
+                        refresh();
+                        play();
+                    } else {
+                        mStatus.setText(mStatus.getText() + "\n\nThe game ZIP did not verify (exit " + code + "): "
+                                        + "the lines below name each file. The ZIP must hold the unmodified game "
+                                        + "folder; mods must be removed.");
+                    }
+                });
+            });
+        }).start();
+    }
+
     private void verifyThenPlay() {
         File logs = new File(getFilesDir(), "logs");
         runInstaller("Checking the installation", new String[] {"--verify", "--threads", "0", "--record",
@@ -304,8 +435,8 @@ public class Sa2SetupActivity extends Activity {
             if (code == 0) {
                 play();
             } else {
-                mStatus.setText("The installation no longer verifies (exit " + code + "). Copy the game folder "
-                                + "again and tap Install again.");
+                mStatus.setText("The installation no longer verifies (exit " + code + "). Tap Install again "
+                                + "from a ZIP, or copy the game folder again and tap Install again.");
             }
         });
     }
@@ -340,6 +471,12 @@ public class Sa2SetupActivity extends Activity {
         mStatus.setPadding(0, pad / 2, 0, pad / 2);
         mStatus.setTextIsSelectable(true);
         col.addView(mStatus);
+
+        mZip = new Button(this);
+        mZip.setText("Choose game ZIP");
+        mZip.setOnClickListener(v -> pickZip());
+        col.addView(mZip, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                         ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);

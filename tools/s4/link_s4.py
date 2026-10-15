@@ -62,7 +62,8 @@ RUNTIME_C = ["guest_memory.c", "function_table_impl.c", "sa2_trap.c", "sa2_call.
              "sa2_dialog.c", "sa2_gdi.c", "sa2_module.c", "sa2_format.c", "sa2_codepage.c",
              "sa2_devprofile.c", "sa2_locale.c",
              "sa2_guest_call.c", "sa2_dinput.c", "sa2_wbem.c", "sa2_poll_handoff.c",
-             "sa2_exe_overlay.c", "sa2_cri_dsp.c", "sa2_ninja_math.c", "sa2_widescreen.c"]
+             "sa2_exe_overlay.c", "sa2_cri_dsp.c", "sa2_ninja_math.c", "sa2_widescreen.c",
+             "sa2_crt_x87.c"]
 RUNTIME_CXX = ["remill_runtime.cpp", "sa2_emulate.cpp"]
 # The shipped executable's code-section overlay (runtime/sa2_exe_overlay.h): the table
 # tools/s7/text_readset.py writes, never tracked, since it holds code bytes of the game. A build
@@ -109,6 +110,11 @@ def exe_overlay_identity(table: Path) -> dict:
 # and njMultiMatrix (runtime/sa2_ninja_math.c): native bodies at PC24, bit for bit the double
 # mode's lifted ones, on the same terms (tools/s8/native_kernels/ninja_diff.py holds them to it).
 #
+# sub_859ac8, sub_859648 and sub_829008 are the CRT's x87 tan, sin and cos bodies
+# (runtime/sa2_crt_x87.c): each wrap clears C2, which remill's FPTAN, FSIN and FCOS leave as the
+# guest's earlier code left it, then calls `__real_`; tools/s8/x87_fallback_probe.py holds them to
+# the host libm with C2 clear and set on entry.
+#
 # sub_405310 is ReadConfig (runtime/sa2_widescreen.c): play's SA2_PLAY_RES or SA2_PLAY_ASPECT
 # rewrites the config's Width and Height after it, so the game draws at the device's aspect; with
 # neither set, and in every replay, the wrap only calls `__real_`
@@ -121,7 +127,8 @@ def exe_overlay_identity(table: Path) -> dict:
 # read as VerticalResolution x 4/3 and the others with the real one; with it unset, and in every
 # replay, each wrap only calls `__real_` (test_widescreen.py holds the list to the file).
 PRODUCTION_WRAPS = ["sub_427ee0", "sub_842500", "sub_843400", "sub_843460", "sub_8418b0",
-                    "sub_426cc0", "sub_424ff0", "sub_426e40", "sub_405310",
+                    "sub_426cc0", "sub_424ff0", "sub_426e40",
+                    "sub_859ac8", "sub_859648", "sub_829008", "sub_405310",
                     "sub_44e9c0", "sub_7945c0", "sub_794cb0", "sub_44d360", "sub_61bba0",
                     "sub_61b6c0", "sub_4526d0", "sub_6f41b0", "sub_420210", "sub_420390",
                     "sub_4200f0", "sub_77e980", "sub_42b230", "sub_41b0c0"]

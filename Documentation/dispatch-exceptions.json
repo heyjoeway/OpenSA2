@@ -60,6 +60,63 @@
     "first_padding_va": "0x007a78a7",
     "first_padding_byte": "0x8b"
    }
+  },
+  {
+   "va": "0x00859ac8",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-14",
+   "why": "0x00859ac8 is FUN_00859ac8 (_CItan's x87 path, fprem1 and fptan), the x87 body of the C runtime's tan, and 0x00859abf (tan's plain C entry: `lea edx,[esp+4]` then `call 0082C245h`, __fload_withFB, 9 bytes in all) runs straight on into it when __fload_withFB returns. The function map made the body its own function, so the stub's module ends after the call and the return lands outside it: the edge is the program's own call-return fall-through, not a decoding artefact. Its target is a function-table entry lifted as a whole module, and remill calls __remill_missing_block in tail position, so dispatching it executes on from the state the call returned with, which is what the processor does after that ret. The only way in is the SSE2 tan at 0x0085a0ee, which jumps to 0x00859abf when the argument is out of its range (|x| above 0x40C8 in the high word, from about 12800) or is a NaN or an infinity. The body branches on C2 straight after its FPTAN, FSIN or FCOS, which remill's semantics do not write; runtime/sa2_crt_x87.c wraps the body to clear C2 on entry, so that branch sees what the processor gives it for an operand within 2^63.",
+   "evidence": "Disassembly of the shipped executable (pefile and iced-x86 over private/exe/sonic2app-unpacked.exe): 0x00859abf is `lea edx,[esp+4]; call 0082C245h` and 0x00859ac8 follows it with `push edx; wait; fnstcw [esp]`; 0x0085a0ee is the SSE2 tan, whose range check ends in `jmp 859ABFh`, the function map's only reference to 0x00859abf. The generated edge table (tools/s4/mb_edges.py, tag next+allarms) records 0x00859ac8 as call-return from 0x859ac3 and nothing else, so with no exception it traps. These three are the table's only call-return edges, all three `call 0082C245h` in tan, sin and cos. The run that found it: an Android run on 2026-10-13, stopped at the start of the event after a stage with trap exit_pc 0x00859ac8, `reached by call-return at 0x00859ac3`, its stack holding 0x0085a0e6 (the return into the SSE2 tan's caller). tools/s8/x87_fallback_probe.py (harness/x87_fallback_probe.c, linked as the Linux game is) calls the plain entry with finite, huge, NaN and infinite arguments, with C2 clear and set on entry: every result equals the host libm's and none traps.",
+   "falsifier": "Remove this entry and regenerate the edge table: the generated row for 0x00859ac8 returns to allow=0, and a guest call of tan with an argument past its range (1e6) or a NaN stops at 0x00859ac8 with `no lifted block at 0x00859ac8 ... reached by call-return at 0x859ac3`.",
+   "decoded": {
+    "target_mnemonic": "push edx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "52",
+    "source_va": "0x00859ac3",
+    "source_byte": "0xe8",
+    "source_mnemonic": "call 0082C245h",
+    "source_flow_control": "CALL",
+    "first_padding_va": "0x00859ac9",
+    "first_padding_byte": "0x9b"
+   }
+  },
+  {
+   "va": "0x00859648",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-14",
+   "why": "0x00859648 is FUN_00859648 (fprem1 and fsin), the x87 body of the C runtime's sin, and 0x0085963f (sin's plain C entry: `lea edx,[esp+4]` then `call 0082C245h`, __fload_withFB, 9 bytes in all) runs straight on into it when __fload_withFB returns. The function map made the body its own function, so the stub's module ends after the call and the return lands outside it: the edge is the program's own call-return fall-through, not a decoding artefact. Its target is a function-table entry lifted as a whole module, and remill calls __remill_missing_block in tail position, so dispatching it executes on from the state the call returned with, which is what the processor does after that ret. The only way in is the SSE2 sin at 0x00859c9e, which jumps to 0x0085963f when the argument is out of its range (|x| above 0x40F5 in the high word, from about 90112) or is a NaN or an infinity. The body branches on C2 straight after its FPTAN, FSIN or FCOS, which remill's semantics do not write; runtime/sa2_crt_x87.c wraps the body to clear C2 on entry, so that branch sees what the processor gives it for an operand within 2^63.",
+   "evidence": "Disassembly of the shipped executable (pefile and iced-x86 over private/exe/sonic2app-unpacked.exe): 0x0085963f is `lea edx,[esp+4]; call 0082C245h` and 0x00859648 follows it with `push edx; wait; fnstcw [esp]`; 0x00859c9e is the SSE2 sin, whose range check ends in `jmp 85963Fh`, the function map's only reference to 0x0085963f. The generated edge table (tools/s4/mb_edges.py, tag next+allarms) records 0x00859648 as call-return from 0x859643 and nothing else, so with no exception it traps. These three are the table's only call-return edges, all three `call 0082C245h` in tan, sin and cos. No run has stopped here yet; an Android run ended mid-stage in Dry Lagoon on 2026-10-14 with the game's exit 1, the way the tan trap ended, and these are the sibling edges of that trap. tools/s8/x87_fallback_probe.py (harness/x87_fallback_probe.c, linked as the Linux game is) calls the plain entry with finite, huge, NaN and infinite arguments, with C2 clear and set on entry: every result equals the host libm's and none traps.",
+   "falsifier": "Remove this entry and regenerate the edge table: the generated row for 0x00859648 returns to allow=0, and a guest call of sin with an argument past its range (1e6) or a NaN stops at 0x00859648 with `no lifted block at 0x00859648 ... reached by call-return at 0x859643`.",
+   "decoded": {
+    "target_mnemonic": "push edx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "52",
+    "source_va": "0x00859643",
+    "source_byte": "0xe8",
+    "source_mnemonic": "call 0082C245h",
+    "source_flow_control": "CALL",
+    "first_padding_va": "0x00859649",
+    "first_padding_byte": "0x9b"
+   }
+  },
+  {
+   "va": "0x00829008",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-14",
+   "why": "0x00829008 is FUN_00829008 (fprem1 and fcos), the x87 body of the C runtime's cos, and 0x00828fff (cos's plain C entry: `lea edx,[esp+4]` then `call 0082C245h`, __fload_withFB, 9 bytes in all) runs straight on into it when __fload_withFB returns. The function map made the body its own function, so the stub's module ends after the call and the return lands outside it: the edge is the program's own call-return fall-through, not a decoding artefact. Its target is a function-table entry lifted as a whole module, and remill calls __remill_missing_block in tail position, so dispatching it executes on from the state the call returned with, which is what the processor does after that ret. The only way in is the SSE2 cos at 0x0082c7ee, which jumps to 0x00828fff when the argument is out of its range (|x| above 0x40F5 in the high word, from about 90112) or is a NaN or an infinity. The body branches on C2 straight after its FPTAN, FSIN or FCOS, which remill's semantics do not write; runtime/sa2_crt_x87.c wraps the body to clear C2 on entry, so that branch sees what the processor gives it for an operand within 2^63.",
+   "evidence": "Disassembly of the shipped executable (pefile and iced-x86 over private/exe/sonic2app-unpacked.exe): 0x00828fff is `lea edx,[esp+4]; call 0082C245h` and 0x00829008 follows it with `push edx; wait; fnstcw [esp]`; 0x0082c7ee is the SSE2 cos, whose range check ends in `jmp 828FFFh`, the function map's only reference to 0x00828fff. The generated edge table (tools/s4/mb_edges.py, tag next+allarms) records 0x00829008 as call-return from 0x829003 and nothing else, so with no exception it traps. These three are the table's only call-return edges, all three `call 0082C245h` in tan, sin and cos. No run has stopped here yet; an Android run ended mid-stage in Dry Lagoon on 2026-10-14 with the game's exit 1, the way the tan trap ended, and these are the sibling edges of that trap. tools/s8/x87_fallback_probe.py (harness/x87_fallback_probe.c, linked as the Linux game is) calls the plain entry with finite, huge, NaN and infinite arguments, with C2 clear and set on entry: every result equals the host libm's and none traps.",
+   "falsifier": "Remove this entry and regenerate the edge table: the generated row for 0x00829008 returns to allow=0, and a guest call of cos with an argument past its range (1e6) or a NaN stops at 0x00829008 with `no lifted block at 0x00829008 ... reached by call-return at 0x829003`.",
+   "decoded": {
+    "target_mnemonic": "push edx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "52",
+    "source_va": "0x00829003",
+    "source_byte": "0xe8",
+    "source_mnemonic": "call 0082C245h",
+    "source_flow_control": "CALL",
+    "first_padding_va": "0x00829009",
+    "first_padding_byte": "0x9b"
+   }
   }
  ],
  "retired": [

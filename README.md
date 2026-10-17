@@ -14,7 +14,7 @@ The aim is to preserve the game's original logic while making that logic run on 
 
 Windows ZIP, Android APK, and Linux DEB packages are available from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.2). You need your own supported copy of the 2012 PC game. The packages include recompiled logic and the port's runtime; you supply the original executable and assets through the installer.
 
-This is an experimental prerelease with incomplete stage coverage. The Android APK (0.1.0-alpha.2.1) plays the story movies; in the Windows and Linux packages they still stay black. On Android, the app's **Report on GitHub** button copies a crash report for a bug report. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
+This is an experimental prerelease with incomplete stage coverage. On Android, the app's **Report on GitHub** button copies a crash report for a bug report. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
 
 ## Screenshots
 
@@ -38,7 +38,7 @@ This source repository includes no game executable, assets, or translated game c
 | Linux, arm64 | Cross-build and replay work under QEMU. General native-device support is unverified. |
 | macOS | Future work. No supported build or compatibility promise. |
 
-These are development results, not a claim of full-game parity. In the Windows and Linux 0.1.0-alpha.2 packages, story movies stay black and stop responding; the Android APK 0.1.0-alpha.2.1 fixes this. Broad stage, boss, and event coverage remains unfinished. See the [status page](docs/status.md) before testing.
+These are development results, not a claim of full-game parity. Broad stage, boss, and event coverage remains unfinished. See the [status page](docs/status.md) before testing.
 
 ## How the port works
 

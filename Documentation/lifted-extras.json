@@ -17,10 +17,10 @@
  ],
  "arms_tag": "next",
  "counts": {
-  "compiled": 5643,
-  "guest_bytes": 17542878,
-  "lifted": 5643,
-  "rows": 5643
+  "compiled": 5644,
+  "guest_bytes": 17542958,
+  "lifted": 5644,
+  "rows": 5644
  },
  "lift_tag": "next",
  "rows": [
@@ -98399,6 +98399,24 @@
    },
    "va": "0x00872630",
    "why": "function-table miss at 0x00872630 on guest thread 5 (start 0x007c53f0), after which the main thread stopped with: EnterCriticalSection(0x01769078): thread 3932 holds it with recursion 1 and no other guest thread can run, so this wait has no end; that thr in private/generated/s4/run/dll.next+allarms.a.json (round 2 of tools/s4/reach_extend.py): 6 instructions to its first ret or jmp, after int3 padding or a ret, following FUN_008724f0 at 0x008724f0, recorded size 310; referenced by 0x007f91f2 imm"
+  },
+  {
+   "bytes": 80,
+   "compiled": true,
+   "declares_sub": [
+    "sub_872410",
+    "sub_872460"
+   ],
+   "end": "0x008726a0",
+   "folded": true,
+   "lifted": true,
+   "owner": {
+    "end": "0x008726a0",
+    "name": "(--end)",
+    "start": "0x00872650"
+   },
+   "va": "0x00872650",
+   "why": "Sofdec's B-picture slice loop (PSFD00): FUN_007F9030 stores 0x00872650 in the picture decoder table at 0x0176ABC4 (slot 0x0176ABB8 + 4*3, picture_coding_type 3) at 0x007F926F, and no module began there (tools/s4/address_taken.py scans .text only). At the first story movie (Hero event 409, e0409_m.sfd, 214 B-pictures) CRI's decode thread (start 0x007C53F0) ended with function table miss at 0x00872650 (region PSFD00) holding the CRI lock 0x01769078: the movie stayed black and silent, its loop 0x00601690 never exited, and Start blocked forever in EnterCriticalSection(0x01769078). I and P pictures use 0x00872880, already lifted"
   },
   {
    "bytes": 272,

@@ -30,7 +30,11 @@ import android.widget.TextView;
  * the controls go below it), which the overlay reads as SA2_TOUCH_LAYOUT (landscape) or
  * SA2_TOUCH_LAYOUT_PORTRAIT; Reset puts every group back; Swap sides mirrors the stick and the
  * diamond. The buttons go to the first of a few spots that covers no control, else the one that
- * covers least, again after every change, and hide while a control is dragged.
+ * covers least, again after every change, and hide while a control is dragged. A window of the
+ * other shape than the orientation edited (split screen or a free-form window, which the editor
+ * cannot refuse: only a task's root activity chooses that) edits nothing: the hint says to turn
+ * the screen or leave split screen, and dragging, Reset, Swap sides and Save wait for the right
+ * shape.
  */
 public class Sa2LayoutActivity extends Activity {
     static final String EXTRA_ORIENTATION = "sa2.orientation";
@@ -38,6 +42,8 @@ public class Sa2LayoutActivity extends Activity {
     private GameSettings mS;
     private Editor mEditor;
     private LinearLayout mBar;
+    private TextView mHint;
+    private Button[] mEdits;          // Reset, Swap sides and Save: only in a window of the edited shape
 
     @Override
     protected void onCreate(Bundle state) {
@@ -63,7 +69,7 @@ public class Sa2LayoutActivity extends Activity {
         LinearLayout bar = mBar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
         bar.setGravity(Gravity.CENTER_HORIZONTAL);
-        TextView hint = new TextView(this);
+        TextView hint = mHint = new TextView(this);
         hint.setText("Drag a control to move it");
         hint.setTextColor(Color.rgb(0xE8, 0xED, 0xF7));
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
@@ -73,13 +79,14 @@ public class Sa2LayoutActivity extends Activity {
         Button swap = button("Swap sides", Ui.QUIET, v -> mEditor.swap());
         Button cancel = button("Cancel", Ui.SECONDARY, v -> finish());
         Button save = button("Save", Ui.PRIMARY, v -> {
-            if (mEditor.layout == null) return;
+            if (!mEditor.editable()) return;
             mEditor.keep();
             if (upright) mS.layoutPortrait = mEditor.portrait;
             else mS.layoutLandscape = mEditor.landscape;
             mS.save(this);
             finish();
         });
+        mEdits = new Button[] {reset, swap, save};
         LinearLayout row1 = Ui.row(this, reset, swap);
         LinearLayout row2 = Ui.row(this, cancel, save);
         bar.addView(row1, fixedWidth(Ui.dp(this, 10)));
@@ -87,10 +94,22 @@ public class Sa2LayoutActivity extends Activity {
         root.addView(bar, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
                                                        FrameLayout.LayoutParams.WRAP_CONTENT,
                                                        Gravity.TOP | Gravity.LEFT));
-        mEditor.changed = () -> bar.post(this::placeBar);
+        mEditor.changed = () -> bar.post(() -> {
+            showShape(upright);
+            placeBar();
+        });
         mEditor.dragging = on -> bar.setVisibility(on ? View.INVISIBLE : View.VISIBLE);
         setContentView(root);
         hideSystemBars();
+    }
+
+    /** The hint and the edit buttons for the window's shape: editing waits for the edited one. */
+    private void showShape(boolean upright) {
+        boolean right = mEditor.editable();
+        mHint.setText(right ? "Drag a control to move it"
+                            : upright ? "Turn the phone upright, or leave split screen, to move the controls"
+                                      : "Turn the phone sideways, or leave split screen, to move the controls");
+        for (Button b : mEdits) b.setEnabled(right);
     }
 
     /** The buttons at the first spot that covers no control: under START, between the stick and
@@ -242,17 +261,22 @@ public class Sa2LayoutActivity extends Activity {
             if (changed != null) changed.run();
         }
 
+        /** Whether the window has the edited orientation's shape, so its layout is the one edited. */
+        boolean editable() {
+            return layout != null && layout.upright == upright;
+        }
+
         /** The places as they stand, for the orientation the editor edits, so a new size lays them out
          * again and Save finds them; a layout of the other shape (before the screen turns) keeps
          * nothing. */
         void keep() {
-            if (layout.upright != upright) return;
+            if (!editable()) return;
             if (upright) portrait = layout.value();
             else landscape = layout.value();
         }
 
         void reset() {
-            if (layout == null) return;
+            if (!editable()) return;
             if (upright) portrait = "";
             else landscape = "";
             layout = GameSettings.touchLayout(getWidth(), getHeight(), frameW, frameH, scale, anchor, minTop, landscape,
@@ -262,7 +286,7 @@ public class Sa2LayoutActivity extends Activity {
         }
 
         void swap() {
-            if (layout == null) return;
+            if (!editable()) return;
             for (int g = 0; g < 2; g++) place(g, 2 * layout.ax + layout.aw - layout.x[g], layout.y[g]);
             keep();
             invalidate();
@@ -279,7 +303,7 @@ public class Sa2LayoutActivity extends Activity {
 
         @Override
         public boolean onTouchEvent(MotionEvent e) {
-            if (layout == null) return false;
+            if (!editable()) return false;
             float x = e.getX(), y = e.getY();
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {

@@ -48,7 +48,6 @@
             android:label="@string/app_name"
             android:exported="false"
             android:theme="@style/PlayTheme"
-            android:resizeableActivity="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
 
         <!-- sensorLandscape is the default orientation's: when the settings choose portrait or

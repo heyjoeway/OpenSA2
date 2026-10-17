@@ -116,6 +116,8 @@ public class Sa2Activity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Back's note belongs to one session: an older one's must not match this session's end.
+        new File(getFilesDir(), CrashReport.END_ASKED_FILE).delete();
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // The sustained-performance mode holds the clocks to what the device can keep up for
@@ -176,12 +178,15 @@ public class Sa2Activity extends SDLActivity {
         Toast.makeText(this, "Press Back again to end the game", Toast.LENGTH_SHORT).show();
     }
 
-    /** Adds CrashReport.END_ASKED to files/last-session.txt, so a session whose process goes before it
-     * writes its "ended:" line (a third Back finishes this activity at once) is not taken for a crash.
-     * The native session rewrites the file whole at its next line, which then says how it ended. */
+    /** Writes files/end-requested (CrashReport.END_ASKED_FILE): this process's pid, which names the
+     * session, and the time Back asked for the end. A session whose process goes before it writes its
+     * "ended:" line is then told apart: gone at once (a third Back finishes this activity) is the
+     * player's close; still stopping long after is a game that stopped answering. */
     private void noteEndRequest() {
-        try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(getFilesDir(), "last-session.txt"), true)) {
-            out.write((CrashReport.END_ASKED + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        File f = new File(getFilesDir(), CrashReport.END_ASKED_FILE);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write((android.os.Process.myPid() + " " + System.currentTimeMillis() + "\n")
+                      .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (java.io.IOException e) {
             // The setup screen then judges the session by the system's exit record alone.
         }

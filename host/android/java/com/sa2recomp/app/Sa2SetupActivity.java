@@ -94,6 +94,8 @@ public class Sa2SetupActivity extends Activity {
     private Button mZip, mCheck, mPlay, mGithub, mCopy, mSummary, mShare;
     private final List<String> mInstallOut = new ArrayList<>();      // the last installer run's lines
     private String mInstallVerdict;      // InstallVerdict's account of the last refused run; null otherwise
+    private int mWaitedForPlay;          // 2 s checks spent waiting for a closing play process
+    private final Runnable mRefresh = this::refresh;
     private final Handler mTicker = new Handler(Looper.getMainLooper());
     private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched, mShowingLast;
     private final ArrayDeque<String> mLines = new ArrayDeque<>();
@@ -219,6 +221,32 @@ public class Sa2SetupActivity extends Activity {
         return getSharedPreferences("setup", Context.MODE_PRIVATE);
     }
 
+    /** True, with the screen saying so and a check in 2 s, while the last session's play process is still
+     * going away with no "ended:" line written (a third Back returns here at once): its end is judged
+     * only once the system has recorded how it ended, for at most a minute. */
+    private boolean waitForPlay() {
+        String last = readText(lastSessionFile());
+        if (last == null || last.contains("\nended: ") || !playRunning()) {
+            mWaitedForPlay = 0;
+            return false;
+        }
+        if (mWaitedForPlay++ >= 30) return false;
+        mStatus.setText("Waiting for the game to finish closing...");
+        mTicker.removeCallbacks(mRefresh);
+        mTicker.postDelayed(mRefresh, 2000);
+        return true;
+    }
+
+    private boolean playRunning() {
+        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        List<android.app.ActivityManager.RunningAppProcessInfo> ps = am == null ? null : am.getRunningAppProcesses();
+        if (ps == null) return false;
+        for (android.app.ActivityManager.RunningAppProcessInfo p : ps) {
+            if (p.processName != null && p.processName.endsWith(":play")) return true;
+        }
+        return false;
+    }
+
     /** The last session ended badly and the player has neither copied its report nor played since. */
     private boolean crashUnseen() {
         File f = lastSessionFile();
@@ -244,6 +272,7 @@ public class Sa2SetupActivity extends Activity {
         if (mBusy) return;
         File g = gameDir();
         if (g != null && !g.isDirectory() && !g.mkdirs()) Log.w(TAG, "cannot create " + g);
+        if (waitForPlay()) return;
         boolean crashed = crashUnseen();
         String last = mPlayLaunched || crashed || mShowingLast ? readText(lastSessionFile()) : null;
         mPlayLaunched = false;
@@ -678,7 +707,9 @@ public class Sa2SetupActivity extends Activity {
             title = "[Bug] Android install: " + (dot > 0 ? installVerdict.substring(0, dot) : installVerdict);
         } else {
             String last = readText(lastSessionFile());
-            title = CrashReport.abnormal(this, last) ? "[Bug] Android: " + CrashReport.headline(this, last) : "[Bug] Android: ";
+            title = last == null ? "[Bug] Android problem report"
+                  : CrashReport.abnormal(this, last) ? "[Bug] Android: " + CrashReport.headline(this, last)
+                  : "[Bug] Android problem report (" + CrashReport.headline(this, last) + ")";
         }
         if (title.length() > 120) title = title.substring(0, 117) + "...";
         String environment = Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE
@@ -950,6 +981,7 @@ public class Sa2SetupActivity extends Activity {
         if (bold) b.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
+    @SuppressWarnings("deprecation")
     private void buildUi() {
         int pad = dp(16);
         Column col = new Column(this, dp(640));
@@ -1030,7 +1062,21 @@ public class Sa2SetupActivity extends Activity {
                                                          ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BACKGROUND);
-        scroll.setFitsSystemWindows(true);
+        // Android 15 draws apps edge to edge whatever fitsSystemWindows says: the system bars' insets
+        // become padding, so scrolled content stays clear of the status bar and the gesture bar.
+        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l, t, r, b;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = insets.getInsets(android.view.WindowInsets.Type.systemBars()
+                                                             | android.view.WindowInsets.Type.displayCutout());
+                l = i.left; t = i.top; r = i.right; b = i.bottom;
+            } else {
+                l = insets.getSystemWindowInsetLeft(); t = insets.getSystemWindowInsetTop();
+                r = insets.getSystemWindowInsetRight(); b = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(l, t, r, b);
+            return insets;
+        });
         scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                                            ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);

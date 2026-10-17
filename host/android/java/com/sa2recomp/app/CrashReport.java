@@ -71,9 +71,15 @@ final class CrashReport {
     private static final Pattern GAME_EXIT = Pattern.compile("the game ended \\(exit (-?\\d+)\\)");
     private static final Pattern PLAYER_FAILURE = Pattern.compile(
             "^(d3d9gpu: |device: |stream: |replay: |host failure|verdict: |  failure: |SDL_|sa2_player: )");
-    /** What Sa2Activity adds to last-session.txt when Back asks the session to end (it may not live to
-     * write its "ended:" line). */
-    static final String END_ASKED = "end requested by the player";
+    /** The file Sa2Activity writes when Back asks the session to end ("<pid> <epoch ms>"): the session
+     * may not live to write its "ended:" line, and it rewrites last-session.txt whole at every line, so
+     * the note is kept apart. */
+    static final String END_ASKED_FILE = "end-requested";
+    /** How long after Back a play process may go and still be the player's own close (a third Back
+     * finishes the activity at once): the session's own SIGTERM grace (kStopGrace, 10 s, in
+     * host/android/native/sa2_android_session.cpp) and a second for the teardown. A process that
+     * outlives it was waiting on a game the session had to kill. */
+    private static final long QUICK_CLOSE_MS = 11_000;
     private static final Pattern DEVICE_DESCRIPTION = Pattern.compile("^device: \\d+x\\d+ fmt ");
     private static final Pattern GENERIC_DEVICE = Pattern.compile(
             "^device: (Direct3DCreate9 returned NULL|CreateDevice failed)");
@@ -105,7 +111,7 @@ final class CrashReport {
         static Outcome of(String last) {
             if (last == null) return new Outcome(true, "no session has run yet", 0, false, false, false);
             String preFail = null;
-            boolean stream = false, ok = false, endAsked = false;
+            boolean stream = false, ok = false;
             boolean noFrames = last.startsWith("FAIL the game presented nothing")
                                || last.contains("\nFAIL the game presented nothing");
             for (String l : last.split("\n")) {
@@ -138,7 +144,6 @@ final class CrashReport {
                 }
                 if (l.startsWith("mode stream")) stream = true;
                 if (l.startsWith("OK ")) ok = true;
-                if (l.startsWith(END_ASKED)) endAsked = true;
                 if (l.startsWith("FAIL ") && preFail == null) preFail = l.substring(5);
             }
             // The stream mode (a recorded stream through the player, no game) writes no "ended:" line.
@@ -148,27 +153,80 @@ final class CrashReport {
                                                         0, true, false, false);
             }
             if (preFail != null) return new Outcome(false, "the game could not start: " + preFail, 0, false, false, false);
-            // Back asked for the end (Sa2Activity notes it here), and the process went before the session
-            // could write how the game stopped: a third Back, or the task closed.
-            if (endAsked) return new Outcome(true, "ended with Back", 0, false, false, false);
             return new Outcome(false, "the game's process stopped before it could say why", 0, false, false, true);
         }
 
-        /** of(), with a lost process checked against the system's record of how it ended: one that
-         * exited by itself, was closed from Recents or stopped by the user is no crash. */
+        /** of(), with a lost play process (no "ended:" line) told apart by the system's record of how it
+         * ended (API 30) and Back's note (END_ASKED_FILE). A crash, an ANR or a low-memory kill is named,
+         * whenever it came. Back asked for the end and the process then closed on purpose within
+         * QUICK_CLOSE_MS: the player's own close (a third Back), no crash. Back asked and the process
+         * outlived that: the session was stuck stopping a game that no longer answered, which is what a
+         * frozen or black screen looks like. Closed without Back (Recents, the system): still offered as a
+         * report, since a player closes a frozen game too. With no record yet (the setup screen resumes
+         * while the play process is still going away; Sa2SetupActivity waits for it) or none at all (API
+         * 29), Back's request stands: ended with Back. */
         static Outcome of(Context c, String last) {
             Outcome o = of(last);
-            if (!o.processLost || Build.VERSION.SDK_INT < 30) return o;
-            ApplicationExitInfo e = playExitInfo(c, sessionPid(sessionDir(last)));
-            if (e == null) return o;
-            int r = e.getReason();
-            String d = e.getDescription() == null ? "" : e.getDescription();
-            if ((r == ApplicationExitInfo.REASON_EXIT_SELF && e.getStatus() == 0)
-                || r == ApplicationExitInfo.REASON_USER_REQUESTED || r == ApplicationExitInfo.REASON_USER_STOPPED
-                || (r == ApplicationExitInfo.REASON_OTHER && d.contains("remove task"))) {
-                return new Outcome(true, "the game was closed", 0, false, false, false);
+            if (!o.processLost) return o;
+            File session = sessionDir(last);
+            int pid = sessionPid(session);
+            long asked = endAsked(c, pid, session);
+            ApplicationExitInfo e = Build.VERSION.SDK_INT >= 30 ? playExitInfo(c, pid) : null;
+            if (e != null && asked > 0 && e.getTimestamp() < asked) asked = 0;    // the record is older than Back
+            int r = e == null ? -1 : e.getReason();
+            String d = e == null || e.getDescription() == null ? "" : e.getDescription();
+            if (r == ApplicationExitInfo.REASON_CRASH_NATIVE) {
+                return new Outcome(false, "the play process crashed (" + signalName(e.getStatus()) + ")", 0, false,
+                                   false, true);
             }
+            if (r == ApplicationExitInfo.REASON_CRASH) {
+                return new Outcome(false, "the play process crashed (" + (d.isEmpty() ? "Java exception" : d) + ")", 0,
+                                   false, false, true);
+            }
+            if (r == ApplicationExitInfo.REASON_ANR) {
+                return new Outcome(false, "the play process stopped responding (ANR)", 0, false, true, true);
+            }
+            if (r == ApplicationExitInfo.REASON_LOW_MEMORY) {
+                return new Outcome(false, "Android closed the game for low memory", 0, false, false, true);
+            }
+            boolean closed = (r == ApplicationExitInfo.REASON_EXIT_SELF && e.getStatus() == 0)
+                             || r == ApplicationExitInfo.REASON_USER_REQUESTED || r == ApplicationExitInfo.REASON_USER_STOPPED
+                             || (r == ApplicationExitInfo.REASON_OTHER && d.contains("remove task"));
+            if (asked > 0) {
+                if (e == null || (closed && e.getTimestamp() - asked <= QUICK_CLOSE_MS)) {
+                    return new Outcome(true, "ended with Back", 0, false, false, false);
+                }
+                return new Outcome(false, "the game stopped responding, and the session could not stop it after "
+                                   + "Back", 0, false, true, false);
+            }
+            if (closed) return new Outcome(false, "the app was closed while the game was running", 0, false, false, true);
             return o;
+        }
+
+        /** When Back asked this session (its play process's pid) to end, in epoch ms; 0 when it did not,
+         * or when the note predates the session (an older process with the same pid). */
+        private static long endAsked(Context c, int pid, File session) {
+            String t = Sa2SetupActivity.readText(new File(c.getFilesDir(), END_ASKED_FILE));
+            if (t == null || pid <= 0) return 0;
+            String[] f = t.trim().split("\\s+");
+            try {
+                long at = f.length == 2 && Integer.parseInt(f[0]) == pid ? Long.parseLong(f[1]) : 0;
+                return at > 0 && at >= sessionStart(session) ? at : 0;
+            } catch (NumberFormatException x) {
+                return 0;
+            }
+        }
+
+        /** The session's start, from its folder's local-time stamp (<yyyyMMdd-HHmmss>-<pid>), less a
+         * minute's slack; 0 when it cannot be read. */
+        private static long sessionStart(File session) {
+            if (session == null || session.getName().length() < 15) return 0;
+            try {
+                Date d = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).parse(session.getName().substring(0, 15));
+                return d == null ? 0 : d.getTime() - 60_000;
+            } catch (java.text.ParseException x) {
+                return 0;
+            }
         }
 
         private static String gameExitText(int code) {
@@ -203,7 +261,20 @@ final class CrashReport {
             String why = firstPlayerFailure(session);
             if (why != null) return r.apply(o.what + ": " + why);
         }
+        if (session != null && !o.clean) {
+            String why = firstThreadTrap(session);
+            if (why != null) return r.apply(o.what + ": " + why);
+        }
         return r.apply(o.what);
+    }
+
+    /** The first guest thread that ended on a trap, as the runtime says it in game.log ("sa2 trap:
+     * guest thread N ..."): the cause of a game left waiting on what that thread held. */
+    private static String firstThreadTrap(File session) {
+        List<String> game = tail(new File(session, "game.log"), 4000);
+        if (game == null) return null;
+        for (String l : game) if (l.startsWith("sa2 trap: ")) return l.substring("sa2 trap: ".length());
+        return null;
     }
 
     // ------------------------------------------------------------ the report
@@ -265,6 +336,7 @@ final class CrashReport {
         ticks(out, session);
         String exit = playExit(c, sessionPid(session), r);
         if (exit != null) out.append(exit);
+        boolean tombstoned = exit != null && exit.contains("crashing thread:");
         if (out.length() == before) out.append("(no trap, fault or renderer failure was recorded)\n");
 
         if (last != null) {
@@ -277,7 +349,7 @@ final class CrashReport {
         }
         appendTail(out, "game.log", gameLog, TAIL_GAME, r);
         appendTail(out, "player.log", playerLog, TAIL_PLAYER, r);
-        String log = logcat();
+        String log = logcat(tombstoned);
         if (log != null && !log.isEmpty()) {
             section(out, "logcat (this app's warnings)");
             out.append(r.apply(log));
@@ -502,6 +574,7 @@ final class CrashReport {
 
     // ------------------------------------------------------------ the device
 
+    @SuppressWarnings("deprecation")
     static String appVersion(Context c) {
         try {
             PackageInfo p = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
@@ -809,8 +882,10 @@ final class CrashReport {
     }
 
     /** This app's own warnings and errors from logcat's main and crash buffers (an app reads only its
-     * uid's lines), the last TAIL_LOGCAT; null when logcat cannot run. */
-    private static String logcat() {
+     * uid's lines), the last TAIL_LOGCAT; null when logcat cannot run. dropCrashDump leaves out
+     * crash_dump's lines (tag DEBUG) when the trace already holds the tombstone they repeat; otherwise
+     * (API 29-30, the game process's own crash) they are the only backtrace. */
+    private static String logcat(boolean dropCrashDump) {
         Process p = null;
         try {
             p = new ProcessBuilder("logcat", "-d", "-b", "main,crash", "-v", "time", "-t", "2000", "*:W")
@@ -819,6 +894,7 @@ final class CrashReport {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String l;
                 while ((l = in.readLine()) != null) {
+                    if (dropCrashDump && l.contains("/DEBUG")) continue;
                     lines.add(l);
                     if (lines.size() > TAIL_LOGCAT) lines.remove(0);
                 }

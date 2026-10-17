@@ -302,6 +302,13 @@ HRESULT Device::make_texture_image(uint32_t w, uint32_t h, uint32_t levels, uint
     // render-target creator makes one, GetCubeMapSurface then SetRenderTarget); a volume of a depth
     // format has no attachment here, by name (DXVK refuses a render-target volume, :255-257).
     if (type == TexType::volume && fi->depth) { not_implemented_value("a volume texture of a depth format"); return D3DERR_INVALIDCALL; }
+    // R5G6B5 and A8 are made BGRA8 from their packed store on upload: a draw into one would leave
+    // BGRA8 texels that are not the format's, so a render target of one (CreateRenderTarget's too)
+    // is not implemented, by name.
+    if (fi->expand != Expand::none && (usage & D3DUSAGE_RENDERTARGET)) {
+        not_implemented_value(std::string("a render target of ") + fi->name + " (the GPU image is BGRA8, expanded only on upload)");
+        return D3DERR_INVALIDCALL;
+    }
     const uint32_t max_levels = full_chain(std::max(w, depth), h);                       // :277-284 (computeMipLevelCount of w, h, d)
     if (levels == 0 || levels > max_levels) levels = max_levels;
 
@@ -651,6 +658,12 @@ HRESULT STDMETHODCALLTYPE Device::GetRenderTargetData(IDirect3DSurface9* rt, IDi
     }
     if (si.type != TexType::flat) {
         not_implemented_value("GetRenderTargetData of a cube face (the readback is of a 2D level)");
+        return answer(I_DEVICE, 32, D3DERR_INVALIDCALL);
+    }
+    if (si.fi->expand != Expand::none) {
+        // its GPU texels are BGRA8, not the destination store's packed format
+        not_implemented_value(std::string("GetRenderTargetData of a ") + si.fi->name +
+                              " surface (the GPU image is BGRA8, expanded only on upload)");
         return answer(I_DEVICE, 32, D3DERR_INVALIDCALL);
     }
     if (!si.gpu || si.fi->gpu != GFmt::bgra8 || di.store.size() <= d->subresource() || di.store[d->subresource()].empty()) {

@@ -7,16 +7,23 @@
 // texture is sampled (R2a samples nothing; the fill is for R3). DXT1, DXT3 and DXT5
 // are BC1, BC2 and BC3. D24S8 (75) is D24_UNORM_S8_UINT, or D32_FLOAT_S8_UINT where
 // the device has no D24S8 (DXVK's fallback, d3d9_format.cpp). R5G6B5 (23) and A8 (28)
-// keep their own 16- and 8-bit layout in the CPU store (the game's lock pitch) and are
-// B8G8R8A8_UNORM on the GPU, expanded on upload to what DXVK's view samples:
-// R5G6B5_UNORM_PACK16 as (r, g, b, 1), and A8's R8_UNORM with the (0, 0, 0, R) swizzle as
-// (0, 0, 0, a). Expanding on the CPU needs no optional 16-bit format of the GPU (a phone's
-// included). Every other format is not implemented, by name. The pitch and row counts are the packed ones of the
-// recording device and host/player/texcodec (one row of blocks for DXT), which are
-// also DXVK's lock pitch (d3d9_device.cpp LockImage: align(elementSize * blocks, 4)).
+// keep their own 16- and 8-bit layout in the CPU store and are B8G8R8A8_UNORM on the
+// GPU, expanded on upload to what DXVK's view samples: R5G6B5_UNORM_PACK16 as
+// (r, g, b, 1), and A8's R8_UNORM with the (0, 0, 0, R) swizzle as (0, 0, 0, a). The
+// expansion is a choice, not a need: Vulkan requires R5G6B5_UNORM_PACK16 and R8_UNORM to
+// be sampleable, and SDL_gpu names both (B5G6R5_UNORM, and A8_UNORM, which its Vulkan
+// backend makes as R8 with that swizzle); here the two share the 4-byte formats' BGRA8
+// path. Every other format is not implemented, by name.
+//
+// The pitch and row counts are the packed ones of the recording device and
+// host/player/texcodec (one row of blocks for DXT), which a replay's lock data follows.
+// For the 4-byte and BC formats they are also DXVK's lock pitch (d3d9_device.cpp
+// LockImage: align(elementSize * blocks, 4)). For R5G6B5 and A8 they are not: DXVK pads
+// each row to 4 bytes (16 and 8 bytes for 7 texels, where the packed rows are 14 and 7).
 //
 // X8 render targets (DXVK's A=1 swizzle and blend fix-ups) are not handled: no
-// stream renders to one, and R3 has to add them before one does.
+// stream renders to one, and R3 has to add them before one does. R5G6B5 and A8 render
+// targets are not implemented, by name: their GPU image is BGRA8, expanded only on upload.
 #pragma once
 
 #include <windows.h>
@@ -42,9 +49,10 @@ struct FormatInfo {
     bool x8;               // alpha forced to 0xFF on upload
     // DXVK's view of a texture of this format has the identity component mapping: its format
     // mapping (src/d3d9/d3d9_format.cpp ConvertFormatUnfixed) carries no Swizzle. False where it
-    // does (X8R8G8B8's A=ONE, :19-24): DXVK's BORDER on such a view applies the swizzle's inverse to
-    // the colour and the view's swizzle to the border, which SDL's swizzle-free texture cannot
-    // build (d9g_sampler.cpp maps BORDER only where this holds).
+    // does (X8R8G8B8's A=ONE, :19-24; A8's (0, 0, 0, R), :50-55): DXVK's BORDER on such a view
+    // applies the swizzle's inverse to the colour and the view's swizzle to the border, which
+    // this device's swizzle-free BGRA8 texture cannot build (d9g_sampler.cpp maps BORDER only
+    // where this holds).
     bool dxvk_view_identity;
     const char* name;
     Expand expand = Expand::none;   // the store's pixels expanded to BGRA8 on upload
@@ -72,8 +80,9 @@ uint32_t full_chain(uint32_t w, uint32_t h);
 void x8_alpha_fill(uint8_t* p, size_t bytes);
 
 // `pixels` packed store pixels of an Expand format as BGRA8 into `dst` (pixels * 4 bytes):
-// R5G6B5's channels widened by bit replication (UNORM: 31 and 63 give 255), alpha 255; A8 as
-// black with its alpha.
+// R5G6B5's channels as the nearest 8-bit value to UNORM's c / 31 and c / 63 (round(c * 255 / 31),
+// round(c * 255 / 63); bit replication is one off for 14 of the codes), alpha 255; A8 as black
+// with its alpha.
 void expand_to_bgra8(Expand e, const uint8_t* src, size_t pixels, uint8_t* dst);
 
 // DXVK's DecodeD3DCOLOR (src/util/util_misc.h): ARGB bytes / 255.0f, as RGBA floats.

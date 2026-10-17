@@ -71,9 +71,10 @@ void expand_to_bgra8(Expand e, const uint8_t* src, size_t pixels, uint8_t* dst) 
         if (e == Expand::r5g6b5) {
             const uint32_t v = uint32_t(src[i * 2]) | uint32_t(src[i * 2 + 1]) << 8;   // little-endian word
             const uint32_t r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
-            dst[0] = uint8_t(b << 3 | b >> 2);
-            dst[1] = uint8_t(g << 2 | g >> 4);
-            dst[2] = uint8_t(r << 3 | r >> 2);
+            // round(c * 255 / 31) and round(c * 255 / 63), exactly, for every code (no code is a tie)
+            dst[0] = uint8_t((b * 527 + 23) >> 6);
+            dst[1] = uint8_t((g * 259 + 33) >> 6);
+            dst[2] = uint8_t((r * 527 + 23) >> 6);
             dst[3] = 0xFF;
         } else {
             dst[0] = dst[1] = dst[2] = 0;

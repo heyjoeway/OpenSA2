@@ -118,7 +118,7 @@ void test_formats() {
     CHECK(level_pitch(7, *r565) == 14 && level_pitch(7, *a8) == 7);   // packed: the recording device's pitch
     {
         // 0xF800 red, 0x07E0 green, 0x001F blue, 0xFFFF white, 0x0000 black, 0x8410 the 50% grey
-        // (16/31, 32/63, 16/31: bit replication gives 0x84, 0x82, 0x84), little-endian words.
+        // (16/31, 32/63, 16/31: the nearest bytes are 0x84, 0x82, 0x84), little-endian words.
         const uint8_t in[] = {0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x10, 0x84};
         uint8_t out[6 * 4] = {};
         expand_to_bgra8(Expand::r5g6b5, in, 6, out);
@@ -131,9 +131,30 @@ void test_formats() {
         expand_to_bgra8(Expand::a8, alpha, 3, aout);
         const uint8_t awant[3 * 4] = {0, 0, 0, 0x00, 0, 0, 0, 0x7F, 0, 0, 0, 0xFF};
         CHECK(std::memcmp(aout, awant, sizeof awant) == 0);
+        // Every 5- and 6-bit code is the byte nearest UNORM's value, round(c * 255 / 31) and
+        // round(c * 255 / 63) (no code is a tie), in its own channel with the others zero.
+        auto expanded = [](uint32_t word) {
+            const uint8_t w[2] = {uint8_t(word), uint8_t(word >> 8)};
+            uint8_t o[4] = {};
+            expand_to_bgra8(Expand::r5g6b5, w, 1, o);
+            return uint32_t(o[0]) | uint32_t(o[1]) << 8 | uint32_t(o[2]) << 16 | uint32_t(o[3]) << 24;
+        };
+        int off = 0;
+        for (uint32_t c = 0; c < 32; c++) {
+            const uint32_t want5 = uint32_t(std::lround(c * 255.0 / 31.0));
+            off += expanded(c << 11) != (0xFF000000u | want5 << 16);   // red
+            off += expanded(c) != (0xFF000000u | want5);               // blue
+        }
+        for (uint32_t c = 0; c < 64; c++)
+            off += expanded(c << 5) != (0xFF000000u | uint32_t(std::lround(c * 255.0 / 63.0)) << 8);   // green
+        CHECK(off == 0);
+        // where bit replication is one off: red 3 and 24, green 11 and 48, blue 7
+        CHECK(expanded(3u << 11) == 0xFF190000u && expanded(24u << 11) == 0xFFC50000u);   // 25, 197
+        CHECK(expanded(11u << 5) == 0xFF002D00u && expanded(48u << 5) == 0xFF00C200u);    // 45, 194
+        CHECK(expanded(7u) == 0xFF00003Au);                                              // 58
     }
     // The packed pitch and rows are texcodec's (the recording device's) for every size.
-    for (uint32_t f : {21u, 22u, kDXT1, kDXT3, kDXT5})
+    for (uint32_t f : {21u, 22u, 23u, 28u, kDXT1, kDXT3, kDXT5})
         for (uint32_t w = 1; w <= 300; w++) {
             CHECK(level_pitch(w, *format_info(f)) == tex::level_pitch(w, f));
             CHECK(level_rows(w, *format_info(f)) == tex::level_rows(w, f));
@@ -1072,6 +1093,174 @@ void test_hazard_tracking() {
     CHECK(keys.find("\"shaders\": {\"vs\": [\"" + hv.hex() + "\"], \"ps\": [\"" + hp.hex() + "\", \"" + hp5.hex() +
                     "\"], \"vs_input_signature\": [[[0, 0]]], \"ps_masks\": [[0, 1], [32, 1]]}") != std::string::npos);
     CHECK(keys.find("\"schema\": \"sa2-d3d9gpu-keys/v3\"") != std::string::npos);
+}
+
+// R5G6B5 and A8 (the Chao Garden's): a CPU store at the recording device's packed pitch, a BGRA8 GPU
+// texture made from it on upload as DXVK's views sample them (R5G6B5 as (r, g, b, 1), A8 as
+// (0, 0, 0, a)), the A8 view's swizzle on the shader route's border, and no render target of either.
+void test_expanded_formats() {
+    d9g::Device* d = make_device(0, kBehavior, true, true);
+    // level `l` of a texture as the GPU holds it, BGRA8, and its texel (x, y) as B | G << 8 | R << 16 | A << 24
+    auto gpu_level = [&](IDirect3DTexture9* t, uint32_t l) {
+        std::string b;
+        CHECK(d9g::cpu_gpu_bytes(d->gpu(), static_cast<d9g::Texture*>(t)->image()->gpu, l, &b));
+        return b;
+    };
+    auto texel = [](const std::string& b, uint32_t w, uint32_t x, uint32_t y) {
+        uint32_t v = 0xDEADBEEF;
+        if ((size_t(y) * w + x + 1) * 4 <= b.size()) std::memcpy(&v, b.data() + (size_t(y) * w + x) * 4, 4);
+        return v;
+    };
+    auto all_texels = [&](IDirect3DTexture9* t, uint32_t l, uint32_t want) {
+        const std::string b = gpu_level(t, l);
+        const uint32_t w = d9g::level_dim(7, l), h = d9g::level_dim(5, l);
+        bool same = b.size() == size_t(w) * h * 4;
+        for (uint32_t i = 0; same && i < w * h; i++) same = texel(b, w, i % w, i / w) == want;
+        return same;
+    };
+    auto put16 = [](uint8_t* row, uint32_t x, uint16_t word) {   // little-endian, as the game writes it
+        row[2 * x] = uint8_t(word);
+        row[2 * x + 1] = uint8_t(word >> 8);
+    };
+    IDirect3DTexture9 *r565 = nullptr, *a8 = nullptr;
+    CHECK(d->CreateTexture(7, 5, 0, 0, D3DFMT_R5G6B5, D3DPOOL_MANAGED, &r565, nullptr) == D3D_OK);
+    CHECK(d->CreateTexture(7, 5, 0, 0, D3DFMT_A8, D3DPOOL_MANAGED, &a8, nullptr) == D3D_OK);
+    if (!r565 || !a8) {
+        if (r565) r565->Release();
+        if (a8) a8->Release();
+        d->Release();
+        return;
+    }
+    // the full chain: 7x5, 3x2, 1x1
+    CHECK(r565->GetLevelCount() == 3 && a8->GetLevelCount() == 3);
+    // before any lock: R5G6B5's levels are opaque black (DXVK's zeroed image has no alpha to read), A8's zero
+    for (uint32_t l = 0; l < 3; l++) CHECK(all_texels(r565, l, 0xFF000000u) && all_texels(a8, l, 0u));
+
+    // R5G6B5 level 0, pitch 14 (packed, where DXVK's lock pitch is 16): row 0 red, green, blue, white,
+    // the 50% grey; row 1 the codes bit replication rounds the wrong way (red 3 and 24, green 11 and
+    // 48, blue 7); the rest left zero
+    D3DLOCKED_RECT lr{};
+    CHECK(r565->LockRect(0, &lr, nullptr, 0) == D3D_OK && lr.Pitch == 14);
+    auto* row0 = static_cast<uint8_t*>(lr.pBits);
+    uint8_t* row1 = row0 + lr.Pitch;
+    const uint16_t first[] = {0xF800, 0x07E0, 0x001F, 0xFFFF, 0x8410};
+    const uint16_t second[] = {3u << 11, 24u << 11, 11u << 5, 48u << 5, 7u};
+    for (uint32_t x = 0; x < 5; x++) {
+        put16(row0, x, first[x]);
+        put16(row1, x, second[x]);
+    }
+    CHECK(r565->UnlockRect(0) == D3D_OK);
+    const d9g::Image* ri = static_cast<d9g::Texture*>(r565)->image();
+    CHECK(ri->store[0].size() == 14 * 5 && ri->store[0][0] == 0x00 && ri->store[0][1] == 0xF8);   // kept packed
+    std::string b = gpu_level(r565, 0);
+    CHECK(b.size() == 7 * 5 * 4);
+    CHECK(texel(b, 7, 0, 0) == 0xFFFF0000u && texel(b, 7, 1, 0) == 0xFF00FF00u && texel(b, 7, 2, 0) == 0xFF0000FFu);
+    CHECK(texel(b, 7, 3, 0) == 0xFFFFFFFFu && texel(b, 7, 4, 0) == 0xFF848284u);
+    CHECK(texel(b, 7, 0, 1) == 0xFF190000u && texel(b, 7, 1, 1) == 0xFFC50000u);   // red 25, 197
+    CHECK(texel(b, 7, 2, 1) == 0xFF002D00u && texel(b, 7, 3, 1) == 0xFF00C200u);   // green 45, 194
+    CHECK(texel(b, 7, 4, 1) == 0xFF00003Au);                                       // blue 58
+    CHECK(texel(b, 7, 6, 0) == 0xFF000000u && texel(b, 7, 6, 4) == 0xFF000000u);   // zero words: opaque black
+    // the 1x1 last level, pitch 2; level 1 untouched
+    CHECK(r565->LockRect(2, &lr, nullptr, 0) == D3D_OK && lr.Pitch == 2);
+    put16(static_cast<uint8_t*>(lr.pBits), 0, 0x07E0);
+    CHECK(r565->UnlockRect(2) == D3D_OK);
+    CHECK(gpu_level(r565, 2) == std::string("\x00\xFF\x00\xFF", 4) && all_texels(r565, 1, 0xFF000000u));
+
+    // A8 level 0, pitch 7 (DXVK's: 8): each byte is the texel's alpha over black
+    CHECK(a8->LockRect(0, &lr, nullptr, 0) == D3D_OK && lr.Pitch == 7);
+    const uint8_t alphas[] = {0x00, 0x01, 0x7F, 0x80, 0xFF};
+    std::memcpy(lr.pBits, alphas, sizeof alphas);
+    static_cast<uint8_t*>(lr.pBits)[4 * lr.Pitch + 6] = 0x5A;
+    CHECK(a8->UnlockRect(0) == D3D_OK);
+    b = gpu_level(a8, 0);
+    CHECK(b.size() == 7 * 5 * 4);
+    for (uint32_t x = 0; x < 5; x++) CHECK(texel(b, 7, x, 0) == uint32_t(alphas[x]) << 24);
+    CHECK(texel(b, 7, 6, 4) == 0x5A000000u && texel(b, 7, 5, 0) == 0u);
+    CHECK(a8->LockRect(2, &lr, nullptr, 0) == D3D_OK && lr.Pitch == 1);
+    *static_cast<uint8_t*>(lr.pBits) = 0xC3;
+    CHECK(a8->UnlockRect(2) == D3D_OK);
+    CHECK(gpu_level(a8, 2) == std::string("\x00\x00\x00\xC3", 4) && all_texels(a8, 1, 0u));
+
+    // The shader route's border (a custom colour, which no sampler border holds): A8's view swizzle
+    // (0, 0, 0, R) applied to the colour's inverse leaves (0, 0, 0, a); A8R8G8B8's identity view keeps it.
+    IDirect3DVertexShader9* vs = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    IDirect3DVertexBuffer9* vb = nullptr;
+    IDirect3DTexture9* argb = nullptr;
+    const D3DVERTEXELEMENT9 e[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, D3DDECL_END()};
+    CHECK(d->CreateVertexShader(kVs, &vs) == D3D_OK);
+    CHECK(d->CreatePixelShader(kPsSample5, &ps) == D3D_OK);
+    CHECK(d->CreateVertexDeclaration(e, &decl) == D3D_OK);
+    CHECK(d->CreateVertexBuffer(48, 0, 0, D3DPOOL_DEFAULT, &vb, nullptr) == D3D_OK);
+    CHECK(d->CreateTexture(8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &argb, nullptr) == D3D_OK);
+    d->SetVertexShader(vs); d->SetPixelShader(ps); d->SetVertexDeclaration(decl);
+    d->SetStreamSource(0, vb, 0, 16);
+    d->SetSamplerState(5, D3DSAMP_ADDRESSU, D3DTADDRESS_BORDER);
+    d->SetSamplerState(5, D3DSAMP_BORDERCOLOR, 0x80402010u);
+    const auto* trace = d9g::cpu_gpu_draws(d->gpu());
+    auto border5 = [&](IDirect3DTexture9* t, std::array<float, 4>* rgba) {
+        d->SetTexture(5, t);
+        const size_t before = trace ? trace->size() : 0;
+        if (d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1) != D3D_OK || !trace || trace->size() != before + 1) return false;
+        const auto& slot = trace->back().pixel.uniforms.slots[d9g::shader::kPsBorderColours];
+        if (slot.size() < 6 * 16) return false;
+        std::memcpy(rgba->data(), slot.data() + 5 * 16, 16);
+        return true;
+    };
+    std::array<float, 4> got{};
+    const uint64_t fallbacks = d9g::report().pipeline.fallback_border_samplers;
+    CHECK(border5(a8, &got) && got[0] == 0.0f && got[1] == 0.0f && got[2] == 0.0f && got[3] == float(0x80) / 255.0f);
+    CHECK(border5(argb, &got) && got[0] == float(0x40) / 255.0f && got[1] == float(0x20) / 255.0f &&
+          got[2] == float(0x10) / 255.0f && got[3] == float(0x80) / 255.0f);
+    CHECK(d9g::report().pipeline.fallback_border_samplers == fallbacks + 2);
+    d->SetTexture(5, nullptr);
+
+    // Neither is a render target, by name (CreateRenderTarget's and a cube's too); DXVK's own refusals
+    // (a MANAGED render target, :226) come first and name nothing. A DEFAULT one without RENDERTARGET is made.
+    uint64_t ni = d9g::report().ni_value_count;
+    const std::string r565_rt = "a render target of R5G6B5 (the GPU image is BGRA8, expanded only on upload)";
+    const std::string a8_rt = "a render target of A8 (the GPU image is BGRA8, expanded only on upload)";
+    IDirect3DTexture9* t = nullptr;
+    IDirect3DSurface9* s = nullptr;
+    IDirect3DCubeTexture9* c = nullptr;
+    auto last_ni = [] { const auto& v = d9g::report().ni_values; return v.empty() ? std::string() : v.back(); };
+    // refused with nothing made; anything made is released, so a regression fails here and leaks nothing
+    auto refused = [](HRESULT hr, auto*& made) {
+        const bool none = !made;
+        if (made) made->Release();
+        made = nullptr;
+        return hr == D3DERR_INVALIDCALL && none;
+    };
+    CHECK(refused(d->CreateTexture(8, 8, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &t, nullptr), t));
+    CHECK(d9g::report().ni_value_count == ni + 1 && last_ni() == r565_rt);
+    CHECK(refused(d->CreateTexture(8, 8, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8, D3DPOOL_DEFAULT, &t, nullptr), t));
+    CHECK(d9g::report().ni_value_count == ni + 2 && last_ni() == a8_rt);
+    CHECK(refused(d->CreateRenderTarget(8, 8, D3DFMT_R5G6B5, D3DMULTISAMPLE_NONE, 0, FALSE, &s, nullptr), s));
+    CHECK(d9g::report().ni_value_count == ni + 3 && last_ni() == r565_rt);
+    CHECK(refused(d->CreateRenderTarget(8, 8, D3DFMT_A8, D3DMULTISAMPLE_NONE, 0, TRUE, &s, nullptr), s));
+    CHECK(d9g::report().ni_value_count == ni + 4 && last_ni() == a8_rt);
+    CHECK(refused(d->CreateCubeTexture(8, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &c, nullptr), c));
+    CHECK(d9g::report().ni_value_count == ni + 5 && last_ni() == r565_rt);
+    CHECK(refused(d->CreateTexture(8, 8, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8, D3DPOOL_MANAGED, &t, nullptr), t));
+    CHECK(d9g::report().ni_value_count == ni + 5);
+    CHECK(d->CreateTexture(8, 8, 1, 0, D3DFMT_A8, D3DPOOL_DEFAULT, &t, nullptr) == D3D_OK && t);
+    if (t) t->Release();
+    // and a readback of one, by name: its GPU texels are BGRA8, not the packed store's
+    IDirect3DSurface9 *level0 = nullptr, *sys = nullptr;
+    CHECK(r565->GetSurfaceLevel(0, &level0) == D3D_OK);
+    CHECK(d->CreateOffscreenPlainSurface(7, 5, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &sys, nullptr) == D3D_OK);
+    ni = d9g::report().ni_value_count;
+    if (level0 && sys) {
+        CHECK(d->GetRenderTargetData(level0, sys) == D3DERR_INVALIDCALL && d9g::report().ni_value_count == ni + 1);
+        CHECK(last_ni() == "GetRenderTargetData of a R5G6B5 surface (the GPU image is BGRA8, expanded only on upload)");
+    }
+    if (sys) sys->Release();
+    if (level0) level0->Release();
+    argb->Release(); vb->Release(); decl->Release(); ps->Release(); vs->Release();
+    a8->Release();
+    r565->Release();
+    CHECK(d->Release() == 0 && d9g::report().live_at_destroy.empty());
 }
 
 void test_report_shape() {
@@ -2882,6 +3071,7 @@ int main(int argc, char** argv) {
     test_locks();
     test_decoded_dxt();
     test_draws_and_frames();
+    test_expanded_formats();
     test_report_shape();
     test_pipeline_tracking();
     test_hazard_tracking();

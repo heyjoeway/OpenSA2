@@ -2,7 +2,7 @@
 
 OpenSA2 is an experimental port with Windows, Android, and Linux downloads. It has reached live gameplay on desktop and Android devices. It has not completed a full-game compatibility pass.
 
-This status reflects development on 2026-10-13. The first [prerelease](downloads.md) uses a tested desktop development snapshot and a later Android snapshot. A complete fresh-checkout game build remains unfinished.
+This status reflects development on 2026-10-16. The [prereleases](downloads.md) use tested development snapshots. A complete fresh-checkout game build remains unfinished.
 
 ## Platforms
 
@@ -24,7 +24,8 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 
 ## Known limitations
 
-- An event after a stage can stop at a missing block in the CRT `_CItan` x87 fallback. The observed missing target is `0x00859AC8`. The sibling math paths and the affected event need further checks.
+- In the Hero story, the event after Green Forest (the Prison Island movie) can show only Tails's plane on a black screen, with no sound, and then stop responding. Earlier builds stopped at the same point on a missing block in the CRT `_CItan` x87 fallback (`0x00859AC8`). Builds since 2026-10-15 run the x87 tan, sin, and cos fallbacks and the NaN tail of the two-argument math dispatch, so the event no longer traps there. Players report the black screen on those builds, and its cause is under investigation.
+- The renderer needs Vulkan 1.3. A device whose driver offers an older version, or lacks a feature the renderer asks for, stops before the first frame. The Android setup screen warns when the system reports an older Vulkan version.
 - Broad stage, boss, event, and game-mode testing is unfinished. Additional missing blocks can exist outside the exercised paths.
 - Widescreen rendering is in development. The viewport and main HUD have been adjusted, but several menus and overlays still need work, including the boss gauge, stage map, title cards, and story-select art.
 - The portable renderer currently depends on the project's SDL3 patches. Equivalent behavior with stock SDL3 is unfinished.
@@ -34,6 +35,6 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 
 ## Work still needed
 
-The immediate game-path work is the `_CItan` missing block and smoke tests across stages and events. Wider testing must then cover long sessions, saves, controllers, and rendering behavior on more hardware. Public build setup and dependency documentation also need work before the checkout can offer a complete build guide.
+The immediate game-path work is the event after Green Forest and smoke tests across stages and events, including the other movie events. Wider testing must then cover long sessions, saves, controllers, and rendering behavior on more hardware. Public build setup and dependency documentation also need work before the checkout can offer a complete build guide.
 
-There are no release dates or platform-support promises. Check this page when reporting an issue, then include the steps and text diagnostics needed to reproduce it.
+There are no release dates or platform-support promises. Check this page when reporting an issue, then include the steps and text diagnostics needed to reproduce it. On Android, the setup screen's **Report on GitHub** button copies a crash report and opens the bug-report form.

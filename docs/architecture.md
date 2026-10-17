@@ -21,7 +21,7 @@ Ghidra provides function ranges, jump-table targets, imports, and other addresse
 
 Remill supplies the x86 instruction translation. The project's passes adapt that output to its guest memory model, dispatch rules, and floating-point behavior. The original game uses the x87 register stack, including precision and rounding controls that host compilers do not reproduce automatically.
 
-An unresolved target produces a diagnostic trap. The port does not silently replace a missing game block with success. The known `_CItan` event failure is an example of an uncovered path that still needs translation.
+An unresolved target produces a diagnostic trap. The port does not silently replace a missing game block with success. The `_CItan` event failure fixed in 2026-10-15 builds is an example: the x87 tan fallback was an uncovered path until it was translated.
 
 ## Guest state and platform services
 

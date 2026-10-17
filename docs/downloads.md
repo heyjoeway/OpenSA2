@@ -1,14 +1,16 @@
 # Download and play OpenSA2
 
-Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.1). The first release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. A known missing block can stop an event after a stage. Read the [limitations](status.md) before testing.
+Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.2). The current release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. The event after Green Forest can show a black screen. Read the [limitations](status.md) before testing.
 
-You need your own supported, unmodified **2012 PC release of Sonic Adventure 2**. The downloads include recompiled game logic and the port's runtime. They include no original game executable or assets. The installer verifies the files you supply and prepares a separate installation.
+You need your own supported, unmodified **2012 PC release of Sonic Adventure 2**. That is the version Steam sells and installs today. "2012" names the release, not an old build: do not look for an older copy. Install the game through Steam, remove any mods, and use its folder as it is. The installer checks every file it reads against the known hashes, so a modified, repacked, or downloaded copy fails the check.
+
+The downloads include recompiled game logic and the port's runtime. They include no original game executable or assets. The installer verifies the files you supply and prepares a separate installation.
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
-| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and compatible Vulkan graphics. Device support is experimental. |
-| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.1/OpenSA2-v0.1.0-alpha.1-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
+| Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.2/OpenSA2-v0.1.0-alpha.2-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
+| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.2/OpenSA2-v0.1.0-alpha.2-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and compatible Vulkan graphics. Device support is experimental. |
+| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.2/OpenSA2-v0.1.0-alpha.2-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
 
 ## Windows
 
@@ -20,11 +22,21 @@ The Windows build is unsigned. Windows may ask you to confirm that you want to r
 
 ## Android
 
-1. Copy your own PC game installation into a ZIP. The archive must include `sonic2app.exe` and the game files.
-2. Download the APK on your device and install it. Android may require permission for your browser or file manager to install apps.
-3. Open OpenSA2 and choose your game ZIP in the setup screen.
+1. On your computer, open the game's folder. In Steam, right-click Sonic Adventure 2 and select **Manage** > **Browse local files**.
+2. Put everything in that folder into a ZIP. The archive must include `sonic2app.exe` and the `resource` folder.
+3. Copy the ZIP to your device.
+4. Download the APK on your device and install it. Android may require permission for your browser or file manager to install apps.
+5. Open OpenSA2, tap **Choose game ZIP**, and select your ZIP.
 
-The app verifies and imports the files into its own storage. It supports touch controls and external controllers. Keep the game ZIP until setup has completed.
+The app copies the ZIP, then shows "Checking the game ZIP" while it verifies and imports the files into its own storage. This can take a few minutes, and the screen can look stuck. Keep the app open until the game starts. You can then delete the ZIP. If a file fails the check, the setup screen names it.
+
+The app supports touch controls and external controllers. The touch controls appear when you touch the screen.
+
+### Report a crash on Android
+
+If the game stops, OpenSA2 returns to its setup screen and says so. Tap **Report on GitHub**. The app copies a crash report and opens the bug-report form with your device filled in. Paste the report into the **Crash report** box, then fill in the steps and what you expected. **Copy report** copies the whole report, **Copy summary** copies a shorter version that fits in a forum comment, and **Share report** sends it to another app. **Share OpenSA2** at the bottom of the screen sends a friend the download link. If the installer refuses your game files, the same buttons copy its output.
+
+The report contains the app version, the device model, the GPU, the Android version, and the game's last log lines. It contains no game files or account details. Read it before you post it. The app also saves the last report as `Android/data/com.sa2recomp.app/files/crash-report.txt`, which a computer can read over USB.
 
 This release uses a new release signing key. If you previously installed a development APK, Android may reject an update because the signing key differs. Back up that app's saves before uninstalling the development version. Public builds will keep the release key for updates.
 
@@ -33,7 +45,7 @@ This release uses a new release signing key. If you previously installed a devel
 Download the DEB, then install it from that directory:
 
 ```bash
-sudo apt install './OpenSA2-v0.1.0-alpha.1-linux-x86_64.deb'
+sudo apt install './OpenSA2-v0.1.0-alpha.2-linux-x86_64.deb'
 ```
 
 Open OpenSA2 from your application menu, or run `opensa2`. The first start finds a Steam copy or offers a game-folder picker. A controller is optional.
@@ -42,6 +54,6 @@ Saves, settings, and logs use the port's per-user `sa2recomp` directories under 
 
 ## Source and checksums
 
-The release provides `SHA256SUMS` for the downloadable files. It also provides the project source snapshot matching the desktop builds. Android's project source is at the release tag. The [developer guide](getting-started.md) explains the local build inputs and the current limits of the public build setup.
+The release provides `SHA256SUMS` for the downloadable files. The project source for all three packages is at the release tag. The [developer guide](getting-started.md) explains the local build inputs and the current limits of the public build setup.
 
-The desktop packages use an earlier tested development snapshot than Android. Later Android performance and display changes are not all included in the desktop runtime. Report the platform and release version with any bug.
+All three packages include the math fixes from 2026-10-15. Report the platform and release version with any bug. Android shows the version in the app's title.

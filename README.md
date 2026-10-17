@@ -12,9 +12,9 @@ The aim is to preserve the game's original logic while making that logic run on 
 
 ## Download the experimental builds
 
-Windows ZIP, Android APK, and Linux DEB packages are available from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.1). You need your own supported copy of the 2012 PC game. The packages include recompiled logic and the port's runtime; you supply the original executable and assets through the installer.
+Windows ZIP, Android APK, and Linux DEB packages are available from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.2). You need your own supported copy of the 2012 PC game. The packages include recompiled logic and the port's runtime; you supply the original executable and assets through the installer.
 
-This is an experimental prerelease. A known event crash and incomplete stage coverage remain. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
+This is an experimental prerelease. A known black screen at the event after Green Forest and incomplete stage coverage remain. On Android, the app's **Report on GitHub** button copies a crash report for a bug report. Read the [setup instructions](docs/downloads.md) and [current limitations](docs/status.md) before playing.
 
 ## Screenshots
 
@@ -38,7 +38,7 @@ This source repository includes no game executable, assets, or translated game c
 | Linux, arm64 | Cross-build and replay work under QEMU. General native-device support is unverified. |
 | macOS | Future work. No supported build or compatibility promise. |
 
-These are development results, not a claim of full-game parity. A known missing block in the CRT `_CItan` fallback can stop an event after a stage. Broad stage, boss, and event coverage remains unfinished. Desktop downloads use an earlier tested snapshot than Android. See the [status page](docs/status.md) before testing.
+These are development results, not a claim of full-game parity. In the Hero story, the event after Green Forest can show a black screen and stop responding. Broad stage, boss, and event coverage remains unfinished. See the [status page](docs/status.md) before testing.
 
 ## How the port works
 

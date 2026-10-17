@@ -24,7 +24,7 @@ body:
     id: version
     attributes:
       label: Revision or build version
-      description: Identify the public revision or local development build you tested.
+      description: The release you installed (Android shows it in the app's title, for example OpenSA2 0.1.0-alpha.2), or the revision you built.
     validations:
       required: true
   - type: textarea
@@ -57,6 +57,12 @@ body:
       label: Actual result
     validations:
       required: true
+  - type: textarea
+    id: crash_report
+    attributes:
+      label: Crash report
+      description: On Android, open OpenSA2 after the game stops and tap Report on GitHub or Copy report, then paste the report here. It includes the device, the GPU, and the game's last log lines.
+      render: text
   - type: textarea
     id: diagnostics
     attributes:

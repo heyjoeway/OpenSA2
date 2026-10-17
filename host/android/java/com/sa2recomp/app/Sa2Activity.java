@@ -168,11 +168,23 @@ public class Sa2Activity extends SDLActivity {
         long now = SystemClock.uptimeMillis();
         if (mLastBack != 0 && now - mLastBack <= BACK_AGAIN_MS) {
             mQuitSent = true;
+            noteEndRequest();
             SDLActivity.nativeSendQuit();
             return;
         }
         mLastBack = now;
         Toast.makeText(this, "Press Back again to end the game", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Adds CrashReport.END_ASKED to files/last-session.txt, so a session whose process goes before it
+     * writes its "ended:" line (a third Back finishes this activity at once) is not taken for a crash.
+     * The native session rewrites the file whole at its next line, which then says how it ended. */
+    private void noteEndRequest() {
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(getFilesDir(), "last-session.txt"), true)) {
+            out.write((CrashReport.END_ASKED + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            // The setup screen then judges the session by the system's exit record alone.
+        }
     }
 
     @Override

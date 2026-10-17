@@ -1,13 +1,27 @@
 package com.sa2recomp.app;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -15,9 +29,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -28,6 +44,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,6 +56,19 @@ import java.util.Map;
  * game folder copied into the app's external files folder, game/ (the folder route). With one it runs the installer's
  * quick check (--verify) and starts the play screen (Sa2Activity). When a session ends it shows
  * what the session wrote to files/last-session.txt.
+ *
+ * When that session did not end cleanly (CrashReport.abnormal), the screen says so. Report on GitHub
+ * copies the crash report (CrashReport) and opens the project's bug-report form with the platform
+ * and version filled in, for the player to paste it; Copy report, Copy summary (cut to fit a forum
+ * comment) and Share hand the text
+ * to the clipboard or another app. The report itself never goes into the URL. The app then
+ * does not start the game by itself the next time it opens, so a new session does not replace the
+ * crashed one's records before the player has copied them; Play or a copy marks the crash seen.
+ *
+ * When the installer refuses the game, InstallVerdict puts the cause and the fix above its lines; while
+ * it runs, a line under the buttons counts the time, since a check can take minutes with no output.
+ * A phone whose system declares no Vulkan 1.3 is told so before it imports anything: the renderer's
+ * device needs 1.3 (host/d3d9gpu).
  *
  * The installer runs with the environment the native session sets (HOME = the files folder,
  * XDG_CONFIG_HOME = files/config, XDG_DATA_HOME = files/data), so both read the same config.
@@ -54,10 +85,17 @@ public class Sa2SetupActivity extends Activity {
     public static final String EXTRA_NO_AUTOPLAY = "sa2.no_autoplay";
     private static final String GAME_EXE = "sonic2app.exe";
     private static final int PICK_ZIP = 1;
+    private static final String PROJECT = "https://github.com/kittycache9/OpenSA2";
+    private static final String ISSUES = PROJECT + "/issues";
+    private static final int COPY = 0, SHARE = 1, GITHUB = 2, SUMMARY = 3;
 
-    private TextView mStatus, mLog;
-    private Button mZip, mCheck, mPlay;
-    private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched;
+    private TextView mStatus, mBanner, mProgress, mLog;
+    private LinearLayout mActions;       // Play and the install buttons, arranged by layoutActions
+    private Button mZip, mCheck, mPlay, mGithub, mCopy, mSummary, mShare;
+    private final List<String> mInstallOut = new ArrayList<>();      // the last installer run's lines
+    private String mInstallVerdict;      // InstallVerdict's account of the last refused run; null otherwise
+    private final Handler mTicker = new Handler(Looper.getMainLooper());
+    private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched, mShowingLast;
     private final ArrayDeque<String> mLines = new ArrayDeque<>();
 
     @Override
@@ -157,7 +195,7 @@ public class Sa2SetupActivity extends Activity {
         return null;
     }
 
-    private static String readText(File f) {
+    static String readText(File f) {
         if (!f.isFile()) return null;
         try (FileInputStream in = new FileInputStream(f)) {
             byte[] b = new byte[(int) Math.min(f.length(), 1 << 20)];
@@ -171,6 +209,24 @@ public class Sa2SetupActivity extends Activity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private File lastSessionFile() {
+        return new File(getFilesDir(), "last-session.txt");
+    }
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences("setup", Context.MODE_PRIVATE);
+    }
+
+    /** The last session ended badly and the player has neither copied its report nor played since. */
+    private boolean crashUnseen() {
+        File f = lastSessionFile();
+        return f.isFile() && CrashReport.abnormal(this, readText(f)) && prefs().getLong("crash_seen", 0) != f.lastModified();
+    }
+
+    private void markCrashSeen() {
+        prefs().edit().putLong("crash_seen", lastSessionFile().lastModified()).apply();
     }
 
     private String configValue(String key) {
@@ -188,14 +244,25 @@ public class Sa2SetupActivity extends Activity {
         if (mBusy) return;
         File g = gameDir();
         if (g != null && !g.isDirectory() && !g.mkdirs()) Log.w(TAG, "cannot create " + g);
-        String last = mPlayLaunched ? readText(new File(getFilesDir(), "last-session.txt")) : null;
+        boolean crashed = crashUnseen();
+        String last = mPlayLaunched || crashed || mShowingLast ? readText(lastSessionFile()) : null;
         mPlayLaunched = false;
+        mShowingLast = last != null;
+        // A shown session holds the screen (autoplay_done is saved with the instance), so a recreated
+        // activity does not start the game over the report the player may still be filing.
+        if (mShowingLast) mAutoPlayDone = true;
         if (configFile().isFile()) {
-            String root = configValue("read_root");
-            mStatus.setText("Sonic Adventure 2 is installed from\n" + root + "\n\nTap Play to start.");
-            mPlay.setEnabled(true);
-            mZip.setText("Install again from a ZIP");
-            mCheck.setText("Install again");
+            if (mInstallVerdict != null) {
+                // A refused reinstall keeps its card until the next install or session.
+            } else if (last != null && CrashReport.abnormal(this, last)) {
+                banner("The game stopped unexpectedly: " + CrashReport.headline(this, last) + "\n\n"
+                       + "Tap Report on GitHub: it copies a crash report and opens the bug-report form, where you "
+                       + "paste it and say what you were doing. If you closed the game yourself, just tap Play.");
+            } else {
+                banner(null);
+            }
+            mStatus.setText(("Sonic Adventure 2 is installed." + vulkanNote()).trim());
+            layoutActions(true);
             if (last != null) {
                 exportSessions();
                 setLog("The last session:\n" + last);
@@ -205,13 +272,14 @@ public class Sa2SetupActivity extends Activity {
             }
             return;
         }
-        mPlay.setEnabled(false);
-        mZip.setText("Choose game ZIP");
-        mCheck.setText("Check game folder");
+        layoutActions(false);
+        if (mInstallVerdict == null) banner(null);
         File root = findGameRoot();
         String where = g == null ? "(no external storage)" : g.getAbsolutePath();
-        mStatus.setText(
-                "First run: this app needs your own copy of Sonic Adventure 2 (the 2012 PC version, Steam).\n\n"
+        String note = vulkanNote().trim();
+        mStatus.setText((note.isEmpty() ? "" : note + "\n\n") +
+                "First run: this app needs your own copy of Sonic Adventure 2 for PC: the version Steam "
+                + "installs today (the 2012 release), with no mods.\n\n"
                 + "1. On your computer, open the game's folder (Steam: right-click Sonic Adventure 2, "
                 + "Manage, Browse local files) and put everything in it into a ZIP.\n"
                 + "2. Copy the ZIP to this phone: USB, a cloud drive, or any other way.\n"
@@ -309,7 +377,7 @@ public class Sa2SetupActivity extends Activity {
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         mZip.setEnabled(!busy);
         mCheck.setEnabled(!busy);
-        mPlay.setEnabled(!busy && configFile().isFile());
+        mPlay.setEnabled(!busy);
     }
 
     // ------------------------------------------------------------ the installer
@@ -321,6 +389,20 @@ public class Sa2SetupActivity extends Activity {
     private void runInstaller(final String what, final String[] args, final Done done) {
         setBusy(true);
         setLog(what + "...");
+        mInstallOut.clear();
+        mInstallVerdict = null;
+        final long t0 = SystemClock.elapsedRealtime();
+        final Runnable tick = new Runnable() {
+            @Override
+            public void run() {
+                long s = (SystemClock.elapsedRealtime() - t0) / 1000;
+                mProgress.setText(String.format(java.util.Locale.US, "%s... %d:%02d\nThis can take several minutes, "
+                                  + "and the screen may not change. Keep the app open.", what, s / 60, s % 60));
+                mTicker.postDelayed(this, 1000);
+            }
+        };
+        mProgress.setVisibility(View.VISIBLE);
+        tick.run();
         new Thread(() -> {
             int code;
             try {
@@ -343,7 +425,10 @@ public class Sa2SetupActivity extends Activity {
                     while ((line = r.readLine()) != null) {
                         final String l = line;
                         Log.i(TAG, "installer: " + l);
-                        runOnUiThread(() -> addLine(l));
+                        runOnUiThread(() -> {
+                            if (mInstallOut.size() < 50000) mInstallOut.add(l);
+                            addLine(l);
+                        });
                     }
                 }
                 code = p.waitFor();
@@ -355,6 +440,8 @@ public class Sa2SetupActivity extends Activity {
             }
             final int c = code;
             runOnUiThread(() -> {
+                mTicker.removeCallbacks(tick);
+                mProgress.setVisibility(View.GONE);
                 setBusy(false);
                 addLine(what + ": exit " + c);
                 done.exited(c);
@@ -379,9 +466,9 @@ public class Sa2SetupActivity extends Activity {
                 refresh();
                 play();
             } else {
-                mStatus.setText(mStatus.getText() + "\n\nThe game folder did not verify (exit " + code + "): "
-                                + "the lines below name each file. A changed or missing file must be copied again "
-                                + "from the PC; mods must be removed.");
+                mInstallVerdict = InstallVerdict.explain(mInstallOut, code, false);
+                banner("The game folder did not pass the check.\n\n" + mInstallVerdict
+                                + "\n\nIf you are stuck, tap Report on GitHub: it copies the check's output.");
             }
         });
     }
@@ -420,7 +507,7 @@ public class Sa2SetupActivity extends Activity {
                 if (!c.isNull(1)) size = c.getLong(1);
             }
         } catch (RuntimeException e) {
-            Log.w(TAG, "cannot describe " + uri + ": " + e);
+            Log.w(TAG, "cannot describe the picked ZIP: " + e.getClass().getSimpleName());
         }
         return new Object[] {name, size};
     }
@@ -433,17 +520,15 @@ public class Sa2SetupActivity extends Activity {
      * may not seek), then runs the installer's ZIP route on the copy and removes it. */
     private void installZip(final Uri uri) {
         final File copy = importZip();
-        Object[] d = describe(uri);
-        final String name = (String) d[0];
-        final long size = (Long) d[1];
+        final long size = (Long) describe(uri)[1];
         long free = getCacheDir().getUsableSpace();
         if (size > 0 && free < size + (64L << 20)) {
-            setLog("Not enough free space to copy " + name + " (" + gb(size) + "; " + gb(free) + " free). "
+            setLog("Not enough free space to copy the ZIP (" + gb(size) + "; " + gb(free) + " free). "
                    + "The import needs room for the ZIP and the extracted game together.");
             return;
         }
         setBusy(true);
-        setLog("Copying " + name + (size > 0 ? " (" + gb(size) + ")" : "") + "...");
+        setLog("Copying the ZIP" + (size > 0 ? " (" + gb(size) + ")" : "") + "...");
         new Thread(() -> {
             String err = null;
             long done = 0;
@@ -463,7 +548,8 @@ public class Sa2SetupActivity extends Activity {
                     }
                 }
             } catch (Exception e) {
-                err = e.toString();
+                // The provider's message can carry the file's full path: the kind of failure is enough.
+                err = e.getClass().getSimpleName();
             }
             final String failure = err;
             final long copied = done;
@@ -471,7 +557,7 @@ public class Sa2SetupActivity extends Activity {
                 setBusy(false);
                 if (failure != null) {
                     copy.delete();
-                    addLine("Cannot copy " + name + ": " + failure);
+                    addLine("Cannot copy the ZIP: " + failure + ". Copy it to the phone again and retry.");
                     return;
                 }
                 addLine("Copied " + gb(copied) + ".");
@@ -485,9 +571,9 @@ public class Sa2SetupActivity extends Activity {
                         refresh();
                         play();
                     } else {
-                        mStatus.setText(mStatus.getText() + "\n\nThe game ZIP did not verify (exit " + code + "): "
-                                        + "the lines below name each file. The ZIP must hold the unmodified game "
-                                        + "folder; mods must be removed.");
+                        mInstallVerdict = InstallVerdict.explain(mInstallOut, code, true);
+                        banner("The game ZIP did not pass the check.\n\n" + mInstallVerdict
+                                        + "\n\nIf you are stuck, tap Report on GitHub: it copies the check's output.");
                     }
                 });
             });
@@ -501,14 +587,117 @@ public class Sa2SetupActivity extends Activity {
             if (code == 0) {
                 play();
             } else {
-                mStatus.setText("The installation no longer verifies (exit " + code + "). Tap Install again "
-                                + "from a ZIP, or copy the game folder again and tap Install again.");
+                banner("The installation no longer verifies (exit " + code + "). Reinstall it from a ZIP, or "
+                       + "copy the game folder again and tap Reinstall from folder.");
             }
         });
     }
 
     private void play() {
+        markCrashSeen();
+        mShowingLast = false;
+        mInstallVerdict = null;
         launchPlay(new Intent(this, Sa2Activity.class));
+    }
+
+    // ------------------------------------------------------------ the crash report
+
+    /** Builds the report off the UI thread (it reads the logs, runs logcat and asks EGL for the GPU),
+     * then copies it, offers it to another app, or copies it and opens the bug-report form. */
+    private void report(final int mode) {
+        setReportEnabled(false);
+        final String setupLog = mInstallOut.isEmpty() ? mLog.getText().toString() : String.join("\n", mInstallOut);
+        final String verdict = mInstallVerdict;
+        Toast.makeText(this, "Collecting the crash report...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String text;
+            try {
+                // The summary fits a forum comment; the rest take the whole report.
+                text = CrashReport.build(getApplicationContext(), setupLog,
+                                         mode == SUMMARY ? CrashReport.SUMMARY_CHARS : CrashReport.FULL_CHARS, verdict);
+            } catch (RuntimeException e) {
+                text = "OpenSA2 crash report\napp: " + CrashReport.appVersion(this) + "\nthe report failed: " + e + "\n";
+            }
+            final String report = text;
+            // Also kept where a computer's file manager (and adb) can read it.
+            File ext = getExternalFilesDir(null);
+            if (ext != null) {
+                try (OutputStream out = new FileOutputStream(new File(ext, "crash-report.txt"))) {
+                    out.write(report.getBytes(StandardCharsets.UTF_8));
+                } catch (Exception e) {
+                    Log.w(TAG, "cannot save the crash report: " + e);
+                }
+            }
+            runOnUiThread(() -> {
+                setReportEnabled(true);
+                if (verdict == null) markCrashSeen();
+                if (mode == SHARE) {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_SUBJECT, "OpenSA2 crash report");
+                    send.putExtra(Intent.EXTRA_TEXT, report);
+                    try {
+                        startActivity(Intent.createChooser(send, "Share the crash report"));
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, "No app can take the report; use Copy instead.", Toast.LENGTH_LONG).show();
+                    }
+                    return;
+                }
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm == null) {
+                    setLog(report);
+                    Toast.makeText(this, "No clipboard: the report is below, select and copy it.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                cm.setPrimaryClip(ClipData.newPlainText("OpenSA2 crash report", report));
+                if (mode == GITHUB) {
+                    openIssueForm(report, verdict);
+                    return;
+                }
+                Toast.makeText(this, (mode == SUMMARY ? "Summary copied (" : "Report copied (") + report.length()
+                               + " characters). Paste it into a bug report or a comment.", Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    private void setReportEnabled(boolean on) {
+        mGithub.setEnabled(on);
+        mCopy.setEnabled(on);
+        mSummary.setEnabled(on);
+        mShare.setEnabled(on);
+    }
+
+    /** The bug-report form (.github/ISSUE_TEMPLATE/bug_report.yml) with its title, platform and
+     * version fields, and the device in its Hardware and software field, filled in from the query (no
+     * part of the report itself); the player pastes the copied report into its Crash report box. An
+     * install failure is titled as one, not as a crash of an older session. */
+    private void openIssueForm(String report, String installVerdict) {
+        String title;
+        if (installVerdict != null) {
+            int dot = installVerdict.indexOf(". ");
+            title = "[Bug] Android install: " + (dot > 0 ? installVerdict.substring(0, dot) : installVerdict);
+        } else {
+            String last = readText(lastSessionFile());
+            title = CrashReport.abnormal(this, last) ? "[Bug] Android: " + CrashReport.headline(this, last) : "[Bug] Android: ";
+        }
+        if (title.length() > 120) title = title.substring(0, 117) + "...";
+        String environment = Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE
+                             + " (API " + Build.VERSION.SDK_INT + "), Vulkan " + CrashReport.vulkanShort(this);
+        Uri form = Uri.parse(ISSUES + "/new").buildUpon()
+                .appendQueryParameter("template", "bug_report.yml")
+                .appendQueryParameter("title", title)
+                .appendQueryParameter("platform", "Android arm64")
+                .appendQueryParameter("version", "OpenSA2 " + versionName())
+                .appendQueryParameter("environment", environment)
+                .build();
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, form));
+            Toast.makeText(this, "Report copied. Paste it into the Crash report box, then fill in the steps.",
+                           Toast.LENGTH_LONG).show();
+        } catch (android.content.ActivityNotFoundException e) {
+            setLog("No browser to open " + ISSUES + ". The report is copied; paste it into a new issue there.\n\n"
+                   + report);
+        }
     }
 
     private void launchPlay(Intent play) {
@@ -516,68 +705,335 @@ public class Sa2SetupActivity extends Activity {
         startActivity(play);
     }
 
+    /** A warning when the system declares no Vulkan 1.3, which the renderer needs; empty otherwise. */
+    private String vulkanNote() {
+        if (CrashReport.hasVulkan13(this)) return "";
+        return "\n\nNote: this phone's graphics driver reports Vulkan " + CrashReport.vulkanShort(this)
+               + ". OpenSA2's renderer needs Vulkan 1.3, so the game will probably not start on this phone yet.";
+    }
+
+    private String versionName() {
+        try {
+            String v = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            return v == null ? "" : v;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    // ------------------------------------------------------------ the layout
+
+    private static final int PRIMARY = 0, SECONDARY = 1, QUIET = 2, ALERT = 3;
+    private static final int BACKGROUND = Color.rgb(0x10, 0x18, 0x30);
+
+    private int dp(float v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    /** A rounded button: PRIMARY (the one main action), SECONDARY, QUIET (outlined), or ALERT (the
+     * report button after a crash). Pressed and disabled states included. */
+    private Button button(String text, View.OnClickListener click) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setStateListAnimator(null);
+        b.setOnClickListener(click);
+        return b;
+    }
+
+    private void style(Button b, int kind) {
+        int fill, stroke = 0, text;
+        switch (kind) {
+            case PRIMARY: fill = Color.rgb(0x2B, 0x6B, 0xE8); text = Color.WHITE; break;
+            case ALERT: fill = Color.rgb(0xD9, 0x4F, 0x4F); text = Color.WHITE; break;
+            case SECONDARY: fill = Color.rgb(0x24, 0x30, 0x4D); text = Color.rgb(0xE8, 0xED, 0xF7); break;
+            default: fill = Color.TRANSPARENT; stroke = Color.rgb(0x3A, 0x48, 0x66); text = Color.rgb(0xB8, 0xC4, 0xDA);
+        }
+        GradientDrawable shape = new GradientDrawable();
+        shape.setCornerRadius(dp(12));
+        shape.setColor(fill);
+        if (stroke != 0) shape.setStroke(dp(1), stroke);
+        GradientDrawable off = new GradientDrawable();
+        off.setCornerRadius(dp(12));
+        off.setColor(kind == QUIET ? Color.TRANSPARENT : Color.rgb(0x1A, 0x23, 0x40));
+        if (kind == QUIET) off.setStroke(dp(1), Color.rgb(0x26, 0x30, 0x48));
+        StateListDrawable bg = new StateListDrawable();
+        bg.addState(new int[] {-android.R.attr.state_enabled}, off);
+        bg.addState(new int[] {}, new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, null));
+        b.setBackground(bg);
+        b.setTextColor(new ColorStateList(new int[][] {{-android.R.attr.state_enabled}, {}},
+                                          new int[] {Color.rgb(0x5D, 0x6A, 0x85), text}));
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, kind == PRIMARY ? 18 : kind == QUIET ? 14 : 15);
+        b.setTypeface(kind == PRIMARY || kind == ALERT ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        int h = dp(kind == PRIMARY ? 56 : kind == QUIET ? 44 : 48);
+        b.setMinHeight(h);
+        b.setMinimumHeight(h);
+        b.setPadding(dp(kind == QUIET ? 6 : 12), 0, dp(kind == QUIET ? 6 : 12), 0);
+    }
+
+    /** Buttons side by side at equal widths, 8 dp apart. */
+    private LinearLayout row(Button... buttons) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < buttons.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            lp.leftMargin = i == 0 ? 0 : dp(4);
+            lp.rightMargin = i == buttons.length - 1 ? 0 : dp(4);
+            detach(buttons[i]);
+            row.addView(buttons[i], lp);
+        }
+        return row;
+    }
+
+    private LinearLayout.LayoutParams full(int topMargin) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                                     ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = topMargin;
+        return lp;
+    }
+
+    private static void detach(View v) {
+        if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
+    }
+
+    /** Installed: Play on its own, then the two ways to install again. Not installed: Choose game ZIP
+     * on its own, then the folder check. */
+    private void layoutActions(boolean installed) {
+        mActions.removeAllViews();
+        if (installed) {
+            mZip.setText("Reinstall from ZIP");
+            mCheck.setText("Reinstall from folder");
+            style(mPlay, PRIMARY);
+            style(mZip, SECONDARY);
+            style(mCheck, SECONDARY);
+            detach(mPlay);
+            mActions.addView(mPlay, full(0));
+            mActions.addView(row(mZip, mCheck), full(dp(8)));
+        } else {
+            mZip.setText("Choose game ZIP");
+            mCheck.setText("Check game folder");
+            style(mZip, PRIMARY);
+            style(mCheck, SECONDARY);
+            detach(mZip);
+            detach(mCheck);
+            mActions.addView(mZip, full(0));
+            mActions.addView(mCheck, full(dp(8)));
+        }
+        mZip.setEnabled(!mBusy);
+        mCheck.setEnabled(!mBusy);
+        mPlay.setEnabled(!mBusy);
+    }
+
+    /** The card above the buttons for something the player must act on (a crash, a refused install),
+     * with the report button turned red while it shows; null hides both. */
+    private void banner(String text) {
+        mBanner.setText(text == null ? "" : text);
+        mBanner.setVisibility(text == null ? View.GONE : View.VISIBLE);
+        style(mGithub, text == null ? QUIET : ALERT);
+    }
+
+    /** A column no wider than maxWidth, so the buttons do not stretch across a landscape screen. */
+    private static final class Column extends LinearLayout {
+        private final int maxWidth;
+
+        Column(android.content.Context c, int maxWidth) {
+            super(c);
+            this.maxWidth = maxWidth;
+            setOrientation(VERTICAL);
+        }
+
+        @Override
+        protected void onMeasure(int widthSpec, int heightSpec) {
+            if (MeasureSpec.getSize(widthSpec) > maxWidth) {
+                widthSpec = MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.EXACTLY);
+            }
+            super.onMeasure(widthSpec, heightSpec);
+        }
+    }
+
+    /** The footer: who makes the app, buttons to its GitHub page (source, releases and issues) and to
+     * tell a friend about it (the releases page, through the system's share sheet), and that it is
+     * not SEGA's. */
+    private LinearLayout about() {
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        f.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        View bar = new View(this);
+        GradientDrawable accent = new GradientDrawable();
+        accent.setCornerRadius(dp(2));
+        accent.setColor(Color.rgb(0x2B, 0x6B, 0xE8));
+        bar.setBackground(accent);
+        f.addView(bar, new LinearLayout.LayoutParams(dp(40), dp(3)));
+
+        TextView who = new TextView(this);
+        SpannableStringBuilder b = new SpannableStringBuilder();
+        int bright = Color.rgb(0xE8, 0xED, 0xF7);
+        appendStyled(b, "OpenSA2", bright, true);
+        b.append(" is an open-source project by ");
+        appendStyled(b, "kittycache9", bright, true);
+        who.setText(b);
+        who.setTextColor(Color.rgb(0x8A, 0x97, 0xB2));
+        who.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        who.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                                                                     ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(14);
+        f.addView(who, lp);
+
+        Button github = pill("View on GitHub", v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(PROJECT)));
+            } catch (android.content.ActivityNotFoundException e) {
+                Toast.makeText(this, PROJECT, Toast.LENGTH_LONG).show();
+            }
+        });
+        Button tell = pill("Share OpenSA2", v -> {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_SUBJECT, "OpenSA2");
+            send.putExtra(Intent.EXTRA_TEXT, "OpenSA2 runs Sonic Adventure 2 natively on Android. It's an open-source "
+                          + "port, and you use your own copy of the PC version from Steam. Get it here: "
+                          + PROJECT + "/releases");
+            try {
+                startActivity(Intent.createChooser(send, "Share OpenSA2"));
+            } catch (android.content.ActivityNotFoundException e) {
+                Toast.makeText(this, PROJECT + "/releases", Toast.LENGTH_LONG).show();
+            }
+        });
+        LinearLayout links = new LinearLayout(this);
+        links.setOrientation(LinearLayout.HORIZONTAL);
+        links.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                                                                      ViewGroup.LayoutParams.WRAP_CONTENT);
+        gap.rightMargin = dp(8);
+        links.addView(github, gap);
+        links.addView(tell);
+        lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(12);
+        f.addView(links, lp);
+
+        TextView legal = new TextView(this);
+        legal.setText("Not affiliated with SEGA or Sonic Team.");
+        legal.setTextColor(Color.rgb(0x66, 0x72, 0x8D));
+        legal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        legal.setGravity(Gravity.CENTER_HORIZONTAL);
+        lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(12);
+        f.addView(legal, lp);
+        return f;
+    }
+
+    /** A small rounded, outlined button for the footer's links. */
+    private Button pill(String text, View.OnClickListener click) {
+        Button b = button(text, click);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setCornerRadius(dp(20));
+        shape.setColor(Color.rgb(0x18, 0x22, 0x3D));
+        shape.setStroke(dp(1), Color.rgb(0x3A, 0x48, 0x66));
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, null));
+        b.setTextColor(Color.rgb(0x8C, 0xB6, 0xFF));
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setMinHeight(dp(40));
+        b.setMinimumHeight(dp(40));
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setPadding(dp(18), 0, dp(18), 0);
+        return b;
+    }
+
+    private static void appendStyled(SpannableStringBuilder b, String text, int color, boolean bold) {
+        int start = b.length();
+        b.append(text);
+        b.setSpan(new android.text.style.ForegroundColorSpan(color), start, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (bold) b.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
     private void buildUi() {
-        float dp = getResources().getDisplayMetrics().density;
-        int pad = (int) (16 * dp);
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        Column col = new Column(this, dp(640));
         col.setPadding(pad, pad, pad, pad);
-        col.setBackgroundColor(Color.rgb(0x10, 0x18, 0x30));
 
         TextView title = new TextView(this);
-        title.setText("SA2 Recompiled");
+        title.setText("SA2 Recompiled " + versionName());
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         col.addView(title);
 
+        mBanner = new TextView(this);
+        mBanner.setTextColor(Color.rgb(0xFF, 0xE4, 0xE4));
+        mBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        mBanner.setTextIsSelectable(true);
+        GradientDrawable card = new GradientDrawable();
+        card.setCornerRadius(dp(12));
+        card.setColor(Color.rgb(0x3A, 0x1C, 0x26));
+        card.setStroke(dp(1), Color.rgb(0xD9, 0x4F, 0x4F));
+        mBanner.setBackground(card);
+        mBanner.setPadding(dp(14), dp(12), dp(14), dp(12));
+        mBanner.setVisibility(View.GONE);
+        col.addView(mBanner, full(dp(12)));
+
         mStatus = new TextView(this);
         mStatus.setTextColor(Color.rgb(0xE0, 0xE6, 0xF0));
         mStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        mStatus.setPadding(0, pad / 2, 0, pad / 2);
         mStatus.setTextIsSelectable(true);
-        col.addView(mStatus);
+        col.addView(mStatus, full(dp(12)));
 
-        mZip = new Button(this);
-        mZip.setText("Choose game ZIP");
-        mZip.setOnClickListener(v -> pickZip());
-        col.addView(mZip, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                                                         ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.START);
-        mCheck = new Button(this);
-        mCheck.setText("Check game folder");
-        mCheck.setOnClickListener(v -> {
-            mAutoPlayDone = true;
-            install();
-        });
-        mPlay = new Button(this);
-        mPlay.setText("Play");
-        mPlay.setOnClickListener(v -> {
+        mPlay = button("Play", v -> {
             mAutoPlayDone = true;
             verifyThenPlay();
         });
-        row.addView(mCheck);
-        row.addView(mPlay);
-        col.addView(row);
+        mZip = button("Choose game ZIP", v -> pickZip());
+        mCheck = button("Check game folder", v -> {
+            mAutoPlayDone = true;
+            install();
+        });
+        mActions = new LinearLayout(this);
+        mActions.setOrientation(LinearLayout.VERTICAL);
+        col.addView(mActions, full(dp(16)));
+
+        mProgress = new TextView(this);
+        mProgress.setTextColor(Color.rgb(0xFF, 0xD8, 0x70));
+        mProgress.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        mProgress.setVisibility(View.GONE);
+        col.addView(mProgress, full(dp(12)));
+
+        TextView caption = new TextView(this);
+        caption.setText("Something went wrong?");
+        caption.setTextColor(Color.rgb(0x8A, 0x97, 0xB2));
+        caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        col.addView(caption, full(dp(24)));
+
+        mGithub = button("Report on GitHub", v -> report(GITHUB));
+        mCopy = button("Copy report", v -> report(COPY));
+        mSummary = button("Copy summary", v -> report(SUMMARY));
+        mShare = button("Share report", v -> report(SHARE));
+        style(mGithub, QUIET);
+        style(mCopy, QUIET);
+        style(mSummary, QUIET);
+        style(mShare, QUIET);
+        col.addView(mGithub, full(dp(8)));
+        col.addView(row(mCopy, mSummary, mShare), full(dp(8)));
+        col.addView(about(), full(dp(32)));
 
         mLog = new TextView(this);
         mLog.setTextColor(Color.rgb(0xA8, 0xB4, 0xC8));
         mLog.setTypeface(Typeface.MONOSPACE);
         mLog.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        mLog.setPadding(0, pad / 2, 0, 0);
         mLog.setTextIsSelectable(true);
-        col.addView(mLog);
+        col.addView(mLog, full(dp(16)));
 
+        FrameLayout center = new FrameLayout(this);
+        center.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                         ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(0x10, 0x18, 0x30));
+        scroll.setBackgroundColor(BACKGROUND);
         scroll.setFitsSystemWindows(true);
-        scroll.addView(col, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                                                        ViewGroup.LayoutParams.WRAP_CONTENT));
+        scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                           ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
-        mPlay.setEnabled(false);
-        mStatus.setVisibility(View.VISIBLE);
+        layoutActions(configFile().isFile());
     }
 }

@@ -11,6 +11,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -89,6 +90,8 @@ public class Sa2SetupActivity extends Activity {
     private static final int PICK_ZIP = 1;
     private static final String PROJECT = "https://github.com/kittycache9/OpenSA2";
     private static final String ISSUES = PROJECT + "/issues";
+    /** Who has contributed to OpenSA2 besides its maker, named under the footer's maker line. */
+    private static final String[] CONTRIBUTORS = {"heyjoeway"};
     private static final int COPY = 0, SHARE = 1, GITHUB = 2, SUMMARY = 3;
 
     private TextView mStatus, mBanner, mProgress, mLog;
@@ -823,9 +826,9 @@ public class Sa2SetupActivity extends Activity {
         Ui.style(mGithub, text == null ? Ui.QUIET : Ui.ALERT);
     }
 
-    /** The footer: who makes the app, buttons to its GitHub page (source, releases and issues) and to
-     * tell a friend about it (the releases page, through the system's share sheet), and that it is
-     * not SEGA's. */
+    /** The footer: who makes the app and who has contributed to it (a tap opens GitHub's contributors
+     * page), buttons to its GitHub page (source, releases and issues) and to tell a friend about it
+     * (the releases page, through the system's share sheet), and that it is not SEGA's. */
     private LinearLayout about() {
         LinearLayout f = new LinearLayout(this);
         f.setOrientation(LinearLayout.VERTICAL);
@@ -852,6 +855,44 @@ public class Sa2SetupActivity extends Activity {
                                                                      ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(14);
         f.addView(who, lp);
+
+        int linksGap = dp(12);
+        if (CONTRIBUTORS.length > 0) {
+            TextView with = new TextView(this);
+            SpannableStringBuilder c = new SpannableStringBuilder("With contributions from ");
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < CONTRIBUTORS.length; i++) {
+                String join = i == 0 ? "" : i == CONTRIBUTORS.length - 1 ? " and " : ", ";
+                c.append(join);
+                appendStyled(c, CONTRIBUTORS[i], bright, true);
+                names.append(join).append(CONTRIBUTORS[i]);
+            }
+            with.setText(c);
+            with.setTextColor(Color.rgb(0x8A, 0x97, 0xB2));
+            with.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            with.setGravity(Gravity.CENTER);
+            with.setMinHeight(dp(40));   // a tap target as tall as the pills below; the ripple stays on the text
+            with.setMinimumHeight(dp(40));
+            with.setContentDescription("With contributions from " + names + ". Opens the contributors page on GitHub.");
+            GradientDrawable mask = new GradientDrawable();
+            mask.setCornerRadius(dp(6));
+            mask.setColor(Color.WHITE);
+            with.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), null,
+                                                  new InsetDrawable(mask, 0, dp(10), 0, dp(10))));
+            with.setPadding(dp(8), 0, dp(8), 0);
+            String contributors = PROJECT + "/graphs/contributors";
+            with.setOnClickListener(v -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(contributors)));
+                } catch (android.content.ActivityNotFoundException e) {
+                    Toast.makeText(this, contributors, Toast.LENGTH_LONG).show();
+                }
+            });
+            lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = -dp(6);   // the 40 dp box centres the text, which sits 6 dp under the maker's line
+            f.addView(with, lp);
+            linksGap = dp(2);        // and the pills keep 14 dp under the text
+        }
 
         Button github = pill("View on GitHub", v -> {
             try {
@@ -882,7 +923,7 @@ public class Sa2SetupActivity extends Activity {
         links.addView(github, gap);
         links.addView(tell);
         lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(12);
+        lp.topMargin = linksGap;
         f.addView(links, lp);
 
         TextView legal = new TextView(this);

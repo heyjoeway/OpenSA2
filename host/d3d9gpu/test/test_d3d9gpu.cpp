@@ -107,7 +107,31 @@ void test_formats() {
     CHECK(format_info(kDXT3)->gpu == GFmt::bc2 && format_info(kDXT3)->block_bytes == 16);
     CHECK(format_info(kDXT5)->gpu == GFmt::bc3 && format_info(kDXT5)->block_bytes == 16);
     CHECK(format_info(75)->depth && format_info(75)->stencil);
-    CHECK(!format_info(23) && !format_info(0) && !format_info(77));
+    CHECK(!format_info(26) && !format_info(0) && !format_info(77));
+    // R5G6B5 and A8: their own packed store, BGRA8 on the GPU, expanded as DXVK's views sample them
+    // (R5G6B5_UNORM_PACK16 identity; A8 as R8 swizzled to (0, 0, 0, R), so not an identity view).
+    const FormatInfo* r565 = format_info(23);
+    const FormatInfo* a8 = format_info(28);
+    CHECK(r565 && r565->gpu == GFmt::bgra8 && r565->pixel_bytes == 2 && r565->expand == Expand::r5g6b5 &&
+          r565->dxvk_view_identity && !r565->x8);
+    CHECK(a8 && a8->gpu == GFmt::bgra8 && a8->pixel_bytes == 1 && a8->expand == Expand::a8 && !a8->dxvk_view_identity);
+    CHECK(level_pitch(7, *r565) == 14 && level_pitch(7, *a8) == 7);   // packed: the recording device's pitch
+    {
+        // 0xF800 red, 0x07E0 green, 0x001F blue, 0xFFFF white, 0x0000 black, 0x8410 the 50% grey
+        // (16/31, 32/63, 16/31: bit replication gives 0x84, 0x82, 0x84), little-endian words.
+        const uint8_t in[] = {0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x10, 0x84};
+        uint8_t out[6 * 4] = {};
+        expand_to_bgra8(Expand::r5g6b5, in, 6, out);
+        const uint8_t want[6 * 4] = {0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255,
+                                     255, 255, 255, 255, 0, 0, 0, 255, 0x84, 0x82, 0x84, 255};
+        CHECK(std::memcmp(out, want, sizeof want) == 0);
+        const uint8_t alpha[] = {0x00, 0x7F, 0xFF};
+        uint8_t aout[3 * 4];
+        std::memset(aout, 0xAA, sizeof aout);
+        expand_to_bgra8(Expand::a8, alpha, 3, aout);
+        const uint8_t awant[3 * 4] = {0, 0, 0, 0x00, 0, 0, 0, 0x7F, 0, 0, 0, 0xFF};
+        CHECK(std::memcmp(aout, awant, sizeof awant) == 0);
+    }
     // The packed pitch and rows are texcodec's (the recording device's) for every size.
     for (uint32_t f : {21u, 22u, kDXT1, kDXT3, kDXT5})
         for (uint32_t w = 1; w <= 300; w++) {
@@ -417,7 +441,7 @@ void test_answers() {
     CHECK(d->CreateTexture(8, 8, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr) == D3DERR_INVALIDCALL);
     CHECK(d->CreateTexture(8, 8, 1, D3DUSAGE_WRITEONLY, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr) == D3DERR_INVALIDCALL);
     CHECK(d->CreateTexture(8, 8, 1, D3DUSAGE_DEPTHSTENCIL, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t, nullptr) == D3DERR_INVALIDCALL);
-    CHECK(d->CreateTexture(8, 8, 1, 0, D3DFMT_R5G6B5, D3DPOOL_MANAGED, &t, nullptr) == D3DERR_INVALIDCALL);   // not implemented
+    CHECK(d->CreateTexture(8, 8, 1, 0, D3DFMT_A4R4G4B4, D3DPOOL_MANAGED, &t, nullptr) == D3DERR_INVALIDCALL);   // not implemented
     CHECK(d9g::report().ni_value_count == 2);
     sys->Release(); sysx->Release(); rt->Release(); bb->Release();
     CHECK(d->Release() == 0 && d9g::report().live_at_destroy.empty());
@@ -822,13 +846,16 @@ void test_pipeline_tracking() {
         in.tex_fmt = D3DFMT_A8R8G8B8;
         CHECK(map_sampler(in, SamplerOptions{}, both, MF_BORDER_FALLBACK).fallback());         // and this one refuses it
         in.tex_fmt = D3DFMT_X8R8G8B8;
-        // X8R8G8B8 is the one format d9g makes whose DXVK view swizzles (d3d9_format.cpp)
+        // X8R8G8B8 and A8 are the formats d9g makes whose DXVK view swizzles (d3d9_format.cpp)
         size_t nf = 0;
         const FormatInfo* fs = all_formats(&nf);
         std::string swizzled;
         for (size_t i = 0; i < nf; i++)
-            if (!fs[i].dxvk_view_identity) swizzled += fs[i].name;
-        CHECK(nf == 6 && swizzled == "X8R8G8B8");
+            if (!fs[i].dxvk_view_identity) swizzled += std::string(swizzled.empty() ? "" : ",") + fs[i].name;
+        CHECK(nf == 8 && swizzled == "X8R8G8B8,A8");
+        in.tex_fmt = D3DFMT_A8;                      // A8's (0, 0, 0, R) view: the shader route's too
+        CHECK(map_sampler(in, SamplerOptions{}, both, 0).fallback());
+        in.tex_fmt = D3DFMT_X8R8G8B8;
         // with depth compare DXVK matches the red component alone (determineBorderColorType)
         CHECK(dxvk_standard_border_colour(0xFF000000u, true) == kBorderTransparentBlack);
         CHECK(dxvk_standard_border_colour(0x00FF0000u, true) == kBorderOpaqueWhite);

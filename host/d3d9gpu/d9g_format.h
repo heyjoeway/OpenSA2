@@ -6,8 +6,12 @@
 // forced to 0xFF on upload, which is what DXVK's A=1 view swizzle gives when the
 // texture is sampled (R2a samples nothing; the fill is for R3). DXT1, DXT3 and DXT5
 // are BC1, BC2 and BC3. D24S8 (75) is D24_UNORM_S8_UINT, or D32_FLOAT_S8_UINT where
-// the device has no D24S8 (DXVK's fallback, d3d9_format.cpp). Every other format is
-// not implemented, by name. The pitch and row counts are the packed ones of the
+// the device has no D24S8 (DXVK's fallback, d3d9_format.cpp). R5G6B5 (23) and A8 (28)
+// keep their own 16- and 8-bit layout in the CPU store (the game's lock pitch) and are
+// B8G8R8A8_UNORM on the GPU, expanded on upload to what DXVK's view samples:
+// R5G6B5_UNORM_PACK16 as (r, g, b, 1), and A8's R8_UNORM with the (0, 0, 0, R) swizzle as
+// (0, 0, 0, a). Expanding on the CPU needs no optional 16-bit format of the GPU (a phone's
+// included). Every other format is not implemented, by name. The pitch and row counts are the packed ones of the
 // recording device and host/player/texcodec (one row of blocks for DXT), which are
 // also DXVK's lock pitch (d3d9_device.cpp LockImage: align(elementSize * blocks, 4)).
 //
@@ -26,6 +30,8 @@
 namespace d9g {
 
 enum class GFmt : uint8_t { none, bgra8, bc1, bc2, bc3, d24s8, d32s8 };
+// A store layout the GPU texture does not share: expanded to BGRA8 on upload.
+enum class Expand : uint8_t { none, r5g6b5, a8 };
 
 struct FormatInfo {
     uint32_t d3d;          // the D3DFORMAT
@@ -41,6 +47,7 @@ struct FormatInfo {
     // build (d9g_sampler.cpp maps BORDER only where this holds).
     bool dxvk_view_identity;
     const char* name;
+    Expand expand = Expand::none;   // the store's pixels expanded to BGRA8 on upload
 };
 
 // nullptr: a format this device does not implement.
@@ -63,6 +70,11 @@ uint32_t full_chain(uint32_t w, uint32_t h);
 
 // Byte 3 of every BGRA8 pixel set to 0xFF (X8R8G8B8 uploads).
 void x8_alpha_fill(uint8_t* p, size_t bytes);
+
+// `pixels` packed store pixels of an Expand format as BGRA8 into `dst` (pixels * 4 bytes):
+// R5G6B5's channels widened by bit replication (UNORM: 31 and 63 give 255), alpha 255; A8 as
+// black with its alpha.
+void expand_to_bgra8(Expand e, const uint8_t* src, size_t pixels, uint8_t* dst);
 
 // DXVK's DecodeD3DCOLOR (src/util/util_misc.h): ARGB bytes / 255.0f, as RGBA floats.
 void decode_d3dcolor(uint32_t argb, float rgba[4]);

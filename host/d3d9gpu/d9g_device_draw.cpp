@@ -323,6 +323,8 @@ draw::Prepared Device::prepare_draw(uint32_t method, uint32_t prim, uint32_t str
         if (const Texture* t = tex_[st]) {
             // The supported colour swizzle is X8's forced alpha; border uses the inverse view.
             if (t->image()->fi->x8) border_colours[r][3] = 1;
+            // A8's (0, 0, 0, R) view: the inverse puts the colour's alpha in R, the view returns it as alpha.
+            if (t->image()->fi->expand == Expand::a8) border_colours[r][0] = border_colours[r][1] = border_colours[r][2] = 0;
         }
         for (uint32_t axis = 0; axis < 3; axis++)
             if (desc.axes[axis] == AddrDecision::fallback_border) si.ss[D3DSAMP_ADDRESSU + axis] = D3DTADDRESS_CLAMP;

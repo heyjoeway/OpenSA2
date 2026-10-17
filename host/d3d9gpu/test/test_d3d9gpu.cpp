@@ -255,6 +255,23 @@ void test_faults_paths_and_parameters() {
     CHECK((fit(1280, 720, 2340, 1080) == std::array<uint32_t, 4>{210, 0, 1920, 1080}));
     CHECK((fit(1707, 720, 2560, 1080) == std::array<uint32_t, 4>{0, 0, 2560, 1080}));
     CHECK((fit(1280, 720, 0, 0) == std::array<uint32_t, 4>{0, 0, 0, 0}));
+    // portrait play's anchor (the player's "The picture's place"): a 4:3 picture in a 1440x3120
+    // window, its centre a quarter of the way down (top 240, not the centred 1020), never above
+    // the safe area's top nor below centred; a pillarbox, or no anchor, is as before
+    auto fit_at = [](uint32_t bw, uint32_t bh, uint32_t w, uint32_t h, float a, uint32_t min_top) {
+        const FitRect r = fit_rect(bw, bh, w, h, a, min_top);
+        return std::array<uint32_t, 4>{r.x, r.y, r.w, r.h};
+    };
+    CHECK((fit_at(1440, 1080, 1440, 3120, -1, 0) == std::array<uint32_t, 4>{0, 1020, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0.25f, 0) == std::array<uint32_t, 4>{0, 240, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0.25f, 300) == std::array<uint32_t, 4>{0, 300, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0, 120) == std::array<uint32_t, 4>{0, 120, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0.5f, 0) == std::array<uint32_t, 4>{0, 1020, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0.9f, 0) == std::array<uint32_t, 4>{0, 1020, 1440, 1080}));
+    CHECK((fit_at(1440, 1080, 1440, 3120, 0.25f, 2000) == std::array<uint32_t, 4>{0, 1020, 1440, 1080}));
+    CHECK((fit_at(720, 540, 720, 1280, 0.25f, 0) == std::array<uint32_t, 4>{0, 50, 720, 540}));
+    CHECK((fit_at(1280, 720, 2400, 1080, 0.25f, 0) == std::array<uint32_t, 4>{240, 0, 1920, 1080}));
+    CHECK((fit_at(1560, 720, 2340, 1080, 0.25f, 0) == std::array<uint32_t, 4>{0, 0, 2340, 1080}));
     // sub-dword: the device made without the sub-dword features (the state words' leg), named last
     c = parse_caps_off("sub-dword,border", "1");
     CHECK(c.border && !c.depth_clamp && c.sub_dword && c.names == "border,sub-dword" && c.error.empty());

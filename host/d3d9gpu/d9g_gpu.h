@@ -20,6 +20,8 @@
 #include "d9g_draw_state.h"
 #include "d9g_shader_profile.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -154,9 +156,14 @@ void apply_caps_off(GpuInfo& g, const CapsOff& off);
 // near-match is that rounding and is stretched over the whole swapchain (at most 2 px, under 0.2 %
 // at 1080 lines) rather than shown with a 1 px bar; a real mismatch (play's switch off, a 16:9
 // back buffer on a 19.5:9 phone or in a 21:9 window) keeps its bars.
+// A vertical anchor (anchor_y 0 to 1; negative, the default, none) moves a letterboxed picture
+// up: its centre at anchor_y of the height, but its top no higher than min_top (the window's safe
+// area) and no lower than centred. The player sets it for portrait play (host/player/player.cpp
+// "The picture's place"), where the free space goes under the picture to the touch controls.
 constexpr uint32_t kFitWholeSlack = 2;
 struct FitRect { uint32_t x = 0, y = 0, w = 0, h = 0; };
-inline FitRect fit_rect(uint32_t bw, uint32_t bh, uint32_t w, uint32_t h) {
+inline FitRect fit_rect(uint32_t bw, uint32_t bh, uint32_t w, uint32_t h, float anchor_y = -1.0f,
+                        uint32_t min_top = 0) {
     FitRect r{0, 0, w, h};
     if (!bw || !bh || !w || !h) return r;
     if (uint64_t(w) * bh > uint64_t(h) * bw)        // wider than the image
@@ -168,6 +175,10 @@ inline FitRect fit_rect(uint32_t bw, uint32_t bh, uint32_t w, uint32_t h) {
     if (w - r.w <= kFitWholeSlack && h - r.h <= kFitWholeSlack) return FitRect{0, 0, w, h};
     r.x = (w - r.w) / 2;
     r.y = (h - r.h) / 2;
+    if (anchor_y >= 0 && r.h < h) {
+        const int64_t top = std::llround(double(anchor_y) * h - double(r.h) / 2);
+        r.y = uint32_t(std::min<int64_t>(std::max<int64_t>(top, min_top), r.y));
+    }
     return r;
 }
 

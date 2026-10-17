@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 using sa2_touch::Control;
@@ -235,11 +236,11 @@ int main(int argc, char** argv) {
             CHECK(!parse("SA2_TOUCH_SCALE", bad) && s.scale == 1.5f, "scale \"%s\" taken", bad);
         CHECK(parse("SA2_TOUCH_OPACITY", "0") && s.opacity == 0, "opacity 0: %s", why.c_str());
         CHECK(!parse("SA2_TOUCH_OPACITY", "2.1") && s.opacity == 0, "opacity 2.1 taken");
-        CHECK(parse("SA2_TOUCH_LAYOUT", "STICK=0.8,0.7;FACE=0.2,0.7") && s.over[0].set && s.over[0].x == 0.8f &&
-              s.over[0].y == 0.7f && s.over[1].set && s.over[1].x == 0.2f && !s.over[2].set && !s.below[0].set,
-              "layout: %s", why.c_str());
+        CHECK(parse("SA2_TOUCH_LAYOUT", "STICK=0.8,0.7;FACE=0.2,0.6") && s.landscape[0].set &&
+              s.landscape[0].x == 0.8f && s.landscape[0].y == 0.7f && s.landscape[1].set && s.landscape[1].x == 0.2f &&
+              !s.landscape[2].set && !s.portrait[0].set, "layout: %s", why.c_str());
         for (const char* bad : {"STICK=0.8", "PAD=0.1,0.1", "STICK=1.2,0.5", "STICK=0.1,0.2;", "STICK=0.1;0.2"})
-            CHECK(!parse("SA2_TOUCH_LAYOUT_BELOW", bad) && !s.below[0].set, "layout \"%s\" taken", bad);
+            CHECK(!parse("SA2_TOUCH_LAYOUT_PORTRAIT", bad) && !s.portrait[0].set, "layout \"%s\" taken", bad);
         CHECK(parse("SA2_TOUCH_MAP", "A=B,LT=START") && s.mapped[0] && s.sends[0].bit == 0x2000 && s.mapped[5] &&
               s.sends[5].bit == 0x0010 && s.sends[5].trigger == 0 && !s.mapped[1], "map: %s", why.c_str());
         for (const char* bad : {"A=JUMP", "Z=A", "A", "A=B,"})
@@ -253,7 +254,7 @@ int main(int argc, char** argv) {
         sa2_touch::Settings s;
         std::string why;
         sa2_touch::parse_setting("SA2_TOUCH_SCALE", "1.5", &s, &why);
-        sa2_touch::parse_setting("SA2_TOUCH_LAYOUT", "STICK=0.8,0.7;FACE=0.2,0.7", &s, &why);
+        sa2_touch::parse_setting("SA2_TOUCH_LAYOUT", "STICK=0.8,0.7;FACE=0.2,0.6", &s, &why);
         sa2_touch::parse_setting("SA2_TOUCH_MAP", "A=B,LT=START", &s, &why);
         sa2_touch::set_settings(q, s);
         CHECK(std::fabs(sa2_touch::stick_radius(q, W, H) - 1.5f * R) < 0.01f, "scaled stick radius %.2f",
@@ -262,7 +263,7 @@ int main(int argc, char** argv) {
         sa2_touch::control_centre(q, W, H, Control::Stick, &qx, &qy);
         CHECK(std::fabs(qx - 0.8f * W) < 0.01f && std::fabs(qy - 0.7f * H) < 0.01f, "stick placed at %.1f,%.1f", qx, qy);
         sa2_touch::control_centre(q, W, H, Control::A, &qx, &qy);
-        CHECK(std::fabs(qx - 0.2f * W) < 0.01f && std::fabs(qy - (0.7f * H + 0.135f * 1.5f * H)) < 0.01f,
+        CHECK(std::fabs(qx - 0.2f * W) < 0.01f && std::fabs(qy - (0.6f * H + 0.135f * 1.5f * H)) < 0.01f,
               "A placed at %.1f,%.1f", qx, qy);
         sa2_touch::handle_event(q, finger(SDL_EVENT_FINGER_DOWN, 1, qx / W, qy / H));
         p = pad_of(q);
@@ -283,6 +284,15 @@ int main(int argc, char** argv) {
         sa2_touch::handle_event(q, finger(SDL_EVENT_FINGER_MOTION, 4, 0.45f - 1.5f * R / W, 0.3f));
         p = pad_of(q);
         CHECK(p.lx == 0 && p.ly == 0 && p.buttons == 0, "a stick on the left half: %d %d %04x", p.lx, p.ly, p.buttons);
+        // A place set at a smaller size is held inside the window: the diamond in the bottom-left
+        // corner at twice the size reaches 0.21 x 1440 from its centre.
+        sa2_touch::parse_setting("SA2_TOUCH_SCALE", "2", &s, &why);
+        sa2_touch::parse_setting("SA2_TOUCH_LAYOUT", "FACE=0,1", &s, &why);
+        sa2_touch::set_settings(q, s);
+        sa2_touch::control_centre(q, W, H, Control::B, &qx, &qy);
+        const float reach = 0.21f * 1440, d2 = 0.135f * 1440;
+        CHECK(std::fabs(qx - (reach + d2)) < 0.01f && std::fabs(qy - (H - reach)) < 0.01f, "B held in at %.1f,%.1f",
+              qx, qy);
         sa2_touch::destroy(q);
     }
     {
@@ -324,16 +334,47 @@ int main(int argc, char** argv) {
         sa2_touch::control_centre(q, 1560, 720, Control::A, &qx, &qy);
         sa2_touch::control_centre(nullptr, 1560, 720, Control::A, &nx2, &ny2);
         CHECK(qx == nx2 && qy == ny2, "landscape A at %.1f,%.1f, not %.1f,%.1f", qx, qy, nx2, ny2);
-        // SA2_TOUCH_LAYOUT_BELOW places in the band, and SA2_TOUCH_LAYOUT does not apply there.
+        // SA2_TOUCH_LAYOUT_PORTRAIT places in an upright window (here in its band), and
+        // SA2_TOUCH_LAYOUT in a landscape one.
         sa2_touch::Settings s;
         std::string why;
-        sa2_touch::parse_setting("SA2_TOUCH_LAYOUT_BELOW", "START=0.5,0.5", &s, &why);
+        sa2_touch::parse_setting("SA2_TOUCH_LAYOUT_PORTRAIT", "START=0.5,0.5", &s, &why);
         sa2_touch::parse_setting("SA2_TOUCH_LAYOUT", "START=0.1,0.9", &s, &why);
         sa2_touch::set_settings(q, s);
         sa2_touch::control_centre(q, 720, 1560, Control::Start, &qx, &qy);
         CHECK(std::fabs(qx - 360) < 0.01f && std::fabs(qy - 1305) < 0.01f, "START below at %.1f,%.1f", qx, qy);
         sa2_touch::control_centre(q, 1560, 720, Control::Start, &qx, &qy);
         CHECK(std::fabs(qx - 156) < 0.01f && std::fabs(qy - 648) < 0.01f, "START over at %.1f,%.1f", qx, qy);
+        // The player's picture place (fit_rect's anchor, test_d3d9gpu's numbers): a 4:3 frame in
+        // a 1440x3120 window, its centre a quarter of the way down, sits at rows 240 to 1320, or
+        // under a safe area's top, never lower than centred; the band starts under it.
+        {
+            sa2_touch::Overlay* a = sa2_touch::create(nullptr, nullptr);
+            sa2_touch::set_frame(a, 1440, 1080);
+            uint32_t top = 0, bottom = 0;
+            const auto rows = [&](float y, uint32_t min_top) {
+                sa2_touch::set_picture(a, y, min_top);
+                sa2_touch::picture_rows(a, 1440, 3120, &top, &bottom);
+                return std::make_pair(top, bottom);
+            };
+            CHECK((rows(-1, 0) == std::make_pair(1020u, 2100u)), "centred rows %u-%u", top, bottom);
+            CHECK((rows(0.25f, 0) == std::make_pair(240u, 1320u)), "upper-half rows %u-%u", top, bottom);
+            CHECK((rows(0.25f, 300) == std::make_pair(300u, 1380u)), "under the safe area %u-%u", top, bottom);
+            CHECK((rows(0.9f, 0) == std::make_pair(1020u, 2100u)), "below centred %u-%u", top, bottom);
+            rows(0.25f, 0);
+            CHECK(sa2_touch::below_picture(a, 1440, 3120), "no band under the raised picture");
+            float sx, sy;
+            sa2_touch::control_centre(a, 1440, 3120, Control::LT, &sx, &sy);
+            CHECK(sy > 1320 && sy < 1320 + 0.2f * 1440, "LT not at the band's top: %.1f", sy);
+            CHECK(std::fabs(sa2_touch::stick_radius(a, 1440, 3120) - 0.12f * 1440) < 0.01f,
+                  "the raised picture's band shrank the stick: %.2f", sa2_touch::stick_radius(a, 1440, 3120));
+            sa2_touch::destroy(a);
+        }
+        // An upright window whose band is too short (a foldable's inner screen) has the controls
+        // over the picture, and still the portrait places.
+        CHECK(!sa2_touch::below_picture(q, 1812, 2176), "below a near-square window's picture");
+        sa2_touch::control_centre(q, 1812, 2176, Control::Start, &qx, &qy);
+        CHECK(std::fabs(qx - 906) < 0.01f && std::fabs(qy - 1088) < 0.01f, "START upright at %.1f,%.1f", qx, qy);
         sa2_touch::destroy(q);
     }
     std::printf("settings and the band: %s\n", fails ? "FAILED" : "ok");

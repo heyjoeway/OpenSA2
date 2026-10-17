@@ -23,8 +23,8 @@
 //    game.env, the session's defaults and the app's settings, and replace those, never the
 //    session's own (the installation, the session's files and the stream's settings, set last).
 //    So game.env.extra wins over the settings screen. The player's settings among them
-//    (SA2_TOUCH_*, SA2_PAD_MAP, SA2_PLAYER_PROF*) go to the player, in this process's
-//    environment, and not to the game.
+//    (SA2_TOUCH_*, SA2_PAD_MAP, SA2_PLAYER_PICTURE_Y, SA2_PLAYER_PROF*) go to the player, in this
+//    process's environment, and not to the game.
 //  - The relay (host/launch/sa2_relay.h) hands the stream on to the player, paced (lead 1).
 //  - The player: host/player's main (renamed sa2_player_main by tools/s8/android_app.py) on this
 //    thread, with the launcher's play argv: --interactive with in-process pipes for --video-fd,
@@ -84,7 +84,10 @@
 //
 // Orientation (--orientation landscape|portrait|auto, the settings screen's; landscape when
 // absent): SDL's SDL_ORIENTATIONS hint, landscape either way up, portrait either way up, or all
-// four. Sa2Activity asks the system for the same orientation itself.
+// four. Sa2Activity asks the system for the same orientation itself. In portrait and auto-rotate
+// the settings screen also sends SA2_PLAYER_PICTURE_Y, where the player puts the picture in an
+// upright window (host/player/player.cpp "The picture's place"); the session says the player's
+// line for it ("player: picture: ...").
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -250,8 +253,26 @@ struct Args {
 // The settings that are the player's, not the game's: they go to this process's environment,
 // where the player runs, and are taken out of the game's.
 bool player_setting(const std::string& k) {
-    return k == "SA2_PLAYER_PROF" || k == "SA2_PLAYER_PROF_OUT" || k == "SA2_PAD_MAP" ||
+    return k == "SA2_PLAYER_PROF" || k == "SA2_PLAYER_PROF_OUT" || k == "SA2_PLAYER_PICTURE_Y" || k == "SA2_PAD_MAP" ||
            k.compare(0, 10, "SA2_TOUCH_") == 0;
+}
+
+// The first line of `path` that holds `needle`, said after `prefix` once it is there, while the
+// player runs, for at most a minute: a line the session's report should carry from another log.
+void relay_line(const std::string& path, const char* needle, const char* prefix, const std::atomic<bool>& done) {
+    const double t0 = sa2p::monotonic_seconds();
+    while (!done.load() && sa2p::monotonic_seconds() - t0 < 60) {
+        std::string log;
+        if (sa2p::read_file(path, log)) {
+            const size_t at = log.find(needle);
+            const size_t nl = at == std::string::npos ? at : log.find('\n', at);
+            if (nl != std::string::npos) {
+                say("%s%s", prefix, log.substr(at, nl - at).c_str());
+                return;
+            }
+        }
+        sa2l::sleep_ms(250);
+    }
 }
 
 // ---------------------------------------------------------------- the debug mode: a stream file
@@ -985,20 +1006,13 @@ int play_game(const Args& a) {
     // The game's own full-width line (runtime/sa2_widescreen.c), said once it is in game.log:
     // ReadConfig runs once, at the guest's boot, within seconds.
     std::thread ws_thread([&] {
-        if (!env_find(genv, "SA2_PLAY_RES") && !env_find(genv, "SA2_PLAY_ASPECT")) return;
-        const double t0 = sa2p::monotonic_seconds();
-        while (!player_done.load() && sa2p::monotonic_seconds() - t0 < 60) {
-            std::string log;
-            if (sa2p::read_file(session + "/game.log", log)) {
-                const size_t at = log.find("widescreen: ");
-                const size_t nl = at == std::string::npos ? at : log.find('\n', at);
-                if (nl != std::string::npos) {
-                    say("game: %s", log.substr(at, nl - at).c_str());
-                    return;
-                }
-            }
-            sa2l::sleep_ms(250);
-        }
+        if (env_find(genv, "SA2_PLAY_RES") || env_find(genv, "SA2_PLAY_ASPECT"))
+            relay_line(session + "/game.log", "widescreen: ", "game: ", player_done);
+    });
+    // The player's line for the picture's place (its first Present after the first frame).
+    std::thread picture_thread([&] {
+        if (env_find(prof_env, "SA2_PLAYER_PICTURE_Y"))
+            relay_line(session + "/player.log", "picture: ", "player: ", player_done);
     });
 
     // The watch: the game's exit or the player's end request stops the game; the player is then
@@ -1045,6 +1059,7 @@ int play_game(const Args& a) {
     mon.stop = true;
     mon_thread.join();
     ws_thread.join();
+    picture_thread.join();
     watch.join();
     relay_thread.join();
     const sa2l::RelayStats rs = relay.stats();

@@ -199,13 +199,22 @@
 // swapchain texture; nothing is drawn before the first touch. The frame's size goes to the
 // overlay at each Present, which then knows where the picture is (its controls go below a
 // portrait window's picture). The overlay's settings (SA2_TOUCH_SCALE, SA2_TOUCH_OPACITY,
-// SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_BELOW, SA2_TOUCH_MAP: touch_overlay.h) and SA2_PAD_MAP are
+// SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_PORTRAIT, SA2_TOUCH_MAP: touch_overlay.h) and SA2_PAD_MAP are
 // read from the environment when the pads are set up, each said in the log ("pads: ..."), a
 // malformed one with why it is not used. SA2_PAD_MAP=BUTTON=OUTPUT,... changes what a physical
 // pad's button sends: BUTTON an SDL button by position (SOUTH EAST WEST NORTH BACK GUIDE START LS
 // RS LB RB UP DOWN LEFT RIGHT MISC1 PADDLE1-4 TOUCHPAD), OUTPUT a game button (input.h
 // pad_output_named; LT and RT hold that trigger all the way). The report's "host_pads" counts
 // the pads, the records asked for and the overlay's draws.
+//
+// The picture's place (portrait play): SA2_PLAYER_PICTURE_Y=F, F 0 to 1, puts a letterboxed
+// picture's centre at F of the window's height (0.25: the middle of its upper half), its top no
+// higher than the window's safe area and no lower than centred; unset, the picture is centred as
+// before. Before each Present the player gives the device that place and the safe area's top in
+// pixels as the window's properties "sa2.picture_y" and "sa2.picture_min_top" (read beside
+// host/d3d9gpu/d9g_gpu.h fit_rect), and the touch overlay the same (set_picture), so its band
+// under the picture starts where the picture ends. Each new place is said in the log ("picture:
+// WxH at rows T-B of the window ...").
 // --synthetic-input F.tsv is the test of all this (Documentation/scripts/tests/
 // test_player_pads_touch.py): lines "MS VERB ARGS", MS after the first Present: "pad-attach K",
 // "pad-button K BUTTON 0|1", "pad-axis K AXIS VALUE", "pad-detach K" drive SDL virtual gamepad
@@ -1160,6 +1169,7 @@ private:
     void open_pad(SDL_JoystickID id);
     void read_pad(PadSlot* s);
     void derive_pad(PadSlot* s) const;
+    void place_picture();
     PadSlot* slot_of(SDL_JoystickID id);
     void send_pads();
     void close_pads();
@@ -1285,6 +1295,9 @@ private:
     };
     PadSlot pad_slots_[sa2_input::kPadSlots];
     sa2_input::PadOutput pad_map_[SDL_GAMEPAD_BUTTON_COUNT];   // SA2_PAD_MAP, over kPadButtonBits
+    float picture_y_ = -1;                         // SA2_PLAYER_PICTURE_Y ("The picture's place"); -1 centred
+    bool picture_read_ = false;
+    std::string picture_said_;                     // the last "picture:" line, said once per change
     sa2_touch::Overlay* touch_ = nullptr;
     sa2_touch::Stats touch_final_;                 // the overlay's counts, kept when it is destroyed
     bool pads_up_ = false, pads_closed_ = false, pads_dirty_ = false, touch_platform_ = false;
@@ -4238,6 +4251,7 @@ void Player::do_present(const Sa2Record* fr) {
                 flag_runs_.back().last = frame_;
             else
                 flag_runs_.push_back({frame_, frame_, uint64_t(fl)});
+            place_picture();
         }
         double call_s = -1;
         const bool call_ok = o_.present_log.empty() || checked_monotonic_s(&call_s);
@@ -4428,6 +4442,31 @@ bool SDLCALL Player::pad_watch(void* self, SDL_Event* e) {
     return true;
 }
 
+// The picture's place ("The picture's place" above), before each Present: the anchor and the safe
+// area's top, in pixels, to the device's window properties and to the overlay.
+void Player::place_picture() {
+    if (!picture_read_) {
+        picture_read_ = true;
+        if (const char* v = getenv("SA2_PLAYER_PICTURE_Y"); v && *v) {
+            char* end = nullptr;
+            const float f = std::strtof(v, &end);
+            if (end && !*end && std::isfinite(f) && f >= 0 && f <= 1) picture_y_ = f;
+            else std::printf("picture: SA2_PLAYER_PICTURE_Y=%s not used: not a number from 0 to 1\n", v);
+        }
+    }
+    if (picture_y_ < 0) return;
+    int ww = 0, wh = 0, pw = 0, ph = 0;
+    SDL_Rect safe{};
+    uint32_t min_top = 0;
+    if (SDL_GetWindowSize(win_, &ww, &wh) && SDL_GetWindowSizeInPixels(win_, &pw, &ph) && wh > 0 &&
+        SDL_GetWindowSafeArea(win_, &safe) && safe.y > 0)
+        min_top = uint32_t(int64_t(safe.y) * ph / wh);
+    const SDL_PropertiesID props = SDL_GetWindowProperties(win_);
+    SDL_SetFloatProperty(props, "sa2.picture_y", picture_y_);
+    SDL_SetNumberProperty(props, "sa2.picture_min_top", min_top);
+    sa2_touch::set_picture(touch_, picture_y_, min_top);
+}
+
 // The pads and the overlay, at the first service once the key sender has started.
 void Player::setup_pads() {
     pads_up_ = true;
@@ -4449,7 +4488,7 @@ void Player::setup_pads() {
     touch_ = sa2_touch::create(nullptr, win_);
     // The overlay's settings and the pads' map ("Gamepads" above), each said in the log.
     sa2_touch::Settings touch_settings;
-    for (const char* k : {"SA2_TOUCH_SCALE", "SA2_TOUCH_OPACITY", "SA2_TOUCH_LAYOUT", "SA2_TOUCH_LAYOUT_BELOW",
+    for (const char* k : {"SA2_TOUCH_SCALE", "SA2_TOUCH_OPACITY", "SA2_TOUCH_LAYOUT", "SA2_TOUCH_LAYOUT_PORTRAIT",
                           "SA2_TOUCH_MAP", "SA2_PAD_MAP"}) {
         const char* v = getenv(k);
         if (!v || !*v) continue;
@@ -4829,6 +4868,16 @@ void Player::present_overlay(void* self, SDL_GPUDevice* dev, SDL_GPUCommandBuffe
     if (!p || !p->touch_ || p->pads_closed_ || !dev || !cb) return;
     sa2_touch::attach_device(p->touch_, dev);
     sa2_touch::set_frame(p->touch_, frame_w, frame_h);
+    uint32_t top = 0, bottom = 0;
+    if (p->picture_y_ >= 0 && sa2_touch::picture_rows(p->touch_, w, h, &top, &bottom)) {
+        const std::string said = strf("picture: %ux%u at rows %u-%u of the window's %ux%u (SA2_PLAYER_PICTURE_Y=%.2f; "
+                                      "the controls %s)", frame_w, frame_h, top, bottom, w, h, p->picture_y_,
+                                      sa2_touch::below_picture(p->touch_, w, h) ? "below it" : "over it");
+        if (said != p->picture_said_) {
+            std::printf("%s\n", said.c_str());
+            p->picture_said_ = said;
+        }
+    }
     if (sa2_touch::active(p->touch_)) {
         sa2_touch::draw(p->touch_, cb, target, w, h);
         ++p->overlay_presents_;

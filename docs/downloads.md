@@ -36,7 +36,7 @@ The app supports touch controls and external controllers. The touch controls app
 
 Tap **Game settings** on the setup screen. Changes apply the next time the game starts. App updates keep your settings.
 
-- **Orientation** is Landscape by default. **Portrait** lets you hold the phone upright: the game is drawn at 4:3 across the screen, and the touch controls sit in the space below the picture. **Auto-rotate** follows the phone when its own auto-rotate is on. The game is then drawn at 4:3 so that it fits either way.
+- **Orientation** is Landscape by default. **Portrait** lets you hold the phone upright: the game is drawn at 4:3 across the screen, in the middle of its upper half, and the touch controls sit in the space below the picture. **Picture position** moves the picture anywhere from the top of the screen to its middle. **Auto-rotate** follows the phone when its own auto-rotate is on. The game is then drawn at 4:3 so that it fits either way.
 - **Full-width picture** draws the game at the screen's shape. Turn it off to keep the game's own 16:9 picture, with bars at the sides of a wider screen.
 - **Aspect ratio** is the screen's shape by default. You can choose 21:9, 16:9, or 4:3 instead.
 - **Resolution** is the largest picture the screen holds. Fewer lines can run faster on a slower phone.

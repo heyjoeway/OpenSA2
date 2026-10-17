@@ -17,20 +17,23 @@
 // band, laid out as they would be in a window of the band's shape, at the window's short side's
 // size, made smaller only when the band is too short for them. The picture is the frame's
 // rectangle as the device presents it (host/d3d9gpu/d9g_gpu.h fit_rect: centred at its own
-// aspect), from the frame size the player passes at each Present (set_frame); until a frame
-// is known the controls lie over the whole window.
+// aspect, or higher with the player's anchor, set_picture), from the frame size the player passes
+// at each Present (set_frame); until a frame is known the controls lie over the whole window.
 //
 // Settings (the player's environment: Android's settings screen through its session, or
 // game.env.extra; parse_setting):
 //   SA2_TOUCH_SCALE=F             every control's size times F, 0.5 to 2 (default 1)
 //   SA2_TOUCH_OPACITY=F           every control's opacity times F, 0 to 2 (default 1; 0 draws
 //                                 nothing, and the controls still work)
-//   SA2_TOUCH_LAYOUT=G=X,Y;...    where a group's centre is, with the controls over the picture:
-//                                 X and Y fractions (0 to 1) of the control area (the window);
-//                                 G is STICK (the stick's resting place, which also chooses the
-//                                 half of the screen the stick takes), FACE (A, B, X and Y), START,
-//                                 LT or RT; a group left out keeps its own place
-//   SA2_TOUCH_LAYOUT_BELOW=...    the same, with the controls in the band under the picture
+//   SA2_TOUCH_LAYOUT=G=X,Y;...    where a group's centre is in a landscape window (no taller than
+//                                 wide): X and Y fractions (0 to 1) of the control area (the
+//                                 window, or the band under the picture); G is STICK (the stick's
+//                                 resting place, which also chooses the half of the screen the
+//                                 stick takes), FACE (A, B, X and Y), START, LT or RT; a group left
+//                                 out keeps its own place, and a placed one is held whole inside
+//                                 the area at the current size
+//   SA2_TOUCH_LAYOUT_PORTRAIT=... the same, in a window taller than wide (the band under the
+//                                 picture when there is one, else the window)
 //   SA2_TOUCH_MAP=B=OUT,...       what an on-screen button sends: B one of A B X Y START LT RT,
 //                                 OUT a game button by input.h pad_output_named's names
 // With none of them set the overlay is exactly the one described above.
@@ -98,7 +101,7 @@ struct Place {
 };
 struct Settings {
     float scale = 1, opacity = 1;
-    Place over[kGroups], below[kGroups];     // by Group
+    Place landscape[kGroups], portrait[kGroups];   // by Group, by the window's orientation
     sa2_input::PadOutput sends[kButtons];    // what each on-screen button sends
     bool mapped[kButtons] = {};              // false: the button's own (A sends A)
 };
@@ -108,6 +111,12 @@ bool parse_setting(const std::string& name, const std::string& value, Settings* 
 void set_settings(Overlay* o, const Settings& s);
 // The game's frame size, for where the picture is; the player passes it at each Present.
 void set_frame(Overlay* o, uint32_t frame_w, uint32_t frame_h);
+// Where a letterboxed picture sits, as the device places it (host/d3d9gpu/d9g_gpu.h fit_rect's
+// anchor): its centre at anchor_y of the window's height (negative: centred, the default), its top
+// no higher than min_top pixels and no lower than centred.
+void set_picture(Overlay* o, float anchor_y, uint32_t min_top);
+// The picture's top and bottom rows in a w x h window; false before a frame is known.
+bool picture_rows(const Overlay* o, uint32_t w, uint32_t h, uint32_t* top, uint32_t* bottom);
 // Whether the controls are in the band under the picture, for the last frame size given.
 bool below_picture(const Overlay* o, uint32_t w, uint32_t h);
 

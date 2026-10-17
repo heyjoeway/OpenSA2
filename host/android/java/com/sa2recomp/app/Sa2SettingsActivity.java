@@ -7,6 +7,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -39,9 +40,9 @@ public class Sa2SettingsActivity extends Activity {
     private int mLong, mShort;
     private Button[] mOrientation, mAspect;
     private Switch mWidescreen, mHud;
-    private Button mResolution, mLayoutOver, mLayoutBelow;
-    private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel;
-    private SeekBar mSize, mOpacity;
+    private Button mResolution, mLayoutLandscape, mLayoutPortrait;
+    private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel, mPlaceLabel, mPlaceNote;
+    private SeekBar mSize, mOpacity, mPlace;
     private boolean mUpdating;
 
     private static final String[] ORIENTATIONS = {GameSettings.LANDSCAPE, GameSettings.PORTRAIT, GameSettings.AUTO};
@@ -126,12 +127,17 @@ public class Sa2SettingsActivity extends Activity {
         return bs;
     }
 
+    /** The chosen one filled, and said to be selected (TalkBack reads the state, not the colour). */
     private static void choose(Button[] bs, int chosen) {
-        for (int i = 0; i < bs.length; i++) Ui.style(bs[i], i == chosen ? Ui.PRIMARY : Ui.SECONDARY);
-        for (Button b : bs) {
+        for (int i = 0; i < bs.length; i++) {
+            Button b = bs[i];
+            Ui.style(b, i == chosen ? Ui.PRIMARY : Ui.SECONDARY);
             b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             b.setMinHeight(Ui.dp(b.getContext(), 44));
             b.setMinimumHeight(Ui.dp(b.getContext(), 44));
+            b.setSelected(i == chosen);
+            if (Build.VERSION.SDK_INT >= 30) b.setStateDescription(i == chosen ? "Selected" : null);
+            else b.setContentDescription(b.getText() + (i == chosen ? ", selected" : ""));
         }
     }
 
@@ -154,16 +160,19 @@ public class Sa2SettingsActivity extends Activity {
         return w;
     }
 
-    /** A slider in steps of 10%, from lo to hi percent. */
-    private SeekBar slider(LinearLayout c, int lo, int hi, java.util.function.IntConsumer change) {
+    /** A slider from lo to hi percent in steps of `step`, named by `label`. */
+    private SeekBar slider(LinearLayout c, TextView label, int lo, int hi, int step,
+                           java.util.function.IntConsumer change) {
         SeekBar b = new SeekBar(this);
-        b.setMax((hi - lo) / 10);
+        b.setId(View.generateViewId());
+        label.setLabelFor(b.getId());
+        b.setMax((hi - lo) / step);
         b.setProgressTintList(ColorStateList.valueOf(Color.rgb(0x2B, 0x6B, 0xE8)));
         b.setThumbTintList(ColorStateList.valueOf(Color.rgb(0x6F, 0x9C, 0xF0)));
         b.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar s, int p, boolean user) {
-                if (user && !mUpdating) change.accept(lo + 10 * p);
+                if (user && !mUpdating) change.accept(lo + step * p);
             }
 
             @Override
@@ -203,6 +212,14 @@ public class Sa2SettingsActivity extends Activity {
         }
         mOrientation = segments(d, new String[] {"Landscape", "Portrait", "Auto-rotate"}, oc);
         mOrientationNote = note(d, "");
+        mPlaceLabel = text("", 15, TEXT, true);
+        d.addView(mPlaceLabel, Ui.full(dp(16)));
+        mPlace = slider(d, mPlaceLabel, 0, 50, 5, v -> {
+            mS.pictureY = v;
+            save();
+        });
+        mPlaceNote = note(d, "Where the picture sits when the phone is upright. Higher leaves more room for the "
+                             + "touch controls below it.");
         mWidescreen = toggle(d, "Full-width picture", (b, on) -> {
             mS.widescreen = on;
             save();
@@ -236,19 +253,19 @@ public class Sa2SettingsActivity extends Activity {
         LinearLayout t = card(col, "Touch controls");
         mSizeLabel = text("", 15, TEXT, true);
         t.addView(mSizeLabel);
-        mSize = slider(t, 50, 200, v -> {
+        mSize = slider(t, mSizeLabel, 50, 200, 10, v -> {
             mS.touchSize = v;
             save();
         });
         mOpacityLabel = text("", 15, TEXT, true);
         t.addView(mOpacityLabel, Ui.full(dp(12)));
-        mOpacity = slider(t, 0, 200, v -> {
+        mOpacity = slider(t, mOpacityLabel, 0, 200, 10, v -> {
             mS.touchOpacity = v;
             save();
         });
         note(t, "At 0% the controls are hidden but still work.");
-        mLayoutOver = action(t, "", v -> editLayout(GameSettings.LANDSCAPE));
-        mLayoutBelow = action(t, "", v -> editLayout(GameSettings.PORTRAIT));
+        mLayoutLandscape = action(t, "", v -> editLayout(GameSettings.LANDSCAPE));
+        mLayoutPortrait = action(t, "", v -> editLayout(GameSettings.PORTRAIT));
         action(t, "Change what the touch buttons do", v -> pickMap(true, -1));
 
         // Controller
@@ -294,7 +311,30 @@ public class Sa2SettingsActivity extends Activity {
     private String resolutionName(int lines) {
         int[] p = mS.picture(mLong, mShort, lines);
         if (p == null) return "The game's own (" + GameSettings.CONFIG_W + "x" + GameSettings.CONFIG_H + ")";
-        return (lines == 0 ? "Screen" : lines + " lines") + " (" + size(p) + ")";
+        if (lines == 0) return "Screen (" + size(p) + ")";
+        int[] full = mS.fullPicture(mLong, mShort);
+        if (full != null && lines >= full[1]) return "Full screen (" + size(p) + ")";
+        return lines + " lines (" + size(p) + ")";
+    }
+
+    /** The choice the stored resolution draws as here: as many lines as the largest picture's, or
+     * more (picked in another orientation), is the largest. The stored value is kept. */
+    private int shownResolution() {
+        int[] full = mS.fullPicture(mLong, mShort);
+        if (full == null || mS.resolution < full[1]) return mS.resolution;
+        return mS.picture(mLong, mShort, 0) != null ? 0 : full[1];
+    }
+
+    /** A slider's value as TalkBack reads it (`value`: the percentage or the place), not the bar's
+     * fraction. */
+    private static void describe(SeekBar b, TextView label, String value) {
+        if (Build.VERSION.SDK_INT >= 30) b.setStateDescription(value);
+        else b.setContentDescription(label.getText());
+    }
+
+    /** The picture position's name: its centre from the top (0) to the middle of the screen (50%). */
+    private static String placeName(int v) {
+        return v <= 0 ? "top" : v >= 50 ? "centre" : v == 25 ? "upper half (default)" : v + "% down";
     }
 
     private void update() {
@@ -303,17 +343,17 @@ public class Sa2SettingsActivity extends Activity {
         choose(mOrientation, indexOf(ORIENTATIONS, mS.orientation));
         mOrientationNote.setText(GameSettings.PORTRAIT.equals(mS.orientation)
                 ? "Hold the phone upright: the game is drawn at 4:3 across the screen, with the touch controls "
-                  + "below it."
+                  + "below it where the screen leaves room."
                 : GameSettings.AUTO.equals(mS.orientation)
                 ? "The game turns with the phone when the phone's auto-rotate is on. It is drawn at 4:3 so it "
-                  + "fits either way; upright, the touch controls go below it."
+                  + "fits either way; upright, the touch controls go below it where the screen leaves room."
                 : "Hold the phone sideways, as before.");
         mWidescreen.setChecked(!fixed && mS.widescreen);
         mWidescreen.setEnabled(!fixed);
         boolean wide = !fixed && mS.widescreen;
         choose(mAspect, fixed ? 3 : indexOf(GameSettings.ASPECTS, mS.aspect));
         for (Button b : mAspect) b.setEnabled(wide);
-        mResolution.setText(resolutionName(mS.resolution));
+        mResolution.setText(resolutionName(shownResolution()));
         mResolution.setEnabled(fixed || wide);
         mHud.setChecked(mS.hud43);
         int[] pic = mS.picture(mLong, mShort);
@@ -322,29 +362,38 @@ public class Sa2SettingsActivity extends Activity {
                 : "The game will draw at " + size(pic) + (fixed ? ", 4:3, as portrait and auto-rotate always do." : "."));
         mSizeLabel.setText(String.format(Locale.US, "Size: %d%%", mS.touchSize));
         mSize.setProgress((mS.touchSize - 50) / 10);
+        describe(mSize, mSizeLabel, mS.touchSize + "%");
         mOpacityLabel.setText(String.format(Locale.US, "Opacity: %d%%", mS.touchOpacity));
         mOpacity.setProgress(mS.touchOpacity / 10);
+        describe(mOpacity, mOpacityLabel, mS.touchOpacity + "%");
+        mPlaceLabel.setText("Picture position: " + placeName(mS.pictureY));
+        mPlace.setProgress(mS.pictureY / 5);
+        describe(mPlace, mPlaceLabel, placeName(mS.pictureY));
+        for (View v : new View[] {mPlaceLabel, mPlace, mPlaceNote}) v.setVisibility(fixed ? View.VISIBLE : View.GONE);
         boolean landscape = !GameSettings.PORTRAIT.equals(mS.orientation);
         boolean portrait = !GameSettings.LANDSCAPE.equals(mS.orientation);
-        mLayoutOver.setVisibility(landscape ? View.VISIBLE : View.GONE);
-        mLayoutBelow.setVisibility(portrait ? View.VISIBLE : View.GONE);
-        mLayoutOver.setText(portrait ? "Move the controls (landscape)" : "Move the controls");
-        mLayoutBelow.setText(landscape ? "Move the controls (portrait)" : "Move the controls");
+        mLayoutLandscape.setVisibility(landscape ? View.VISIBLE : View.GONE);
+        mLayoutPortrait.setVisibility(portrait ? View.VISIBLE : View.GONE);
+        mLayoutLandscape.setText(portrait ? "Move the controls (landscape)" : "Move the controls");
+        mLayoutPortrait.setText(landscape ? "Move the controls (portrait)" : "Move the controls");
         mUpdating = false;
     }
 
     // ------------------------------------------------------------ the choices
 
+    /** The default first (the largest picture, or the game's own size where the session keeps it,
+     * on a screen no wider than 4:3, which then also offers the full screen), then fewer lines
+     * than the largest picture has. */
     private void pickResolution() {
         List<Integer> lines = new ArrayList<>();
+        int[] full = mS.fullPicture(mLong, mShort);
+        lines.add(0);
+        if (full != null && mS.picture(mLong, mShort, 0) == null) lines.add(full[1]);
+        for (int r : GameSettings.RESOLUTIONS)
+            if (r != 0 && (full == null || r < full[1])) lines.add(r);
         List<String> names = new ArrayList<>();
-        int[] largest = mS.picture(mLong, mShort, 0);
-        for (int r : GameSettings.RESOLUTIONS) {
-            if (r != 0 && largest != null && r >= largest[1]) continue;
-            lines.add(r);
-            names.add(resolutionName(r));
-        }
-        int chosen = Math.max(0, lines.indexOf(mS.resolution));
+        for (int r : lines) names.add(resolutionName(r));
+        int chosen = Math.max(0, lines.indexOf(shownResolution()));
         new AlertDialog.Builder(this)
                 .setTitle("Resolution")
                 .setSingleChoiceItems(names.toArray(new String[0]), chosen, (dlg, which) -> {

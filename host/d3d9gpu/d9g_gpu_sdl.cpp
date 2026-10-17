@@ -727,9 +727,14 @@ public:
                 // The back buffer at its own aspect, centred, black bars on the sides (a wider
                 // swapchain: a 19.5:9 phone, a resized window) or above and below (a taller one):
                 // the blit's render pass clears the whole swapchain texture first. A swapchain of
-                // the back buffer's aspect is covered whole, as before, with nothing cleared.
+                // the back buffer's aspect is covered whole, as before, with nothing cleared. The
+                // player's picture place (host/player/player.cpp "The picture's place": the window's
+                // properties "sa2.picture_y" and "sa2.picture_min_top") moves a letterboxed picture
+                // up; a window without them is centred, as before.
                 const Uint32 bw = it->second.d.w, bh = it->second.d.h;
-                const FitRect dst = fit_rect(bw, bh, w, h);
+                const SDL_PropertiesID wp = SDL_GetWindowProperties(win_);
+                const FitRect dst = fit_rect(bw, bh, w, h, SDL_GetFloatProperty(wp, "sa2.picture_y", -1.0f),
+                                             uint32_t(SDL_GetNumberProperty(wp, "sa2.picture_min_top", 0)));
                 const bool whole = dst.x == 0 && dst.y == 0 && dst.w == w && dst.h == h;
                 SDL_GPUBlitInfo bi{};
                 bi.source = SDL_GPUBlitRegion{it->second.t, 0, 0, 0, 0, bw, bh};
@@ -747,7 +752,6 @@ public:
                 // command buffer before the submission. A window without one presents as before.
                 using PresentOverlay = void (*)(void*, SDL_GPUDevice*, SDL_GPUCommandBuffer*, SDL_GPUTexture*, Uint32,
                                                 Uint32, SDL_GPUTexture*, Uint32, Uint32);
-                const SDL_PropertiesID wp = SDL_GetWindowProperties(win_);
                 if (void* overlay = SDL_GetPointerProperty(wp, "sa2.present_overlay", nullptr)) {
                     reinterpret_cast<PresentOverlay>(overlay)(SDL_GetPointerProperty(wp, "sa2.present_overlay.context", nullptr),
                         dev_, cb, it->second.t, it->second.d.w, it->second.d.h, sw, w, h);

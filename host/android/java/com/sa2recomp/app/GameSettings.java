@@ -28,7 +28,9 @@ import java.util.Locale;
  * (SA2_PLAY_RES=off). Portrait and auto-rotate always draw 4:3: the game's menus are laid out for
  * 4:3, and a wider picture across an upright phone would be a thin strip. Portrait sizes it across
  * the screen's width; auto-rotate sizes it for landscape, so it is scaled down when the phone is
- * upright.
+ * upright. Upright, the picture sits where the picture position puts it (its centre a quarter of the
+ * way down by default, the middle of the screen's upper half), so the touch controls below it get
+ * the rest of the screen.
  */
 final class GameSettings {
     static final String PREFS = "game_settings";
@@ -55,7 +57,8 @@ final class GameSettings {
     int resolution = 0;                  // lines, 0 the screen's
     String aspect = "auto";
     int touchSize = 100, touchOpacity = 100;   // percent of the overlay's own
-    String layoutOver = "", layoutBelow = "";  // SA2_TOUCH_LAYOUT and SA2_TOUCH_LAYOUT_BELOW, "" its own
+    int pictureY = 25;                         // upright, the picture's centre, percent of the height down (0 to 50)
+    String layoutLandscape = "", layoutPortrait = "";  // SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_PORTRAIT; "" its own
     String touchMap = "", padMap = "";         // SA2_TOUCH_MAP and SA2_PAD_MAP, only what differs
 
     static GameSettings load(Context c) {
@@ -68,8 +71,9 @@ final class GameSettings {
         s.aspect = p.getString("aspect", s.aspect);
         s.touchSize = p.getInt("touch_size", s.touchSize);
         s.touchOpacity = p.getInt("touch_opacity", s.touchOpacity);
-        s.layoutOver = p.getString("touch_layout", s.layoutOver);
-        s.layoutBelow = p.getString("touch_layout_below", s.layoutBelow);
+        s.pictureY = p.getInt("picture_y", s.pictureY);
+        s.layoutLandscape = p.getString("touch_layout", s.layoutLandscape);
+        s.layoutPortrait = p.getString("touch_layout_portrait", s.layoutPortrait);
         s.touchMap = p.getString("touch_map", s.touchMap);
         s.padMap = p.getString("pad_map", s.padMap);
         return s;
@@ -86,8 +90,9 @@ final class GameSettings {
                 .putString("aspect", aspect)
                 .putInt("touch_size", touchSize)
                 .putInt("touch_opacity", touchOpacity)
-                .putString("touch_layout", layoutOver)
-                .putString("touch_layout_below", layoutBelow)
+                .putInt("picture_y", pictureY)
+                .putString("touch_layout", layoutLandscape)
+                .putString("touch_layout_portrait", layoutPortrait)
                 .putString("touch_map", touchMap)
                 .putString("pad_map", padMap)
                 .commit();
@@ -162,26 +167,29 @@ final class GameSettings {
         return ratio(aspect);
     }
 
-    /** The game's back buffer for these settings on a lng x shrt screen, {w, h}; null when the game
-     * keeps its config's own size (widescreen off in landscape, or the default settings on a
-     * screen no wider than 4:3, as the session decides). `lines` overrides the resolution (0 the
-     * largest), for listing the choices. */
-    int[] picture(int lng, int shrt, int lines) {
-        if (displayDefault() && lines == 0) return (long) lng * 3 > (long) shrt * 4 ? new int[] {lng, shrt} : null;
+    /** The largest picture of the chosen aspect a lng x shrt screen holds in the session's
+     * orientation, {w, h}; null with widescreen off in landscape (the game's own size). */
+    int[] fullPicture(int lng, int shrt) {
         if (!fixed43() && !widescreen) return null;
         int bw = upright() ? shrt : lng, bh = upright() ? lng : shrt;
         double r = pictureRatio(lng, shrt);
-        int w, h;
-        if ((double) bw / bh > r) {
-            h = bh;
-            w = (int) Math.round(h * r);
-        } else {
-            w = bw;
-            h = (int) Math.round(w / r);
-        }
+        if ((double) bw / bh > r) return new int[] {(int) Math.round(bh * r), bh};
+        return new int[] {bw, (int) Math.round(bw / r)};
+    }
+
+    /** The game's back buffer for these settings on a lng x shrt screen, {w, h}; null when the game
+     * keeps its config's own size (widescreen off in landscape, or the default settings on a
+     * screen no wider than 4:3, as the session decides). `lines` overrides the resolution (0 the
+     * default, the largest picture except where the session keeps the config's size), for
+     * listing the choices; as many lines as the largest picture's, or more, is the largest. */
+    int[] picture(int lng, int shrt, int lines) {
+        if (displayDefault() && lines == 0) return (long) lng * 3 > (long) shrt * 4 ? new int[] {lng, shrt} : null;
+        int[] full = fullPicture(lng, shrt);
+        if (full == null) return null;
+        int w = full[0], h = full[1];
         if (lines > 0 && lines < h) {
+            w = (int) Math.round(lines * pictureRatio(lng, shrt));
             h = lines;
-            w = (int) Math.round(h * r);
         }
         w = Math.max(320, Math.min(16384, w));
         h = Math.max(320, Math.min(16384, h));
@@ -190,6 +198,12 @@ final class GameSettings {
 
     int[] picture(int lng, int shrt) {
         return picture(lng, shrt, resolution);
+    }
+
+    /** Where the player puts a letterboxed picture in an upright window (SA2_PLAYER_PICTURE_Y), or -1
+     * (centred) when the orientation is landscape. */
+    float pictureAnchor() {
+        return LANDSCAPE.equals(orientation) ? -1 : pictureY / 100f;
     }
 
     /** The frame the touch overlay will see: the picture, or the config's own size. */
@@ -208,10 +222,11 @@ final class GameSettings {
             e.add("SA2_PLAY_RES=" + (p == null ? "off" : p[0] + "x" + p[1]));
         }
         if (!hud43) e.add("SA2_PLAY_HUD43=0");
+        if (!LANDSCAPE.equals(orientation)) e.add("SA2_PLAYER_PICTURE_Y=" + fraction(pictureY));
         if (touchSize != 100) e.add("SA2_TOUCH_SCALE=" + fraction(touchSize));
         if (touchOpacity != 100) e.add("SA2_TOUCH_OPACITY=" + fraction(touchOpacity));
-        if (!layoutOver.isEmpty()) e.add("SA2_TOUCH_LAYOUT=" + layoutOver);
-        if (!layoutBelow.isEmpty()) e.add("SA2_TOUCH_LAYOUT_BELOW=" + layoutBelow);
+        if (!layoutLandscape.isEmpty()) e.add("SA2_TOUCH_LAYOUT=" + layoutLandscape);
+        if (!layoutPortrait.isEmpty()) e.add("SA2_TOUCH_LAYOUT_PORTRAIT=" + layoutPortrait);
         if (!touchMap.isEmpty()) e.add("SA2_TOUCH_MAP=" + touchMap);
         if (!padMap.isEmpty()) e.add("SA2_PAD_MAP=" + padMap);
         return e;
@@ -254,11 +269,13 @@ final class GameSettings {
      * host/player/touch_overlay.cpp layout(), the same arithmetic, so the editor shows the controls
      * where the game will. The control area is the window, or the band under the picture when that
      * band is at least 30% of the window's short side; s sizes everything (0.12 s the stick's
-     * radius); x and y are each group's centre in pixels.
+     * radius); x and y are each group's centre in pixels. The places set for the window's
+     * orientation (portrait when it is taller than wide) apply, each held whole inside the area.
      */
     static final class TouchLayout {
-        boolean below;
+        boolean below, upright;
         float ax, ay, aw, ah, s;
+        float pictureTop, pictureBottom;   // the picture's rows (the whole height when it fills it)
         final float[] x = new float[5], y = new float[5];
         final float[] dx = new float[5], dy = new float[5];   // the overlay's own places
 
@@ -290,15 +307,25 @@ final class GameSettings {
         return Math.max(0f, Math.min(1f, v));
     }
 
-    static TouchLayout touchLayout(float w, float h, int fw, int fh, float scale, String overValue, String belowValue) {
+    /** `anchor` and `minTop`: the picture's place in a taller window (host/d3d9gpu/d9g_gpu.h fit_rect),
+     * its centre at anchor of the height (negative: centred), its top no higher than minTop. */
+    static TouchLayout touchLayout(float w, float h, int fw, int fh, float scale, float anchor, float minTop,
+                                   String landscapeValue, String portraitValue) {
         TouchLayout l = new TouchLayout();
+        l.upright = h > w;
         float shortSide = Math.min(w, h);
         float s = shortSide * scale;
-        float bottom = h;
+        float top = 0, bottom = h;
         if (fw > 0 && fh > 0 && (double) w * fh <= (double) h * fw) {
             float ph = Math.min(h, Math.round(w * (float) fh / fw));
-            if (h - ph > 2f) bottom = (float) Math.floor((h - ph) / 2) + ph;
+            if (h - ph > 2f) {
+                top = (float) Math.floor((h - ph) / 2);
+                if (anchor >= 0) top = Math.min(top, Math.max(minTop, (float) Math.round((double) anchor * h - ph / 2.0)));
+                bottom = top + ph;
+            }
         }
+        l.pictureTop = top;
+        l.pictureBottom = bottom;
         l.below = h - bottom >= 0.30f * shortSide;
         l.ax = 0;
         l.ay = 0;
@@ -326,17 +353,21 @@ final class GameSettings {
             l.x[g] = l.dx[g];
             l.y[g] = l.dy[g];
         }
-        String value = l.below ? belowValue : overValue;
+        String value = l.upright ? portraitValue : landscapeValue;
         for (String item : value.isEmpty() ? new String[0] : value.split(";")) {
             int eq = item.indexOf('='), comma = item.indexOf(',');
             int g = eq < 0 ? -1 : Arrays.asList(GROUPS).indexOf(item.substring(0, eq));
             if (g < 0 || comma < eq) continue;
+            float px, py;
             try {
-                l.x[g] = l.ax + clamp01(Float.parseFloat(item.substring(eq + 1, comma))) * l.aw;
-                l.y[g] = l.ay + clamp01(Float.parseFloat(item.substring(comma + 1))) * l.ah;
+                px = l.ax + clamp01(Float.parseFloat(item.substring(eq + 1, comma))) * l.aw;
+                py = l.ay + clamp01(Float.parseFloat(item.substring(comma + 1))) * l.ah;
             } catch (NumberFormatException e) {
-                // A place that does not read is the group's own, as the overlay refuses it.
+                continue;   // a place that does not read is the group's own, as the overlay refuses it
             }
+            float hw = Math.min(l.halfW(g), l.aw / 2), hh = Math.min(l.halfH(g), l.ah / 2);
+            l.x[g] = Math.max(l.ax + hw, Math.min(l.ax + l.aw - hw, px));
+            l.y[g] = Math.max(l.ay + hh, Math.min(l.ay + l.ah - hh, py));
         }
         return l;
     }

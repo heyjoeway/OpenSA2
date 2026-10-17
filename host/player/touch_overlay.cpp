@@ -44,35 +44,70 @@ struct Layout {
 constexpr float kBelowNeed = 0.60f;
 constexpr float kBelowMin = 0.30f;      // the least band, in the window's short side, worth it
 
-// The picture's bottom edge as the device presents a fw x fh frame in a w x h window
+// The picture's top and bottom rows as the device presents a fw x fh frame in a w x h window
 // (host/d3d9gpu/d9g_gpu.h fit_rect: centred at its own aspect, the whole window when the two
-// agree to within 2 px), or h when there is no frame.
-float picture_bottom(float w, float h, uint32_t fw, uint32_t fh) {
-    if (!fw || !fh || w <= 0 || h <= 0) return h;
-    if (double(w) * fh > double(h) * fw) return h;            // wider than the frame: bars at the sides
+// agree to within 2 px; with an anchor, its centre at anchor of the height, its top no higher than
+// min_top and no lower than centred); the whole height when there is no frame or it fills it.
+void picture_rows(float w, float h, uint32_t fw, uint32_t fh, float anchor, float min_top, float* top,
+                  float* bottom) {
+    *top = 0;
+    *bottom = h;
+    if (!fw || !fh || w <= 0 || h <= 0) return;
+    if (double(w) * fh > double(h) * fw) return;               // wider than the frame: bars at the sides
     const float ph = std::min(h, std::round(w * float(fh) / float(fw)));
-    if (h - ph <= 2.0f) return h;
-    return std::floor((h - ph) / 2) + ph;
+    if (h - ph <= 2.0f) return;
+    *top = std::floor((h - ph) / 2);
+    if (anchor >= 0)
+        *top = std::min(*top, std::max(min_top, float(std::llround(double(anchor) * h - double(ph) / 2))));
+    *bottom = *top + ph;
 }
 
-Layout layout(const Settings& st, float w, float h, uint32_t fw, uint32_t fh) {
+// Half a group's width and height at size s: the stick's base, the diamond's reach, START's, LT's
+// and RT's boxes.
+void group_half(Group g, float s, float* hw, float* hh) {
+    switch (g) {
+    case Group::Stick: *hw = *hh = 0.12f * s; return;
+    case Group::Face: *hw = *hh = 0.21f * s; return;
+    case Group::Start: *hw = 0.075f * s; *hh = 0.035f * s; return;
+    default: *hw = 0.09f * s; *hh = 0.04f * s; return;
+    }
+}
+
+// Where the picture goes in a taller window (set_picture): no anchor, centred.
+struct Anchor {
+    float y = -1, min_top = 0;
+};
+
+Layout layout(const Settings& st, float w, float h, uint32_t fw, uint32_t fh, const Anchor& an) {
     Layout l{};
     const float short_side = std::min(w, h);
     float s = short_side * st.scale;
     // The control area: the window, or the band under the picture.
     float ax = 0, ay = 0, aw = w, ah = h;
-    const float bottom = picture_bottom(w, h, fw, fh);
+    float top, bottom;
+    picture_rows(w, h, fw, fh, an.y, an.min_top, &top, &bottom);
     const bool below = h - bottom >= kBelowMin * short_side;
     if (below) {
         ay = bottom;
         ah = h - bottom;
         s = std::min(s, ah / kBelowNeed);
     }
-    const Place* place = below ? st.below : st.over;
+    // A group's place: its own, or the one set for the window's orientation, held whole inside the
+    // control area at this size (a place set at a smaller size could reach past an edge).
+    const Place* place = h > w ? st.portrait : st.landscape;
     const auto at = [&](Group g, float dx, float dy, float* x, float* y) {
         const Place& p = place[int(g)];
-        *x = p.set ? ax + p.x * aw : dx;
-        *y = p.set ? ay + p.y * ah : dy;
+        if (!p.set) {
+            *x = dx;
+            *y = dy;
+            return;
+        }
+        float hw, hh;
+        group_half(g, s, &hw, &hh);
+        hw = std::min(hw, aw / 2);
+        hh = std::min(hh, ah / 2);
+        *x = std::max(ax + hw, std::min(ax + aw - hw, ax + p.x * aw));
+        *y = std::max(ay + hh, std::min(ay + ah - hh, ay + p.y * ah));
     };
     const float m = 0.04f * s;
     l.s = s;
@@ -158,6 +193,7 @@ struct Overlay {
     Uniforms u{};
     Settings settings;
     uint32_t frame_w = 0, frame_h = 0;   // the game's frame at the last Present (set_frame)
+    Anchor anchor;                       // set_picture
     uint32_t no_window_w = 1280, no_window_h = 720;   // set_size
 };
 
@@ -195,7 +231,7 @@ void recompute(Overlay* o) {
         s.connected = true;
         float w, h;
         window_size(o, &w, &h);
-        const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h);
+        const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h, o->anchor);
         for (const Finger& f : o->fingers) {
             if (f.role == R_BUTTON && f.button >= 0) {
                 const Button& b = l.b[f.button];
@@ -336,7 +372,7 @@ bool handle_event(Overlay* o, const SDL_Event& e) {
     ++o->st.finger_events;
     float w, h;
     window_size(o, &w, &h);
-    const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h);
+    const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h, o->anchor);
     Finger* f = find(o, t.touchID, t.fingerID);
     if (e.type == SDL_EVENT_FINGER_DOWN) {
         if (!o->active) { o->active = true; ++o->st.activations; }
@@ -397,7 +433,7 @@ void draw(Overlay* o, SDL_GPUCommandBuffer* cb, SDL_GPUTexture* target, uint32_t
     if (!o->dev || !cb || !target || !w || !h) return;
     if (!ensure_pipeline(o)) { ++o->st.draw_failures; return; }
     const float fw = float(w), fh = float(h);
-    const Layout l = layout(o->settings, fw, fh, o->frame_w, o->frame_h);
+    const Layout l = layout(o->settings, fw, fh, o->frame_w, o->frame_h, o->anchor);
     Uniforms& u = o->u;
     u.target[0] = fw; u.target[1] = fh; u.target[2] = 0; u.target[3] = 0;
     ShapeList sh{&u, o->settings.opacity};
@@ -467,8 +503,8 @@ namespace {
 const Settings kNoSettings{};
 
 Layout layout_of(const Overlay* o, uint32_t w, uint32_t h) {
-    return o ? layout(o->settings, float(w), float(h), o->frame_w, o->frame_h)
-             : layout(kNoSettings, float(w), float(h), 0, 0);
+    return o ? layout(o->settings, float(w), float(h), o->frame_w, o->frame_h, o->anchor)
+             : layout(kNoSettings, float(w), float(h), 0, 0, Anchor{});
 }
 
 // A decimal number from lo to hi, digits and a point only (no sign, no exponent).
@@ -504,9 +540,9 @@ bool parse_setting(const std::string& name, const std::string& value, Settings* 
         if (!parse_number(value, 0.5f, 2.0f, &n.scale)) { *why = "not a number from 0.5 to 2"; return false; }
     } else if (name == "SA2_TOUCH_OPACITY") {
         if (!parse_number(value, 0.0f, 2.0f, &n.opacity)) { *why = "not a number from 0 to 2"; return false; }
-    } else if (name == "SA2_TOUCH_LAYOUT" || name == "SA2_TOUCH_LAYOUT_BELOW") {
+    } else if (name == "SA2_TOUCH_LAYOUT" || name == "SA2_TOUCH_LAYOUT_PORTRAIT") {
         static const char* const groups[kGroups] = {"STICK", "FACE", "START", "LT", "RT"};
-        Place* places = name == "SA2_TOUCH_LAYOUT" ? n.over : n.below;
+        Place* places = name == "SA2_TOUCH_LAYOUT" ? n.landscape : n.portrait;
         for (const auto& [k, v] : items(value, ';')) {
             int g = 0;
             while (g < kGroups && k != groups[g]) ++g;
@@ -559,10 +595,26 @@ void set_frame(Overlay* o, uint32_t frame_w, uint32_t frame_h) {
     o->frame_h = frame_h;
 }
 
+void set_picture(Overlay* o, float anchor_y, uint32_t min_top) {
+    if (!o) return;
+    o->anchor.y = anchor_y;
+    o->anchor.min_top = float(min_top);
+}
+
+bool picture_rows(const Overlay* o, uint32_t w, uint32_t h, uint32_t* top, uint32_t* bottom) {
+    if (!o || !o->frame_w || !o->frame_h) return false;
+    float t, b;
+    picture_rows(float(w), float(h), o->frame_w, o->frame_h, o->anchor.y, o->anchor.min_top, &t, &b);
+    *top = uint32_t(t);
+    *bottom = uint32_t(b);
+    return true;
+}
+
 bool below_picture(const Overlay* o, uint32_t w, uint32_t h) {
     if (!o) return false;
-    return float(h) - picture_bottom(float(w), float(h), o->frame_w, o->frame_h) >=
-           kBelowMin * float(std::min(w, h));
+    float top, bottom;
+    picture_rows(float(w), float(h), o->frame_w, o->frame_h, o->anchor.y, o->anchor.min_top, &top, &bottom);
+    return float(h) - bottom >= kBelowMin * float(std::min(w, h));
 }
 
 void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y) {

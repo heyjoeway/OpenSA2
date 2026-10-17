@@ -25,11 +25,12 @@ import android.widget.TextView;
  * The touch controls' layout editor, opened from the settings screen for one orientation: the
  * whole screen as the game will have it (the picture where the game's will be, the controls at
  * their size and places, GameSettings.TouchLayout), each group (the stick, the A/B/X/Y diamond,
- * START, LT, RT) dragged to a new place. Save keeps the places as fractions of the control area
- * (the screen, or the band under the picture when the controls go below it), which the overlay
- * reads as SA2_TOUCH_LAYOUT or SA2_TOUCH_LAYOUT_BELOW; Reset puts every group back; Swap sides
- * mirrors the stick and the diamond. The buttons sit under START (in the picture's middle when
- * the controls are below it), and hide while a control is dragged.
+ * START, LT, RT) dragged to a new place. Save keeps the places for the orientation the editor was
+ * opened for, as fractions of the control area (the screen, or the band under the picture when
+ * the controls go below it), which the overlay reads as SA2_TOUCH_LAYOUT (landscape) or
+ * SA2_TOUCH_LAYOUT_PORTRAIT; Reset puts every group back; Swap sides mirrors the stick and the
+ * diamond. The buttons go to the first of a few spots that covers no control, else the one that
+ * covers least, again after every change, and hide while a control is dragged.
  */
 public class Sa2LayoutActivity extends Activity {
     static final String EXTRA_ORIENTATION = "sa2.orientation";
@@ -52,7 +53,8 @@ public class Sa2LayoutActivity extends Activity {
         }
         int[] screen = GameSettings.screen(this);
         int[] frame = mS.frame(screen != null ? screen[0] : 1920, screen != null ? screen[1] : 1080);
-        mEditor = new Editor(this, frame[0], frame[1], mS.touchSize / 100f, mS.layoutOver, mS.layoutBelow);
+        mEditor = new Editor(this, frame[0], frame[1], mS.touchSize / 100f, mS.pictureAnchor(), mS.layoutLandscape,
+                             mS.layoutPortrait);
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -72,8 +74,9 @@ public class Sa2LayoutActivity extends Activity {
         Button cancel = button("Cancel", Ui.SECONDARY, v -> finish());
         Button save = button("Save", Ui.PRIMARY, v -> {
             if (mEditor.layout == null) return;
-            if (mEditor.layout.below) mS.layoutBelow = mEditor.layout.value();
-            else mS.layoutOver = mEditor.layout.value();
+            mEditor.keep();
+            if (upright) mS.layoutPortrait = mEditor.portrait;
+            else mS.layoutLandscape = mEditor.landscape;
             mS.save(this);
             finish();
         });
@@ -83,21 +86,61 @@ public class Sa2LayoutActivity extends Activity {
         bar.addView(row2, fixedWidth(Ui.dp(this, 8)));
         root.addView(bar, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
                                                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                                                       Gravity.TOP | Gravity.CENTER_HORIZONTAL));
-        mEditor.laidOut = () -> bar.post(this::placeBar);
+                                                       Gravity.TOP | Gravity.LEFT));
+        mEditor.changed = () -> bar.post(this::placeBar);
         mEditor.dragging = on -> bar.setVisibility(on ? View.INVISIBLE : View.VISIBLE);
         setContentView(root);
         hideSystemBars();
     }
 
-    /** The buttons under START, clear of the controls' own places; in the middle of the picture
-     * when the controls are below it. */
+    /** The buttons at the first spot that covers no control: under START, between the stick and
+     * the diamond, the top's middle, the screen's middle (the picture's middle first when the
+     * controls are below it, where they cover none); else at the free spot nearest the middle of a
+     * scan of the screen; else at the spot that covers least. */
     private void placeBar() {
         GameSettings.TouchLayout l = mEditor.layout;
         if (l == null) return;
-        int h = mBar.getHeight(), screen = mEditor.getHeight();
-        float top = l.below ? (screen - h) / 2f : l.y[2] + l.halfH(2) + Ui.dp(this, 16);
-        mBar.setTranslationY(Math.max(0, Math.min(screen - h, top)));
+        float bw = mBar.getWidth(), bh = mBar.getHeight(), w = mEditor.getWidth(), h = mEditor.getHeight();
+        float gap = Ui.dp(this, 16);
+        java.util.List<float[]> spots = new java.util.ArrayList<>();
+        if (l.below) spots.add(new float[] {(w - bw) / 2, (l.pictureTop + l.pictureBottom - bh) / 2});
+        spots.add(new float[] {l.x[2] - bw / 2, l.y[2] + l.halfH(2) + gap});
+        spots.add(new float[] {(l.x[0] + l.x[1] - bw) / 2, (l.y[0] + l.y[1] - bh) / 2});
+        spots.add(new float[] {(w - bw) / 2, gap});
+        spots.add(new float[] {(w - bw) / 2, (h - bh) / 2});
+        int named = spots.size();
+        for (float y = 0; y <= h - bh; y += gap)
+            for (float x = 0; x <= w - bw; x += gap) spots.add(new float[] {x, y});
+        float bestX = 0, bestY = 0, least = Float.MAX_VALUE, nearest = Float.MAX_VALUE;
+        for (int i = 0; i < spots.size(); i++) {
+            float x = Math.max(0, Math.min(w - bw, spots.get(i)[0])), y = Math.max(0, Math.min(h - bh, spots.get(i)[1]));
+            float covered = covered(l, x, y, bw, bh);
+            if (covered == 0 && i < named) {
+                bestX = x;
+                bestY = y;
+                break;
+            }
+            float off = covered == 0 ? (float) Math.hypot(x + bw / 2 - w / 2, y + bh / 2 - h / 2) : Float.MAX_VALUE;
+            if (covered < least || (covered == 0 && off < nearest)) {
+                least = covered;
+                nearest = off;
+                bestX = x;
+                bestY = y;
+            }
+        }
+        mBar.setX(bestX);
+        mBar.setY(bestY);
+    }
+
+    /** How much of the controls the buttons would cover at (x, y), with an 8 dp margin. */
+    private float covered(GameSettings.TouchLayout l, float x, float y, float bw, float bh) {
+        float covered = 0, m = Ui.dp(this, 8);
+        for (int g = 0; g < 5; g++) {
+            float ox = Math.min(x + bw + m, l.x[g] + l.halfW(g)) - Math.max(x - m, l.x[g] - l.halfW(g));
+            float oy = Math.min(y + bh + m, l.y[g] + l.halfH(g)) - Math.max(y - m, l.y[g] - l.halfH(g));
+            if (ox > 0 && oy > 0) covered += ox * oy;
+        }
+        return covered;
     }
 
     private LinearLayout.LayoutParams fixedWidth(int top) {
@@ -142,10 +185,11 @@ public class Sa2LayoutActivity extends Activity {
     /** The screen: the picture's place, the control area's edge when it is a band, and the groups. */
     private static final class Editor extends View {
         final int frameW, frameH;
-        final float scale;
-        String over, below;          // the places as saved, kept while the screen changes size
+        final float scale, anchor;
+        float minTop;                // the safe area's top: SDL's, from the same insets (SDLSurface)
+        String landscape, portrait;  // the places, kept while the screen changes size
         GameSettings.TouchLayout layout;
-        Runnable laidOut;                            // a new layout for a new size
+        Runnable changed;                            // a new size, a drop, Reset or Swap sides
         java.util.function.Consumer<Boolean> dragging;   // a control picked up, and let go
         private int held = -1;
         private float grabX, grabY;
@@ -153,13 +197,30 @@ public class Sa2LayoutActivity extends Activity {
                             label = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
 
-        Editor(Context c, int frameW, int frameH, float scale, String over, String below) {
+        Editor(Context c, int frameW, int frameH, float scale, float anchor, String landscape, String portrait) {
             super(c);
             this.frameW = frameW;
             this.frameH = frameH;
             this.scale = scale;
-            this.over = over;
-            this.below = below;
+            this.anchor = anchor;
+            setOnApplyWindowInsetsListener((v, insets) -> {
+                float top;
+                if (Build.VERSION.SDK_INT >= 30) {
+                    top = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.systemGestures()
+                                           | WindowInsets.Type.mandatorySystemGestures()
+                                           | WindowInsets.Type.tappableElement() | WindowInsets.Type.displayCutout()).top;
+                } else {
+                    android.view.DisplayCutout cut = insets.getDisplayCutout();
+                    top = cut != null ? cut.getSafeInsetTop() : 0;
+                }
+                if (top != minTop) {
+                    minTop = top;
+                    relayout();
+                }
+                return insets;
+            });
+            this.landscape = landscape;
+            this.portrait = portrait;
             line.setStyle(Paint.Style.STROKE);
             label.setColor(Color.rgb(0x5D, 0x6A, 0x85));
             label.setTextAlign(Paint.Align.CENTER);
@@ -168,23 +229,34 @@ public class Sa2LayoutActivity extends Activity {
 
         @Override
         protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-            if (layout != null) keep();
-            layout = GameSettings.touchLayout(w, h, frameW, frameH, scale, over, below);
-            if (laidOut != null) laidOut.run();
+            relayout();
         }
 
-        /** The places as they stand, so a new size lays them out again. */
-        private void keep() {
-            if (layout.below) below = layout.value();
-            else over = layout.value();
+        /** Laid out again for the current size and safe area, the places kept. */
+        private void relayout() {
+            if (getWidth() <= 0 || getHeight() <= 0) return;
+            if (layout != null) keep();
+            layout = GameSettings.touchLayout(getWidth(), getHeight(), frameW, frameH, scale, anchor, minTop, landscape,
+                                              portrait);
+            invalidate();
+            if (changed != null) changed.run();
+        }
+
+        /** The places as they stand, for the layout's orientation, so a new size lays them out
+         * again and Save finds them. */
+        void keep() {
+            if (layout.upright) portrait = layout.value();
+            else landscape = layout.value();
         }
 
         void reset() {
             if (layout == null) return;
-            if (layout.below) below = "";
-            else over = "";
-            layout = GameSettings.touchLayout(getWidth(), getHeight(), frameW, frameH, scale, over, below);
+            if (layout.upright) portrait = "";
+            else landscape = "";
+            layout = GameSettings.touchLayout(getWidth(), getHeight(), frameW, frameH, scale, anchor, minTop, landscape,
+                                              portrait);
             invalidate();
+            if (changed != null) changed.run();
         }
 
         void swap() {
@@ -192,6 +264,7 @@ public class Sa2LayoutActivity extends Activity {
             for (int g = 0; g < 2; g++) place(g, 2 * layout.ax + layout.aw - layout.x[g], layout.y[g]);
             keep();
             invalidate();
+            if (changed != null) changed.run();
         }
 
         /** Group g's centre at (x, y), kept whole inside the control area. */
@@ -236,6 +309,7 @@ public class Sa2LayoutActivity extends Activity {
                     if (held >= 0) {
                         keep();
                         if (dragging != null) dragging.accept(false);
+                        if (changed != null) changed.run();
                     }
                     held = -1;
                     invalidate();
@@ -279,11 +353,11 @@ public class Sa2LayoutActivity extends Activity {
             if (layout == null) return;
             GameSettings.TouchLayout l = layout;
             int w = getWidth(), h = getHeight();
-            // The picture, centred at its own aspect, as the renderer presents it.
-            float pw = w, ph = h;
+            // The picture: at its own aspect, centred across, at the layout's rows (the player's place
+            // for it in a taller window).
+            float pw = w, ph = l.pictureBottom - l.pictureTop, py = l.pictureTop;
             if ((double) w * frameH > (double) h * frameW) pw = Math.round(h * (float) frameW / frameH);
-            else ph = Math.round(w * (float) frameH / frameW);
-            float px = (float) Math.floor((w - pw) / 2), py = (float) Math.floor((h - ph) / 2);
+            float px = (float) Math.floor((w - pw) / 2);
             fill.setColor(Color.rgb(0x1A, 0x22, 0x36));
             fill.setAlpha(255);
             c.drawRect(px, py, px + pw, py + ph, fill);

@@ -100,7 +100,7 @@ public class Sa2SetupActivity extends Activity {
     private final Runnable mRefresh = this::refresh;
     private final Handler mTicker = new Handler(Looper.getMainLooper());
     private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched, mShowingLast;
-    private boolean mHoldPlay;           // the settings screen was opened: a check that passes does not start the game
+    private boolean mHoldPlay;           // the settings were opened during a check: if it passes, it does not start the game
     private final ArrayDeque<String> mLines = new ArrayDeque<>();
 
     @Override
@@ -498,6 +498,7 @@ public class Sa2SetupActivity extends Activity {
                 refresh();
                 playUnlessHeld();
             } else {
+                mHoldPlay = false;
                 mInstallVerdict = InstallVerdict.explain(mInstallOut, code, false);
                 banner("The game folder did not pass the check.\n\n" + mInstallVerdict
                                 + "\n\nIf you are stuck, tap Report on GitHub: it copies the check's output.");
@@ -525,6 +526,7 @@ public class Sa2SetupActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request != PICK_ZIP || result != RESULT_OK || data == null || data.getData() == null) return;
         mAutoPlayDone = true;
+        mHoldPlay = false;
         installZip(data.getData());
     }
 
@@ -588,6 +590,7 @@ public class Sa2SetupActivity extends Activity {
             runOnUiThread(() -> {
                 setBusy(false);
                 if (failure != null) {
+                    mHoldPlay = false;
                     copy.delete();
                     addLine("Cannot copy the ZIP: " + failure + ". Copy it to the phone again and retry.");
                     return;
@@ -603,6 +606,7 @@ public class Sa2SetupActivity extends Activity {
                         refresh();
                         playUnlessHeld();
                     } else {
+                        mHoldPlay = false;
                         mInstallVerdict = InstallVerdict.explain(mInstallOut, code, true);
                         banner("The game ZIP did not pass the check.\n\n" + mInstallVerdict
                                         + "\n\nIf you are stuck, tap Report on GitHub: it copies the check's output.");
@@ -619,6 +623,7 @@ public class Sa2SetupActivity extends Activity {
             if (code == 0) {
                 playUnlessHeld();
             } else {
+                mHoldPlay = false;
                 banner("The installation no longer verifies (exit " + code + "). Reinstall it from a ZIP, or "
                        + "copy the game folder again and tap Reinstall from folder.");
             }
@@ -959,6 +964,7 @@ public class Sa2SetupActivity extends Activity {
         mZip = Ui.button(this, "Choose game ZIP", v -> pickZip());
         mCheck = Ui.button(this, "Check game folder", v -> {
             mAutoPlayDone = true;
+            mHoldPlay = false;
             install();
         });
         mActions = new LinearLayout(this);

@@ -24,7 +24,7 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 
 ## Known limitations
 
-- The renderer needs Vulkan 1.3. A device whose driver offers an older version, or lacks a feature the renderer asks for, stops before the first frame. The Android setup screen warns when the system reports an older Vulkan version.
+- The renderer needs Vulkan 1.3. A device whose driver offers an older version, or lacks a required feature, stops before the first frame. The Android setup screen warns when the system reports an older Vulkan version. Depth clamping is optional from 0.1.0-alpha.3: during play the renderer draws without it, while replays and tests still refuse the draws that need it.
 - Broad stage, boss, event, and game-mode testing is unfinished. Additional missing blocks can exist outside the exercised paths.
 - Widescreen rendering is in development. The viewport and main HUD have been adjusted, but several menus and overlays still need work, including the boss gauge, stage map, title cards, and story-select art.
 - The portable renderer currently depends on the project's SDL3 patches. Equivalent behavior with stock SDL3 is unfinished.

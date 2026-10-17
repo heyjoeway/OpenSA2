@@ -21,7 +21,10 @@ LAYER_SETTINGS = (
     "khronos_validation.log_filename = /dev/stderr\n"
     "khronos_validation.report_flags = error,warn\n"
     "khronos_validation.enable_message_limit = false\n"
-    "khronos_validation.message_format_json = false\n")
+    "khronos_validation.message_format_json = false\n"
+    # the layer's shader cache keys on the module, not the target environment: a module once passed
+    # under a 1.3 instance would pass unchecked under a 1.1 one (the vk11 profile's legs and controls)
+    "khronos_validation.check_shaders_caching = false\n")
 ICDS = {"nvidia": "/usr/share/vulkan/icd.d/nvidia_icd.json",
         "lvp": "/usr/share/vulkan/icd.d/lvp_icd.json"}
 CONTROL_VUIDS = {
@@ -30,6 +33,10 @@ CONTROL_VUIDS = {
                      "VUID-RuntimeSpirv-uniformAndStorageBuffer16BitAccess-06332",
                      "VUID-VkShaderModuleCreateInfo-pCode-08740"},
     "modes-base": {"VUID-vkCmdDraw-None-06479"},
+    # the 1.3 profile's SPIR-V 1.6 modules on SDL_gpu's Vulkan 1.1 device: the version, and the
+    # capabilities (PhysicalStorageBufferAddresses, VulkanMemoryModel, demote, ...) no 1.1 feature enables
+    "load-vk11-control": {"VUID-VkShaderModuleCreateInfo-pCode-08737",
+                          "VUID-VkShaderModuleCreateInfo-pCode-08740"},
 }
 
 
@@ -239,7 +246,7 @@ def observed_command(argv, *, selected, verify, probe, record_path, environment,
     return record, bytes(stderr)
 
 
-R1_JOBS = {"load": "load", "load-control": "load", "null-sdl": "probe-null",
+R1_JOBS = {"load": "load", "load-control": "load", "load-vk11": "load", "load-vk11-control": "load", "null-sdl": "probe-null",
            "null-control": "probe-null", "border": "border", "modes": "modes", "modes-base": "modes"}
 
 
@@ -308,7 +315,7 @@ def audit_r1(run, selected, shaderc, root):
         require(type(command) is list and len(command) >= 2 and command[:2] == [str(shaderc), R1_JOBS[job]] and
                 record.get("producer_sha256") == sha(shaderc), "R1 observation names another producer")
         require(type(record.get("producer_exit")) is int and record["producer_exit"] in
-                ((0, 1) if job in ("load-control", "modes-base") else (0,)), "R1 producer exited unexpectedly")
+                ((0, 1) if job in ("load-control", "load-vk11-control", "modes-base") else (0,)), "R1 producer exited unexpectedly")
         stderr = path.with_suffix(".stderr")
         require(record.get("stderr_sha256") == sha(stderr) and record.get("stderr_bytes") == stderr.stat().st_size,
                 "R1 retained stderr differs from collected bytes")
@@ -332,24 +339,25 @@ def audit_r1(run, selected, shaderc, root):
         require(type(fd) is str and re.fullmatch(r"[0-9]+", fd) is not None,
                 "R1 has no observer descriptor identity")
         paths = [str(Path(probe["manifest"]).parent), str(Path(selected["manifest"]).parent)]
-        if job == "load": paths.append(str(run / "vkcap/vkcap"))
+        captured = job in ("load", "load-vk11")   # test_shaders.sh's capture layer rides on both loads
+        if captured: paths.append(str(run / "vkcap/vkcap"))
         expected_environment = {
             **selection_environment(selected), "SA2_VALIDATION_OBSERVER_FD": fd,
             "VK_INSTANCE_LAYERS": ":".join([PROBE_NAME, LAYER_NAME] +
-                (["VK_LAYER_SA2_vkcap"] if job == "load" else [])),
+                (["VK_LAYER_SA2_vkcap"] if captured else [])),
             "VK_ADD_LAYER_PATH": ":".join(paths), "LD_LIBRARY_PATH": selected["loader_environment"]["LD_LIBRARY_PATH"],
             "VK_LAYER_SETTINGS_PATH": str(settings.parent), "VK_LAYER_DUPLICATE_MESSAGE_LIMIT": "1000000",
             "VK_LOADER_LAYERS_DISABLE": "~implicit~", "VK_DRIVER_FILES": ICDS[driver],
             "SDL_LOGGING": "gpu=info", "SDL_VIDEO_DRIVER": "offscreen",
         }
-        if job == "load": expected_environment["VKCAP_OUT"] = str(run / driver / "load-capture")
+        if captured: expected_environment["VKCAP_OUT"] = str(run / driver / (job + "-capture"))
         require(environment == expected_environment, "R1 retained role environment differs")
         require(record.get("icd_inputs") == {"VK_DRIVER_FILES": {"path": ICDS[driver], "sha256": sha(ICDS[driver])}},
                 "R1 selected ICD identity differs")
         names = environment.get("VK_INSTANCE_LAYERS", "").split(":")
         require(names[:2] == [PROBE_NAME, LAYER_NAME] and len(set(names)) == len(names),
                 "R1 observer and validation layer order differs")
-        require(names == [PROBE_NAME, LAYER_NAME] + (["VK_LAYER_SA2_vkcap"] if job == "load" else []),
+        require(names == [PROBE_NAME, LAYER_NAME] + (["VK_LAYER_SA2_vkcap"] if captured else []),
                 "R1 observation selected another explicit layer")
         observations = record.get("observations")
         require(type(observations) is list and observations, "R1 has no actual live observations")

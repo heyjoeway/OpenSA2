@@ -217,6 +217,36 @@ void apply_caps_off(GpuInfo& g, const CapsOff& off) {
     g.capability_override = off.names;
 }
 
+namespace {
+// A Vulkan version as "major.minor.patch", null where unread.
+std::string vk_version(uint32_t v) {
+    if (!v) return "null";
+    return strf("\"%u.%u.%u\"", (v >> 22) & 0x7fu, (v >> 12) & 0x3ffu, v & 0xfffu);
+}
+// VkPhysicalDeviceType by name.
+const char* vk_device_type(uint32_t t) {
+    static const char* names[] = {"other", "integrated GPU", "discrete GPU", "virtual GPU", "CPU"};
+    return t < 5 ? names[t] : "unknown";
+}
+// sdl_gpu's "vk11" member (GpuInfo::vk11), "" on a device made at 1.3, so its report keeps every line it had.
+std::string vk11_json(const GpuInfo& gpu) {
+    if (!gpu.vk11) return "";
+    return strf(", \"vk11\": {\"api_version\": \"1.1\", \"reason\": %s, \"forced\": %s, \"device_type\": %s, "
+                "\"device_api_version\": %s, \"instance_api_version\": %s}",
+                jstr(gpu.vk11_reason).c_str(), jnull(gpu.vk11_forced).c_str(),
+                gpu.vk_device_api ? jstr(vk_device_type(gpu.vk_device_type)).c_str() : "null",
+                vk_version(gpu.vk_device_api).c_str(), vk_version(gpu.vk_instance_api).c_str());
+}
+// sdl_gpu's "vk13_below_device" member (GpuInfo::vk13_below_device), "" unless set, so a device reporting
+// 1.3 or later keeps every line it had.
+std::string vk13_below_json(const GpuInfo& gpu) {
+    if (!gpu.vk13_below_device) return "";
+    return strf(", \"vk13_below_device\": {\"api_version\": \"1.3\", \"device_api_version\": %s, "
+                "\"instance_api_version\": %s}",
+                vk_version(gpu.vk_device_api).c_str(), vk_version(gpu.vk_instance_api).c_str());
+}
+}  // namespace
+
 std::string Report::json() const {
     std::string s = "{\n  \"schema\": \"sa2-d3d9gpu-report/v1\",\n  \"tool\": \"host/d3d9gpu libsa2_d3d9gpu.a\",\n";
     s += strf("  \"complete\": %s,\n  \"phase\": %s,\n  \"failure\": %s,\n", complete ? "true" : "false",
@@ -251,7 +281,7 @@ std::string Report::json() const {
               "\"fallback_owed\": {\"border\": %s, \"depth_clamp\": %s}, "
               "\"sdl_features_dropped\": %s, \"sampler_anisotropy\": %s, \"anisotropy_dropped_samplers\": %llu, "
               "\"depth_clamp_forced_off\": %s, \"live_session\": %s, \"depth_clamp_clip_only\": %s, "
-              "\"depth_clamp_clip_only_draws\": %llu},\n",
+              "\"depth_clamp_clip_only_draws\": %llu%s%s},\n",
               jstr(gpu.driver).c_str(), jstr(gpu.device_name).c_str(), jstr(gpu.driver_name).c_str(),
               jstr(gpu.driver_version).c_str(), jstr(gpu.driver_info).c_str(), jstr(gpu.depth_format).c_str(),
               gpu.debug_mode ? "true" : "false", gpu.vulkan_options.empty() ? "null" : gpu.vulkan_options.c_str(),
@@ -267,7 +297,8 @@ std::string Report::json() const {
               owe_border ? "true" : "false", owe_clamp ? "true" : "false", jnull(gpu.sdl_features_dropped).c_str(),
               gpu.sampler_anisotropy ? "true" : "false", (unsigned long long)anisotropy_dropped_samplers,
               gpu.depth_clamp_forced_off ? "true" : "false", gpu.live_session ? "true" : "false",
-              gpu.depth_clamp_clip_only ? "true" : "false", (unsigned long long)depth_clamp_clip_only_draws);
+              gpu.depth_clamp_clip_only ? "true" : "false", (unsigned long long)depth_clamp_clip_only_draws,
+              vk11_json(gpu).c_str(), vk13_below_json(gpu).c_str());
     s += strf("  \"fpu\": {\"measured\": %s, \"x87_cw_before\": \"%04x\", \"x87_cw_after\": \"%04x\", "
               "\"mxcsr_before\": \"%08x\", \"mxcsr_after\": \"%08x\", \"claim_x87_cw_before\": \"%04x\", "
               "\"claim_x87_cw_after\": \"%04x\", \"claim_mxcsr_before\": \"%08x\", \"claim_mxcsr_after\": \"%08x\", "

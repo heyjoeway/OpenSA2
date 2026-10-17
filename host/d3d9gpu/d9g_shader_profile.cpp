@@ -113,6 +113,30 @@ ShaderProfile determine_profile(const DeviceFacts& f, const D3D9Config& d3d9) {
   // Host 2's own: no shaderClipDistance, so no vertex module writes ClipDistance
   if (!f.clip_distance)
     p.no_clip_distance = true;
+  // Host 2's own: a device made at Vulkan 1.1 (ShaderProfile::vk11). SDL_gpu's 1.1 device has Vulkan 1.0
+  // features only and no extension, so nothing the 1.2 features or the extensions give is used: the state
+  // is read as 32-bit words, and no float-control mode, float controls 2, raw access chain, descriptor
+  // heap or resource indexing (optimizeDescriptorIndexing) is asked of the builder. DXVK's driver and
+  // limit rules stand.
+  if (f.vk11) {
+    p.vk11 = true;
+    p.state_words = true;
+    p.supports_16bit_arithmetic = false;
+    p.supports_sub_dword_push_data = false;
+    for (int i = 0; i < 3; i++) {
+      p.supports_sz_inf_nan_preserve[i] = false;
+      p.supports_rte[i] = false;
+      p.supports_rtz[i] = false;
+      p.supports_denorm_flush[i] = false;
+      p.supports_denorm_preserve[i] = false;
+    }
+    p.independent_round_mode = false;
+    p.independent_denorm_mode = false;
+    p.supports_float_controls2 = false;
+    p.supports_nv_raw_access_chains = false;
+    p.supports_descriptor_heap = false;
+    p.supports_resource_indexing = false;
+  }
   return p;
 }
 
@@ -157,6 +181,8 @@ std::string ShaderProfile::record() const {
     add("host2.state_words", state_words);
   if (no_clip_distance)   // only when set, as state_words
     add("host2.no_clip_distance", no_clip_distance);
+  if (vk11)   // only when set, as state_words: every 1.3 record stays as it was
+    add("host2.vk11", vk11);
   std::sort(lines.begin(), lines.end());
   std::string out;
   for (const auto& l : lines)

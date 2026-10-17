@@ -30,6 +30,11 @@
 //                        run, replays included (as on a Galaxy A05's Mali-G52); on Android also
 //                        debug.sa2.no_depth_clamp=1; recorded in the report's env and
 //                        sdl_gpu.depth_clamp_forced_off
+//   SA2_D3D9GPU_VK11     1: the device is made at Vulkan 1.1 and every shader lowered to SPIR-V 1.3,
+//                        the profile a driver offering only Vulkan 1.1 or 1.2 gets by itself (an Adreno
+//                        610's), on any device; on Android also debug.sa2.vk11=1 (d9g_gpu_sdl.cpp
+//                        make_sdl_gpu). Recorded in the report's sdl_gpu.vk11 (forced), not in its env
+//                        block, so a 1.3 run's report keeps every line it had
 //   SA2_D3D9GPU_TEST_RUN 1: a test run (the override's and the shader faults' one condition; it
 //                        changes nothing else)
 //   SA2_D3D9GPU_SHADER_DUMP  a directory: each shader's bytecode as <sha256>.bin at its creation (the

@@ -337,6 +337,14 @@ draw::Prepared Device::prepare_draw(uint32_t method, uint32_t prim, uint32_t str
     if (const auto* u = std::get_if<Unmapped>(&program)) return *u;
     if (const auto* f = std::get_if<Failure>(&program)) return *f;
     v.program = std::get<Program>(std::move(program));
+    // A device made at Vulkan 1.1 takes SPIR-V 1.3 at most. The vk11 profile lowers every module to it
+    // (d9g_shader_abi.cpp lower_vk11), so a module above it means a profile that disagrees with the
+    // device: refused by name, never handed to the driver.
+    if (vk11_)
+        for (const shader::Built* b : {&v.program->vertex, &v.program->pixel})
+            if (b->spirv.size() > 1 && b->spirv[1] > 0x00010300u)
+                return Unmapped{{"a SPIR-V 1." + std::to_string((b->spirv[1] >> 8) & 0xffu) +
+                                 " module on a device made at Vulkan 1.1"}};
     if (auto* dip = std::get_if<BufferIndexed>(&geometry); dip && indexed_method) dip->instances = instances;
     if (auto* up = std::get_if<OwnedIndexedUp>(&geometry)) up->instances = instances;
     v.geometry = std::move(geometry);

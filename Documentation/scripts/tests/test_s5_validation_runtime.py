@@ -227,10 +227,10 @@ def test_r1_reconciles_every_live_job_and_rejects_artifact_substitutions(authore
             output=run/driver/(job+".txt");output.parent.mkdir(parents=True,exist_ok=True)
             job_env={**env,"FAKE_LAYER_PATH":str(layer),"FAKE_PROBE_PATH":probe["library"]}
             job_env["VK_DRIVER_FILES"] = runtime.ICDS[driver]
-            if job=="load":
+            if job in ("load","load-vk11"):   # test_shaders.sh captures both loads
                 job_env["VK_INSTANCE_LAYERS"] += ":VK_LAYER_SA2_vkcap"
                 job_env["VK_ADD_LAYER_PATH"] += ":" + str(run/"vkcap/vkcap")
-                job_env["VKCAP_OUT"] = str(run/driver/"load-capture")
+                job_env["VKCAP_OUT"] = str(run/driver/(job+"-capture"))
             if job in runtime.CONTROL_VUIDS:
                 job_env["FAKE_CONTROL_ERRORS"] = "".join("Validation Error: [ " + vuid + " ] authored expected control\n"
                     for vuid in sorted(runtime.CONTROL_VUIDS[job]))
@@ -242,7 +242,7 @@ def test_r1_reconciles_every_live_job_and_rejects_artifact_substitutions(authore
             # This CPU producer is not VVL; the receipt-boundary fixture supplies the logger line.
             with output.open("ab") as stdout: stdout.write(runtime.LAYER_STARTUP.encode()+b"\n"+collected)
     audited=runtime.audit_r1(run,selected,child,ROOT)
-    assert len(audited["jobs"])==14
+    assert len(audited["jobs"])==18   # R1_JOBS' nine on each of the two drivers
     assert all(len(job["observations"])==2 for job in audited["jobs"].values())
     path=run/"nvidia/validation/load.json"
     original=path.read_bytes()

@@ -128,6 +128,21 @@ struct GpuInfo {
     bool depth_clamp_forced_off = false;
     bool live_session = false;
     bool depth_clamp_clip_only = false;
+    // The Vulkan 1.1 profile (shader::ApiLevel::vk11): SDL_gpu's device made at API 1.1, so
+    // shader_facts.vk11 and every module lowered to SPIR-V 1.3 (ShaderProfile::vk11). vk11_reason says
+    // why: forced by its switch, no device taking the 1.3 profile, or a GPU that needs it preferred over a
+    // CPU device that took 1.3 (d9g_gpu_sdl.cpp make_sdl_gpu). vk11_forced: the switch that asked
+    // ("SA2_D3D9GPU_VK11=1", "debug.sa2.vk11=1"), "" none. The report prints them only when vk11 is set.
+    bool vk11 = false;
+    std::string vk11_reason, vk11_forced;
+    // SDL_gpu made the device at 1.3 although it reports below 1.3 (vk_device_api): SDL_gpu compares no
+    // version, only the 1.1, 1.2 and 1.3 feature structures, which some drivers fill above their own
+    // version. It runs the 1.3 profile as before the 1.1 profile existed, its facts read in full; the
+    // report prints it only when set (sdl_gpu.vk13_below_device).
+    bool vk13_below_device = false;
+    // From the same vkGetPhysicalDeviceProperties query as vk_vendor_id: the device's own apiVersion and
+    // its VkPhysicalDeviceType; and the loader's (vkEnumerateInstanceVersion, 1.0 without it). 0 unread.
+    uint32_t vk_device_api = 0, vk_device_type = 0, vk_instance_api = 0;
 };
 
 // A test run's capability override (SA2_D3D9GPU_CAPS_OFF, d9g_entry.cpp): the patch's
@@ -248,8 +263,10 @@ public:
 };
 
 // d9g_gpu_sdl.cpp: SDL_CreateGPUDeviceWithProperties(SPIR-V, debug, "vulkan", SDL_GPUVulkanOptions:
-// Vulkan 1.3 and shader::VulkanFeatures); nullptr with *err set. `off`: the test run's capability
-// override, applied after the patch's detection. SA2_D3D9GPU_NO_CLIPDIST=1 (on Android also the
+// Vulkan 1.3 and shader::VulkanFeatures, or Vulkan 1.1 and its 1.0 features where no device takes the
+// 1.3 profile); nullptr with *err set. `off`: the test run's capability override, applied after the
+// patch's detection. SA2_D3D9GPU_VK11=1 (on Android also the property debug.sa2.vk11=1) makes it at
+// Vulkan 1.1 on any device (GpuInfo::vk11). SA2_D3D9GPU_NO_CLIPDIST=1 (on Android also the
 // property debug.sa2.no_clipdist=1) makes the device without shaderClipDistance on any device (the
 // fallback a Mali GPU takes, forced for testing); SA2_D3D9GPU_NO_BC=1 (on Android also the property
 // debug.sa2.no_bc=1) samples no BC format (GpuInfo::bc_forced_off), the CPU decode a Mali GPU takes;
@@ -259,10 +276,12 @@ std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* e
 // d9g_gpu_cpu.cpp (tests only): every texture a byte array per level. The CPU model reports the
 // patch's two capabilities as given (a test parameter, as its device name is a test value),
 // shaderClipDistance as given (false: a Mali GPU's profile, ShaderProfile::no_clip_distance), the
-// BC formats as sampled or not (false: a Mali GPU's, GpuInfo::bc_unsupported), and
-// GpuInfo::depth_clamp_clip_only as given (true: a live session's draws without depth clip and clamp).
+// BC formats as sampled or not (false: a Mali GPU's, GpuInfo::bc_unsupported),
+// GpuInfo::depth_clamp_clip_only as given (true: a live session's draws without depth clip and clamp), and
+// the Vulkan 1.1 profile as given (true: a device made at 1.1, GpuInfo::vk11, DeviceFacts::vk11, and no
+// sub-dword access).
 std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border = false, bool clip_and_clamp = false, bool clip_distance = true,
-                                  bool bc = true, bool clip_only = false);
+                                  bool bc = true, bool clip_only = false, bool vk11 = false);
 // The CPU model's bytes of a subresource (tests read depth-stencil through it too):
 // BGRA8 as BGRA8; D24S8 as one uint32 per pixel, depth in bits 0-23 (unorm24) and
 // stencil in bits 24-31; a volume's level slice after slice. `layer`: a cube's face.

@@ -1461,7 +1461,8 @@ private:
 
 // One vkGetPhysicalDeviceProperties query of the device SDL_gpu chose, matched by its name, on
 // a throwaway instance through the loader SDL_gpu loaded (SDL_Vulkan_GetVkGetInstanceProcAddr):
-// the vendor ID and pointSizeRange[1] (R2b, d9g_gpu.h GpuInfo). It changes nothing SDL_gpu
+// the vendor ID and pointSizeRange[1] (R2b, d9g_gpu.h GpuInfo), and the device's apiVersion and type
+// with the loader's version (the 1.1 profile's record, and make_sdl_gpu's CPU-device rule). It changes nothing SDL_gpu
 // holds; the x87 control word and MXCSR are recorded around it with SDL_CreateGPUDevice's.
 void query_vulkan_device(SdlGpu* gpu) {
     GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
@@ -1479,6 +1480,10 @@ void query_vulkan_device(SdlGpu* gpu) {
     const uint16_t x87 = x87_cw();
     const uint32_t mx = mxcsr();
     if (create(&ci, nullptr, &inst) != VK_SUCCESS) { info.vk_query = "vkCreateInstance failed"; return; }
+    // the loader's version (GpuInfo::vk_instance_api): 1.0 where it has no vkEnumerateInstanceVersion
+    info.vk_instance_api = VK_API_VERSION_1_0;
+    if (auto version = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(gipa(VK_NULL_HANDLE, "vkEnumerateInstanceVersion")))
+        version(&info.vk_instance_api);
     auto enumerate = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(gipa(inst, "vkEnumeratePhysicalDevices"));
     auto props = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(gipa(inst, "vkGetPhysicalDeviceProperties"));
     auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(gipa(inst, "vkDestroyInstance"));
@@ -1495,6 +1500,8 @@ void query_vulkan_device(SdlGpu* gpu) {
                 info.vk_vendor_id = p.vendorID;
                 info.vk_device_id = p.deviceID;
                 info.vk_point_size_max = p.limits.pointSizeRange[1];
+                info.vk_device_api = p.apiVersion;
+                info.vk_device_type = uint32_t(p.deviceType);
             }
             if (matches == 1) { info.vk_query_ok = true; info.vk_query = "vkGetPhysicalDeviceProperties"; }
             else info.vk_query = std::to_string(matches) + " physical devices named " + info.device_name;
@@ -1512,14 +1519,15 @@ void query_vulkan_device(SdlGpu* gpu) {
 
 // The facts DXVK's shader options are computed from (R1, d9g_shader_profile.h), read from the
 // device SDL_gpu chose, matched by its name, by d9g_shader_vulkan.cpp's own query on a throwaway
-// Vulkan 1.3 instance through the loader SDL_gpu loaded. It changes nothing SDL_gpu holds; the x87
-// control word and MXCSR are recorded around it as around the properties query above.
-void query_shader_facts(SdlGpu* gpu) {
+// instance through the loader SDL_gpu loaded, at the level the device was made at (`level`: at vk11
+// no Vulkan 1.2 or 1.3 structure is read). It changes nothing SDL_gpu holds; the x87 control word and
+// MXCSR are recorded around it as around the properties query above.
+void query_shader_facts(SdlGpu* gpu, shader::ApiLevel level) {
     GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
     const uint16_t x87 = x87_cw();
     const uint32_t mx = mxcsr();
-    const shader::DeviceFactsQuery q =
-        shader::query_device_facts(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), info.device_name);
+    const shader::DeviceFactsQuery q = shader::query_device_facts(
+        reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), info.device_name, level);
     info.shader_facts_ok = q.ok;
     info.shader_facts_query = q.how;
     info.shader_facts = q.facts;
@@ -1534,9 +1542,10 @@ namespace {
 
 // One SDL_CreateGPUDeviceWithProperties with `features` and SDL's own opt-out demands `sdl`, the x87
 // control word and MXCSR recorded around it (`first`: before this attempt; a retry keeps the first
-// attempt's, so it hides no change).
+// attempt's, so it hides no change). `hardware_only` (DeviceRequest::hardware_only, the CPU step down's
+// 1.1 request alone): SDL_gpu refuses every device that is not a GPU.
 SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, const shader::VulkanFeatures::SdlDemands& sdl,
-                             bool first) {
+                             bool hardware_only, bool first) {
     Report& r = report();
     SDL_GPUVulkanOptions vo{};
     vo.vulkan_api_version = features.api_version();
@@ -1560,6 +1569,8 @@ SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, const
         SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false);
     if (!sdl.anisotropy)
         SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
+    if (hardware_only)
+        SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_REQUIRE_HARDWARE_ACCELERATION_BOOLEAN, true);
     if (first) {
         r.x87_before = x87_cw();
         r.mxcsr_before = mxcsr();
@@ -1598,23 +1609,6 @@ std::string sdl_dropped(const shader::VulkanFeatures::SdlDemands& sdl) {
     add(!sdl.depth_clamp, "depthClamp");
     add(!sdl.indirect_first_instance, "drawIndirectFirstInstance");
     add(!sdl.anisotropy, "samplerAnisotropy");
-    return out;
-}
-
-// The optional groups `features` asks for, and SDL's demands `sdl` leaves on, that `lacks` names, by
-// name ("" none).
-std::string dropped_names(const shader::VulkanFeatures& features, const shader::VulkanFeatures::SdlDemands& sdl,
-                          const shader::VulkanFeatures::Lacks& lacks) {
-    std::string out;
-    auto add = [&](bool dropped, const char* name) {
-        if (dropped) out += std::string(out.empty() ? "" : ", ") + name;
-    };
-    add(features.sub_dword() && lacks.sub_dword, "the sub-dword features");
-    add(features.clip_distance() && lacks.clip_distance, "shaderClipDistance");
-    add(features.scalar_layout() && lacks.scalar_layout, "scalarBlockLayout");
-    add(sdl.depth_clamp && lacks.depth_clamp, "SDL's depthClamp");
-    add(sdl.indirect_first_instance && lacks.indirect_first_instance, "SDL's drawIndirectFirstInstance");
-    add(sdl.anisotropy && lacks.anisotropy, "SDL's samplerAnisotropy");
     return out;
 }
 
@@ -1674,6 +1668,22 @@ constexpr const char kLiveSessionProperty[] = "sa2.live_session";
 // takes, on a device that has the feature) without shaderClipDistance; SA2_D3D9GPU_NO_DEPTH_CLAMP=1
 // without SDL's depthClamp. On Android the system properties debug.sa2.no_clipdist=1 and
 // debug.sa2.no_depth_clamp=1 ask the same (test_switch).
+//
+// The Vulkan 1.1 profile (shader::ApiLevel::vk11; GitHub #5's Adreno 610 offers Vulkan 1.1 only): where
+// SDL_gpu refuses the full 1.3 request and no device takes the 1.3 profile (each reports below 1.3 or
+// lacks one of its four 1.2 and 1.3 features: VulkanFeatures::Lacks::api13), the device is asked for at
+// API 1.1 with Vulkan 1.0 features (and the clip distance and SDL demands some device lacks dropped),
+// and every module is lowered to SPIR-V 1.3 (ShaderProfile::vk11); a refusal at 1.1 is retried as at
+// 1.3. Where SDL_gpu settles on a CPU device (lavapipe) at 1.3 while a GPU takes only the 1.1 profile,
+// the GPU is asked for at 1.1 instead, GPUs only (SDL_PROP_GPU_DEVICE_CREATE_VULKAN_REQUIRE_HARDWARE_
+// ACCELERATION_BOOLEAN); where SDL_gpu takes no GPU at 1.1 either (a non-conformant driver such as hasvk,
+// which it refuses whatever the version), the CPU device's 1.3 request is made again, as SDL_gpu chose it,
+// and said once on stderr. A device SDL_gpu makes at 1.3 although it reports below 1.3 (its driver fills
+// the 1.3 feature structures SDL_gpu checks) keeps the 1.3 profile it had before the 1.1 profile existed,
+// named on stderr and in the report (GpuInfo::vk13_below_device). A device that reports no Vulkan 1.1 is
+// refused by name before SDL_gpu is asked at 1.1. SA2_D3D9GPU_VK11=1 (on Android debug.sa2.vk11=1) asks at 1.1 from the start,
+// on any device. The choice is shader::next_device_request's; each step down is said once on stderr and
+// recorded (GpuInfo::vk11, vk11_reason, vk11_forced).
 std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* err) {
     const char* clip_prop = nullptr;
     const bool clip_forced_off = test_switch("SA2_D3D9GPU_NO_CLIPDIST", "debug.sa2.no_clipdist", &clip_prop);
@@ -1696,98 +1706,215 @@ std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* e
         std::fprintf(stderr, "d3d9gpu: %s: the Vulkan device is made without depthClamp, so with no depth clip and "
                              "clamp, and the draws are clipped at the near and far planes without the clamp\n",
                      clamp_prop ? "debug.sa2.no_depth_clamp=1" : "SA2_D3D9GPU_NO_DEPTH_CLAMP=1");
-    std::unique_ptr<shader::VulkanFeatures> features =
-        std::make_unique<shader::VulkanFeatures>(!off.sub_dword, !clip_forced_off);
-    shader::VulkanFeatures::SdlDemands sdl;
-    sdl.depth_clamp = !clamp_forced_off;
-    SDL_GPUDevice* dev = create_device(debug, *features, sdl, true);
-    std::string lacking;
-    if (!dev) {
-        std::string why = std::string("SDL_CreateGPUDeviceWithProperties (Vulkan 1.3, ") + features->describe() +
-                          (sdl_dropped(sdl).empty() ? "" : ", SDL without " + sdl_dropped(sdl)) + "): " + SDL_GetError();
-        bool fits = false;
-        shader::VulkanFeatures::Lacks lacks;
-        lacking = lacking_features(*features, sdl, &fits, &lacks);
-        if (!fits) {
-            for (int attempt = 0; attempt < 2 && !dev; attempt++) {
-                if (attempt) lacks = shader::VulkanFeatures::Lacks::all();   // the second: without every optional one
-                const std::string names = dropped_names(*features, sdl, lacks);
-                if (names.empty()) continue;
-                features = std::make_unique<shader::VulkanFeatures>(features->sub_dword() && !lacks.sub_dword,
-                                                                    features->clip_distance() && !lacks.clip_distance,
-                                                                    features->scalar_layout() && !lacks.scalar_layout);
-                sdl = {sdl.depth_clamp && !lacks.depth_clamp, sdl.indirect_first_instance && !lacks.indirect_first_instance,
-                       sdl.anisotropy && !lacks.anisotropy};
-                dev = create_device(debug, *features, sdl, false);
-                if (!dev)
-                    why += "; without " + names + " (" + features->describe() +
-                           (sdl_dropped(sdl).empty() ? "" : ", SDL without " + sdl_dropped(sdl)) + "): " + SDL_GetError();
-            }
-        }
-        if (!dev) {
-            *err = why + "; the features each Vulkan device lacks: " + lacking;
+    // SA2_D3D9GPU_VK11=1 (on Android also debug.sa2.vk11=1): the device is made at Vulkan 1.1 and the
+    // shaders lowered to SPIR-V 1.3, as on a GPU whose driver offers only 1.1 (an Adreno 610), on any device.
+    const char* vk11_prop = nullptr;
+    const bool vk11_forced = test_switch("SA2_D3D9GPU_VK11", "debug.sa2.vk11", &vk11_prop);
+    const std::string vk11_switch = !vk11_forced ? "" : vk11_prop ? "debug.sa2.vk11=1" : "SA2_D3D9GPU_VK11=1";
+    if (vk11_forced)
+        std::fprintf(stderr, "d3d9gpu: %s: the Vulkan device is made at API 1.1 and the shaders are lowered to SPIR-V 1.3\n",
+                     vk11_switch.c_str());
+    using shader::DeviceAnswer;
+    using shader::DeviceRequest;
+    using shader::DeviceStep;
+    DeviceRequest req = shader::first_device_request(vk11_forced, off.sub_dword, clip_forced_off, clamp_forced_off);
+    auto features_for = [](const DeviceRequest& r) {
+        return std::make_unique<shader::VulkanFeatures>(r.sub_dword, r.clip_distance, r.scalar_layout, r.level);
+    };
+    std::unique_ptr<shader::VulkanFeatures> features = features_for(req);
+    auto level_name = [](const DeviceRequest& r) { return r.level == shader::ApiLevel::vk11 ? "1.1" : "1.3"; };
+    // What the devices lack of the request (read at its level's first refusal; for the vk11 switch before
+    // its first request), and the text of each level's reading for the error and the report.
+    shader::VulkanFeatures::Lacks lacks;
+    bool fits = false, read = false;
+    std::string lacking, lacking13, why, vk11_reason = vk11_forced ? "forced (" + vk11_switch + ")" : "";
+    if (vk11_forced) {
+        lacking = lacking_features(*features, req.sdl, &fits, &lacks);
+        read = true;
+        if (shader::next_device_request(req, DeviceAnswer::unasked, 0, lacks, fits).kind == DeviceStep::refuse_api11) {
+            *err = "no Vulkan device reports 1.1 or later (" + lacking + "): the renderer needs Vulkan 1.1";
             return nullptr;
         }
-        if (!features->sub_dword() && !off.sub_dword)
+    }
+    // Each request's part of the error: the first, a step down, a retry within a level.
+    std::string label = std::string("SDL_CreateGPUDeviceWithProperties (Vulkan ") + level_name(req) + ", ";
+    bool first = true, refused_once = false, cpu_step_down = false;
+    int retry = 0;
+    std::unique_ptr<SdlGpu> gpu;
+    // The CPU step down's way back (DeviceStep::restore): the 1.3 request SDL_gpu accepted on the CPU device
+    // (DeviceStep::fallback), the CPU device's name, and what the report and the errors held then.
+    struct CpuDevice13 {
+        DeviceRequest req;
+        std::string device_name, lacking, lacking13;
+        bool refused_once = false;
+    } cpu13;
+    std::string refusal;   // SDL_GetError() of the last refusal
+    for (;;) {
+        SDL_GPUDevice* dev = create_device(debug, *features, req.sdl, req.hardware_only, first);
+        first = false;
+        DeviceAnswer answer = DeviceAnswer::refused;
+        shader::VulkanFeatures::Lacks cpu_lacks;
+        bool cpu_fits = false;
+        std::string cpu_lacking;
+        if (dev) {
+            gpu = std::make_unique<SdlGpu>(dev, debug, off);
+            // An SDL marked as patched reports the patch's properties, and an unmarked one none: either
+            // other way, the library is not the configuration it says it is (an unmarked patched SDL,
+            // or a mark without the patch), and nothing runs on it.
+            const GpuInfo& g = gpu->info();
+            if (g.sdl_patched != g.sdl_capabilities_present) {
+                *err = "the SDL3 loaded (" + g.sdl_revision + ") is " + (g.sdl_patched ? "marked as patched" : "not marked as patched") +
+                       " but " + (g.sdl_capabilities_present ? "reports" : "does not report") +
+                       " the patch's device properties (patches/sdl3)";
+                return nullptr;
+            }
+            query_vulkan_device(gpu.get());
+            answer = DeviceAnswer::accepted;
+            if (g.vk_device_type == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+                answer = DeviceAnswer::accepted_cpu;
+                // SDL_gpu chose a CPU device at 1.3: read whether a GPU would take the 1.1 profile instead
+                // (not on the CPU device's 1.3 gone back to, which is kept)
+                if (req.level == shader::ApiLevel::vk13 && !req.cpu_settled)
+                    cpu_lacking = lacking_features(*features, req.sdl, &cpu_fits, &cpu_lacks);
+            }
+        } else {
+            refused_once = true;
+            refusal = SDL_GetError();
+            why += label + features->describe() + (sdl_dropped(req.sdl).empty() ? "" : ", SDL without " + sdl_dropped(req.sdl)) +
+                   "): " + refusal;
+            if (!read) {
+                lacking = lacking_features(*features, req.sdl, &fits, &lacks);
+                if (req.level == shader::ApiLevel::vk13) lacking13 = lacking;
+                read = true;
+            }
+        }
+        const bool cpu = answer == DeviceAnswer::accepted_cpu;
+        const DeviceStep step = shader::next_device_request(req, answer, retry, cpu ? cpu_lacks : lacks, cpu ? cpu_fits : fits);
+        if (step.kind == DeviceStep::done) break;
+        if (step.kind == DeviceStep::refuse_api11) {
+            *err = "no Vulkan device reports 1.1 or later (" + lacking + "): the renderer needs Vulkan 1.1; " + why;
+            return nullptr;
+        }
+        if (step.kind == DeviceStep::give_up) {
+            *err = why + "; the features each Vulkan device lacks: " + (lacking13.empty() ? lacking : lacking13) +
+                   (!lacking13.empty() && lacking != lacking13 ? "; at Vulkan 1.1: " + lacking : "");
+            return nullptr;
+        }
+        if (step.kind == DeviceStep::restore) {
+            // No GPU took the GPU-only 1.1 request (SDL_gpu refuses a non-conformant driver, or one without a
+            // present queue, which the reading does not see): the CPU device's 1.3, as SDL_gpu chose it, with
+            // the report it had then (no vk11, the lacks as they were).
+            std::fprintf(stderr, "d3d9gpu: no GPU took the Vulkan 1.1 request either (%s): the CPU device %s is made at "
+                                 "API 1.3, as SDL_gpu chose it\n",
+                         cpu ? ("SDL_gpu chose the CPU device " + gpu->info().device_name + " again").c_str() : refusal.c_str(),
+                         cpu13.device_name.c_str());
+            gpu.reset();
+            req = cpu13.req;
+            refused_once = cpu13.refused_once;
+            lacking = cpu13.lacking;
+            lacking13 = cpu13.lacking13;
+            vk11_reason.clear();
+            cpu_step_down = false;
+            label = "; the CPU device at Vulkan 1.3 again (";
+            retry = 0;
+            features = features_for(req);
+            continue;
+        }
+        if (step.step_down) {
+            if (cpu) {
+                cpu13 = {step.fallback, gpu->info().device_name, lacking, lacking13, refused_once};
+                vk11_reason = "SDL_gpu chose the CPU device " + gpu->info().device_name + " at Vulkan 1.3, and a GPU takes "
+                              "only the 1.1 profile (" + cpu_lacking + ")";
+                lacking = cpu_lacking;
+                cpu_step_down = true;
+                // said once a GPU takes it (after the loop): where none does, the CPU device keeps its 1.3
+                label = "; at Vulkan 1.1, GPUs only (";
+            } else {
+                vk11_reason = "no Vulkan device takes the 1.3 profile (" + lacking + ")";
+                std::fprintf(stderr, "d3d9gpu: %s: the device is made at API 1.1 and the shaders are lowered to SPIR-V 1.3\n",
+                             vk11_reason.c_str());
+                label = "; at Vulkan 1.1 (";
+            }
+            gpu.reset();   // the CPU device's, if any
+            retry = 0;
+            read = false;
+        } else {
+            label = "; without " + step.dropped + " (";
+            retry = step.retry + 1;
+        }
+        req = step.request;
+        features = features_for(req);
+    }
+    const bool vk11 = features->level() == shader::ApiLevel::vk11;
+    if (vk11 && cpu_step_down)
+        std::fprintf(stderr, "d3d9gpu: %s: the device is made at API 1.1 on the GPU %s and the shaders are lowered to "
+                             "SPIR-V 1.3\n", vk11_reason.c_str(), gpu->info().device_name.c_str());
+    // SDL_gpu made the device at 1.3 on a driver that reports below it (it compares no version, only the
+    // feature structures, which some drivers fill above their own version): run as before the 1.1 profile
+    // existed, its facts read in full (query_device_facts at vk13), and named here and in the report.
+    const std::string below13 = vk11 ? "" : shader::device_below13_note(gpu->info().vk_device_api);
+    if (!below13.empty()) std::fprintf(stderr, "d3d9gpu: %s\n", below13.c_str());
+    // What each retry dropped, said once (and at vk11 not the sub-dword features or scalarBlockLayout, which
+    // the 1.1 profile goes without on any device: the step down said so). The devices' lacks are reported
+    // where they changed the request: after a refusal, or the step down from a CPU device; the vk11 switch's
+    // reading before its first request is not.
+    const bool lacking_used = refused_once || cpu_step_down;
+    if (lacking_used) {
+        if (!vk11 && !features->sub_dword() && !off.sub_dword)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks the sub-dword features (%s): the shaders read their "
                                  "state as 32-bit words\n", lacking.c_str());
-        if (!features->scalar_layout())
+        if (!vk11 && !features->scalar_layout())
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks scalarBlockLayout (%s): made without it, which no "
                                  "shader needs\n", lacking.c_str());
         if (!features->clip_distance() && !clip_forced_off)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks shaderClipDistance (%s): the vertex shaders write no "
                                  "ClipDistance, and a draw with a user clip plane enabled is refused\n", lacking.c_str());
-        if (!sdl.depth_clamp && !clamp_forced_off)
+        if (!req.sdl.depth_clamp && !clamp_forced_off)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks depthClamp (%s): made without it, so with no depth "
                                  "clip and clamp\n", lacking.c_str());
-        if (!sdl.indirect_first_instance)
+        if (!req.sdl.indirect_first_instance)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks drawIndirectFirstInstance (%s): made without it, "
                                  "which no draw needs (no indirect draw is issued)\n", lacking.c_str());
-        if (!sdl.anisotropy)
+        if (!req.sdl.anisotropy)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks samplerAnisotropy (%s): made without it; a sampler "
                                  "that asks for anisotropic filtering is made without it\n", lacking.c_str());
     }
-    auto gpu = std::make_unique<SdlGpu>(dev, debug, off);
-    // An SDL marked as patched reports the patch's properties, and an unmarked one none: either
-    // other way, the library is not the configuration it says it is (an unmarked patched SDL,
-    // or a mark without the patch), and nothing runs on it.
+    const shader::VulkanFeatures::SdlDemands& sdl = req.sdl;
     const GpuInfo& g = gpu->info();
-    if (g.sdl_patched != g.sdl_capabilities_present) {
-        *err = "the SDL3 loaded (" + g.sdl_revision + ") is " + (g.sdl_patched ? "marked as patched" : "not marked as patched") +
-               " but " + (g.sdl_capabilities_present ? "reports" : "does not report") +
-               " the patch's device properties (patches/sdl3)";
-        return nullptr;
-    }
-    query_vulkan_device(gpu.get());
     GpuInfo& info = const_cast<GpuInfo&>(gpu->info());
     info.vulkan_options = features->describe();
     info.sub_dword_access = features->sub_dword();
     info.clip_distance = features->clip_distance();
     info.clip_distance_forced_off = clip_forced_off;
     info.bc_forced_off = bc_forced_off;
-    info.vulkan_lacking = lacking;
+    info.vulkan_lacking = lacking_used ? lacking : "";
     info.sdl_features_dropped = sdl_dropped(sdl);
     info.sampler_anisotropy = sdl.anisotropy;
     info.depth_clamp_forced_off = clamp_forced_off;
+    info.vk11 = vk11;
+    info.vk11_reason = vk11 ? vk11_reason : "";
+    info.vk11_forced = vk11_switch;
+    info.vk13_below_device = !below13.empty();
     info.live_session = SDL_GetBooleanProperty(SDL_GetGlobalProperties(), kLiveSessionProperty, false);
     info.depth_clamp_clip_only = !info.depth_clip_and_clamp && (info.live_session || clamp_forced_off);
     // Without depth clip and clamp every pipeline owes the clamp (R_DEPTH_CLAMP), so say once which
     // way the draws go: clip-only, or refused by name.
     if (!info.depth_clip_and_clamp) {
-        const char* why = !info.sdl_capabilities_present ? "the SDL3 loaded is not the patched one (patches/sdl3)"
-                          : info.depth_clip_and_clamp_detected ? "forced off by a test run (SA2_D3D9GPU_CAPS_OFF)"
-                          : !sdl.depth_clamp ? "the device was made without depthClamp"
-                                             : "the device has no depthClipEnable (VK_EXT_depth_clip_enable) beside depthClamp";
-        std::fprintf(stderr, "d3d9gpu: no depth clip and clamp (%s): %s\n", why,
+        const char* why_not = !info.sdl_capabilities_present ? "the SDL3 loaded is not the patched one (patches/sdl3)"
+                              : info.depth_clip_and_clamp_detected ? "forced off by a test run (SA2_D3D9GPU_CAPS_OFF)"
+                              : !sdl.depth_clamp ? "the device was made without depthClamp"
+                                                 : "the device has no depthClipEnable (VK_EXT_depth_clip_enable) beside depthClamp";
+        std::fprintf(stderr, "d3d9gpu: no depth clip and clamp (%s): %s\n", why_not,
                      info.depth_clamp_clip_only
                          ? "the draws are clipped at the near and far planes without the clamp"
                          : "outside a live session each draw is refused (DEPTH_CLAMP_FALLBACK_OWED); "
                            "SA2_D3D9GPU_NO_DEPTH_CLAMP=1 draws them clip-only");
     }
-    query_shader_facts(gpu.get());
+    query_shader_facts(gpu.get(), features->level());
     // the profile's facts are what the device was made with, not what it could have been
     info.shader_facts.sub_dword_access = features->sub_dword();
     info.shader_facts.clip_distance = features->clip_distance();
+    info.shader_facts.vk11 = vk11;
     if (!g.shader_facts_ok) {
         *err = "the shader translator's device facts could not be read (" + g.shader_facts_query +
                "): without them it cannot compile as DXVK compiles on this device";

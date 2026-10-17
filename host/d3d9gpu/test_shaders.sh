@@ -51,6 +51,13 @@
 #        capture layer on the same load: the modules SDL_gpu handed the driver are the modules the load
 #        wrote (C3's host-2 side); its control, the same load on SDL's default device (no feature
 #        chain), must print validation errors (the layer is loaded and its errors are seen)
+#   C2 at Vulkan 1.1  the same load with --vk11: SDL_gpu's device made at API 1.1 with Vulkan 1.0 features,
+#        the 1.1 profile, every module lowered to SPIR-V 1.3 (d9g_shader_abi.cpp lower_vk11); the same pass
+#        conditions, every module written at SPIR-V 1.3, and every device the capture saw made at API 1.1
+#        with no Vulkan 1.1, 1.2 or 1.3 feature structure; its control, the 1.3 profile's unlowered modules
+#        on the same device (--vk11-unlowered), must print the version's and the capabilities' VUIDs
+#        (08737, 08740) and no other (validation_run.py CONTROL_VUIDS); the layer's shader cache is off
+#        (LAYER_SETTINGS), since its key ignores the target environment
 #   C3   the canonical diff against DXVK, from two DXVK sources: the DXVK player over the four
 #        streams with DXVK_SHADER_DUMP_PATH (the graphics-pipeline-library variant: spv_canon.py
 #        --batch, every one of the 26 objects as the base, unspecialized) and the capture layer (vkcap)
@@ -241,6 +248,12 @@ for drv in nvidia lvp; do
   env "${GPUENV[@]}" $(layer_env) "${OBSERVER[@]}" --record "$D/validation/load-control.json" -- "$SHADERC" load "$R/plan.json" "$D/load-control" --no-features > "$D/load-control.txt" 2>&1
   "${TOOL[@]}" load --run "$R" --driver $drv --log "$D/load.txt" --control-log "$D/load-control.txt" --plan "$R/plan.json" \
     --out-dir "$D/load" --capture "$D/load-capture" || bad "C2 on $drv"
+  echo "== $drv: C2 at Vulkan 1.1: every shader lowered to SPIR-V 1.3 on SDL_gpu's 1.1 device, under the validation layer"
+  mkdir -p "$D/load-vk11" "$D/load-vk11-control"
+  env "${GPUENV[@]}" $(cap_layer_env "$D/load-vk11-capture") "${OBSERVER[@]}" --record "$D/validation/load-vk11.json" -- "$SHADERC" load "$R/plan.json" "$D/load-vk11" --vk11 > "$D/load-vk11.txt" 2>&1
+  env "${GPUENV[@]}" $(layer_env) "${OBSERVER[@]}" --record "$D/validation/load-vk11-control.json" -- "$SHADERC" load "$R/plan.json" "$D/load-vk11-control" --vk11-unlowered > "$D/load-vk11-control.txt" 2>&1
+  "${TOOL[@]}" load --run "$R" --driver $drv-vk11 --vk11 --log "$D/load-vk11.txt" --control-log "$D/load-vk11-control.txt" \
+    --plan "$R/plan.json" --out-dir "$D/load-vk11" --capture "$D/load-vk11-capture" || bad "C2 at Vulkan 1.1 on $drv"
   # host 2's base (the word off) of every specialized pair and border variant, for C12 (no GPU)
   "${TOOL[@]}" bases --plan "$R/plan.json" --shaderc "$SHADERC" --facts "$R/facts-$drv.json" --named "$R/named" \
     --out "$D/bases" > "$D/bases.txt" 2>&1 || bad "the bases of the specialized modules on $drv ($D/bases.txt)"

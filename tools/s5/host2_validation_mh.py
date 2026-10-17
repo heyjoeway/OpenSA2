@@ -206,6 +206,8 @@ def run(args) -> int:
         "SA2_VALIDATION_API_VERSION": selected["api_version"]})
     if args.control:
         env.update({"SA2_D3D9GPU_TEST_RUN": "1", "SA2_D3D9GPU_SHADER_FAULT": args.control})
+    if args.vk11:   # the Vulkan 1.1 profile, forced (the device's report says so: sdl_gpu.vk11.forced)
+        env["SA2_D3D9GPU_VK11"] = "1"
     player_args = [str(stream), "--stage", str(ch.METAL_HARBOR["stage"]), "--report", str(out / "report.json")]
     if not args.no_frames:
         frames = out / "frames.y4m"
@@ -219,7 +221,7 @@ def run(args) -> int:
             "--", str(player), *player_args]
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     (out / "command.json").write_text(json.dumps({
-        "argv": argv, "started": started, "control": args.control, "max_frames": args.max_frames,
+        "argv": argv, "started": started, "control": args.control, "vk11": args.vk11, "max_frames": args.max_frames,
         "readback": not args.no_frames,
         "stream_sha256": stream_sha, "player_sha256": sha256(player),
         "build_record": {"path": str(build_record), "sha256": sha256(build_record)}, "pipeline": pipeline_now(),
@@ -426,6 +428,7 @@ def summary(held: dict) -> dict:
                    "VK_INSTANCE_LAYERS": get_env(device, "VK_INSTANCE_LAYERS"),
                    **{k: get_env(device, k) for k in FAULT_SWITCHES},
                    "sdl_patched": gpu.get("sdl_patched"), "capability_override": gpu.get("capability_override"),
+                   "vk11": gpu.get("vk11"),
                    "present": {k: (device.get("present") or {}).get(k) for k in
                                ("mode", "swapchain_mode", "presents", "presented", "frames_without_swapchain_texture", "failures")},
                    "draws": {k: (device.get("draws") or {}).get(k) for k in
@@ -496,6 +499,11 @@ def leg_failures(held: dict, label: str, control: str | None) -> list[str]:
     got = {k: get_env(held["device"], k) for k in FAULT_SWITCHES}
     if got != want:
         f.append(f"{label}: the device's fault switches were {got}, not {want}")
+    # the Vulkan 1.1 profile: forced exactly where the command forced it (the report has no env line for it)
+    vk11 = (held["device"].get("sdl_gpu") or {}).get("vk11")
+    forced = (vk11 or {}).get("forced") == "SA2_D3D9GPU_VK11=1"
+    if bool(command.get("vk11")) != forced or (command.get("env") or {}).get("SA2_D3D9GPU_VK11", "") != ("1" if forced else ""):
+        f.append(f"{label}: the run asked for the 1.1 profile {bool(command.get('vk11'))}, and the device reports {vk11}")
     loose = s["loose"]
     if (loose["validation_error_lines"] != s["errors"] or loose["validation_warning_lines"] != s["warnings"]
             or (loose["vuid_lines"] and not s["errors"] + s["warnings"])
@@ -686,7 +694,8 @@ def receipt(args) -> int:
         "scope": "host 2 (sa2_player_gpu on SDL_gpu's Vulkan backend, NVIDIA) playing the registered Metal Harbor "
                  "stream to its end under the pinned Khronos validation layer at its compiled defaults: each run's "
                  "settings file is validation_run.py's LAYER_SETTINGS, which sets only where and how messages are "
-                 "reported, and no VK_* variable sets a feature, "
+                 "reported and turns the layer's shader cache off (its key ignores the target environment), and no "
+                 "VK_* variable sets a feature, "
                  f"so the layer's built-in values applied (on: {on}; off: {off}). The manifest also lists a "
                  f"legacy 'disables' default ({', '.join(defaults.get('disables') or []) or 'none'}): that is a "
                  "vkconfig preset, which the layer reads only when a settings file or the environment sets "
@@ -815,6 +824,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--out", required=True, help="a fresh run directory under private/")
     r.add_argument("--max-frames", type=int, default=0)
     r.add_argument("--control", choices=sorted(CONTROLS), help="the positive control's translator fault (a test run)")
+    r.add_argument("--vk11", action="store_true",
+                   help="the Vulkan 1.1 profile forced (SA2_D3D9GPU_VK11=1): the device at API 1.1, SPIR-V 1.3 modules")
     r.add_argument("--no-frames", action="store_true",
                    help="no --frames-out: the play path alone, as host/d3d9gpu/test_d3d9gpu.sh step 5 runs it")
     w = sub.add_parser("receipt", help="write the receipt from retained runs; launches nothing")

@@ -11,8 +11,10 @@
 //     where the pipeline itself carries the vertex input interface, null where it does not, and
 //     "dynamic" where it is dynamic state), as one JSON line each in VKCAP_OUT/pipelines.jsonl;
 //   - every vkCreateDevice: the enabled extensions, the sType of every structure in the create
-//     info's pNext chain (the loader's own excepted), and the depthClamp and depthClipEnable
-//     features it enables, one JSON line each in VKCAP_OUT/devices.jsonl;
+//     info's pNext chain (the loader's own excepted), the depthClamp and depthClipEnable
+//     features it enables, and the apiVersion its instance was created with (VkApplicationInfo's,
+//     "1.0.0" without one; null for an instance the layer did not see created), one JSON line each
+//     in VKCAP_OUT/devices.jsonl;
 //   - every vkCreateSampler: its device, address modes and border colour, in
 //     VKCAP_OUT/samplers.jsonl.
 // Every record carries "load", the process and the moment the loader loaded this layer: the loader
@@ -96,6 +98,7 @@ typedef struct {
   PFN_vkGetInstanceProcAddr gipa;
   PFN_vkDestroyInstance destroy_instance;
   PFN_vkCreateDevice create_device;
+  uint32_t api_version;   // VkApplicationInfo::apiVersion (1.0 without one)
 } InstanceDispatch;
 typedef struct {
   void* key;
@@ -384,11 +387,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL vkcap_CreateSampler(VkDevice device, const
 
 // devices.jsonl: what the application asked of vkCreateDevice, written after the call with its
 // result, so a device whose creation fails is recorded too. Called with g_lock held.
-static void record_device(unsigned long id, const VkDeviceCreateInfo* ci, VkResult r) {
+static void record_device(unsigned long id, const VkDeviceCreateInfo* ci, VkResult r, const InstanceDispatch* inst) {
   if (!out_dir()) return;
   FILE* f = open_record("devices.jsonl");
   if (!f) return;
-  fprintf(f, "{\"load\": \"%s\", \"seq\": %lu, \"result\": %d, \"extensions\": [", g_load, id, (int)r);
+  fprintf(f, "{\"load\": \"%s\", \"seq\": %lu, \"result\": %d, \"instance_api_version\": ", g_load, id, (int)r);
+  if (inst) fprintf(f, "\"%u.%u.%u\", ", VK_API_VERSION_MAJOR(inst->api_version), VK_API_VERSION_MINOR(inst->api_version),
+                    VK_API_VERSION_PATCH(inst->api_version));
+  else fprintf(f, "null, ");
+  fprintf(f, "\"extensions\": [");
   for (uint32_t i = 0; i < ci->enabledExtensionCount; i++)
     fprintf(f, "%s\"%s\"", i ? ", " : "", ci->ppEnabledExtensionNames[i]);
   fprintf(f, "], \"pnext\": [");
@@ -424,7 +431,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL vkcap_CreateDevice(VkPhysicalDevice phys, 
   VkResult r = create(phys, ci, alloc, device);
   pthread_mutex_lock(&g_lock);
   unsigned long dev_id = g_device_seq++;
-  record_device(dev_id, ci, r);
+  record_device(dev_id, ci, r, id);
   pthread_mutex_unlock(&g_lock);
   if (r != VK_SUCCESS) return r;
   pthread_mutex_lock(&g_lock);
@@ -471,6 +478,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL vkcap_CreateInstance(const VkInstanceCreat
     g_instances[i].gipa = gipa;
     g_instances[i].destroy_instance = (PFN_vkDestroyInstance)gipa(*instance, "vkDestroyInstance");
     g_instances[i].create_device = (PFN_vkCreateDevice)gipa(*instance, "vkCreateDevice");
+    g_instances[i].api_version = ci->pApplicationInfo && ci->pApplicationInfo->apiVersion ? ci->pApplicationInfo->apiVersion
+                                                                                         : VK_API_VERSION_1_0;
     break;
   }
   pthread_mutex_unlock(&g_lock);

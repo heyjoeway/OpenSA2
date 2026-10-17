@@ -19,6 +19,10 @@
 
 #include <SDL3/SDL_gpu.h>
 
+// The pinned SDL tarball's Khronos headers (build.sh): the vk11 detection test's stub Vulkan driver.
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,6 +31,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -1750,6 +1755,1045 @@ void test_pipeline_streams() {
     CHECK(da.n_vbs == 1 && d9g::key_of(da, a, true).bytes == d9g::key_of(db, b, true).bytes);
 }
 
+// ---------------------------------------------------------------- the Vulkan 1.1 profile
+// A device whose driver offers only Vulkan 1.1 or 1.2 (GitHub #5's Adreno 610) gets the 1.1 profile:
+// SDL_gpu's device made at API 1.1 with Vulkan 1.0 features, every module lowered to SPIR-V 1.3
+// (d9g_shader_abi.cpp lower_vk11), the profile's record marked host2.vk11=1. The 1.3 path keeps its
+// record, its feature request and its report.
+namespace {
+
+using d9g::shader::ApiLevel;
+
+// SPIR-V words of one instruction: its opcode and operands.
+std::vector<uint32_t> spv(uint32_t op, std::vector<uint32_t> operands = {}) {
+    std::vector<uint32_t> w{(uint32_t(operands.size() + 1) << 16) | op};
+    w.insert(w.end(), operands.begin(), operands.end());
+    return w;
+}
+// A literal string's words (NUL-terminated, little-endian, padded).
+std::vector<uint32_t> spv_str(const std::string& s) {
+    std::vector<uint32_t> w((s.size() + 4) / 4, 0);
+    for (size_t i = 0; i < s.size(); i++) w[i / 4] |= uint32_t(uint8_t(s[i])) << (8 * (i % 4));
+    return w;
+}
+// An instruction with more operand words (a string, interface ids): its word count follows.
+std::vector<uint32_t> cat(std::vector<uint32_t> a, const std::vector<uint32_t>& b) {
+    a.insert(a.end(), b.begin(), b.end());
+    a[0] = (uint32_t(a.size()) << 16) | (a[0] & 0xffffu);
+    return a;
+}
+using SpvModule = std::vector<std::vector<uint32_t>>;   // instructions
+std::vector<uint32_t> spv_words(const SpvModule& m, uint32_t version = 0x00010600u) {
+    std::vector<uint32_t> w{0x07230203u, version, 0u, 100u, 0u};
+    for (const auto& i : m) w.insert(w.end(), i.begin(), i.end());
+    return w;
+}
+// The index of the first instruction with opcode `op` (and, with `operand1`, that first operand).
+size_t spv_find(const SpvModule& m, uint32_t op, int64_t operand1 = -1) {
+    for (size_t i = 0; i < m.size(); i++)
+        if ((m[i][0] & 0xffffu) == op && (operand1 < 0 || (m[i].size() > 1 && m[i][1] == uint32_t(operand1)))) return i;
+    return m.size();
+}
+
+// A fragment module shaped as dxbc-spirv builds an alpha test: SPIR-V 1.6, PhysicalStorageBuffer64
+// Vulkan, the entry interface listing a uniform buffer beside its input and output, and
+// if (alpha < 0.5) { demote } store. Ids: %10 main, %20 input, %21 output, %22 uniform buffer, %30 the
+// entry block, %31 the demote's block, %32 the merge.
+SpvModule alpha_module(uint32_t model = 4) {
+    return {
+        spv(17, {1}), spv(17, {5347}), spv(17, {5345}), spv(17, {5379}),
+        cat(spv(11, {1}), spv_str("GLSL.std.450")),
+        spv(14, {5348, 3}),
+        cat(cat(spv(15, {model, 10}), spv_str("main")), {20, 21, 22}),
+        spv(16, {10, 7}),
+        spv(19, {2}), spv(33, {3, 2}), spv(22, {4, 32}), spv(23, {5, 4, 4}),
+        spv(32, {6, 1, 5}), spv(32, {7, 3, 5}), spv(20, {8}), spv(30, {9, 5}), spv(32, {11, 2, 9}),
+        spv(59, {6, 20, 1}), spv(59, {7, 21, 3}), spv(59, {11, 22, 2}), spv(43, {4, 12, 0x3f000000u}),
+        spv(54, {2, 10, 0, 3}),
+        spv(248, {30}), spv(61, {5, 13, 20}), spv(81, {4, 14, 13, 3}), spv(184, {8, 15, 14, 12}),
+        spv(247, {32, 0}), spv(250, {15, 31, 32}),
+        spv(248, {31}), spv(5380), spv(249, {32}),
+        spv(248, {32}), spv(62, {21, 13}), spv(253),
+        spv(56)};
+}
+
+}  // namespace
+
+// (a) The profile: the CPU model's 1.3 record, line for line (the record every 1.3 cache key holds), and
+// the 1.1 profile's: state words, no float-control mode, no resource indexing, host2.vk11=1. The facts
+// file names vk11 only when set.
+void test_vk11_profile() {
+    using namespace d9g::shader;
+    auto gpu = d9g::make_cpu_gpu();
+    const DeviceFacts facts = gpu->info().shader_facts;
+    CHECK(!facts.vk11);
+    const std::string rec13 =
+        "compile.enable_sample_rate_shading=0\ncompile.lower_constant_arrays=0\ncompile.lower_f32_to_f16=1\n"
+        "compile.lower_ftoi=1\ncompile.lower_in_bounds_cbv_to_bda=0\ncompile.lower_itof=0\ncompile.lower_sin_cos=0\n"
+        "compile.semantic_io=1\ncompile.supports_16bit_arithmetic=0\ncompile.supports_sub_dword_push_data=1\n"
+        "compile.typed_r32_load_requires_format=0\nd3d9.fast_float_emulation=0\nlimits.max_uniform_buffer_count=-1\n"
+        "limits.max_uniform_buffer_size=65536\nlimits.min_storage_buffer_alignment=16\nspirv.denorm_flush16=0\n"
+        "spirv.denorm_flush32=0\nspirv.denorm_flush64=0\nspirv.denorm_preserve16=1\nspirv.denorm_preserve32=1\n"
+        "spirv.denorm_preserve64=1\nspirv.export_point_size=0\nspirv.independent_denorm_mode=1\n"
+        "spirv.independent_round_mode=1\nspirv.rte16=1\nspirv.rte32=1\nspirv.rte64=1\nspirv.rtz16=0\nspirv.rtz32=0\n"
+        "spirv.rtz64=0\nspirv.supports_descriptor_heap=0\nspirv.supports_float_controls2=0\n"
+        "spirv.supports_nv_raw_access_chains=0\nspirv.supports_resource_indexing=1\nspirv.sz_inf_nan_preserve16=1\n"
+        "spirv.sz_inf_nan_preserve32=1\nspirv.sz_inf_nan_preserve64=1\n";
+    const ShaderProfile p13 = determine_profile(facts);
+    CHECK(p13.record() == rec13);
+    if (p13.record() != rec13) std::printf("  the 1.3 record:\n%s", p13.record().c_str());
+    CHECK(!p13.vk11 && !p13.state_words);
+    DeviceFacts f11 = facts;
+    f11.vk11 = true;
+    const std::string rec11 =
+        "compile.enable_sample_rate_shading=0\ncompile.lower_constant_arrays=0\ncompile.lower_f32_to_f16=1\n"
+        "compile.lower_ftoi=1\ncompile.lower_in_bounds_cbv_to_bda=0\ncompile.lower_itof=0\ncompile.lower_sin_cos=0\n"
+        "compile.semantic_io=1\ncompile.supports_16bit_arithmetic=0\ncompile.supports_sub_dword_push_data=0\n"
+        "compile.typed_r32_load_requires_format=0\nd3d9.fast_float_emulation=0\nhost2.state_words=1\nhost2.vk11=1\n"
+        "limits.max_uniform_buffer_count=-1\nlimits.max_uniform_buffer_size=65536\nlimits.min_storage_buffer_alignment=16\n"
+        "spirv.denorm_flush16=0\nspirv.denorm_flush32=0\nspirv.denorm_flush64=0\nspirv.denorm_preserve16=0\n"
+        "spirv.denorm_preserve32=0\nspirv.denorm_preserve64=0\nspirv.export_point_size=0\n"
+        "spirv.independent_denorm_mode=0\nspirv.independent_round_mode=0\nspirv.rte16=0\nspirv.rte32=0\nspirv.rte64=0\n"
+        "spirv.rtz16=0\nspirv.rtz32=0\nspirv.rtz64=0\nspirv.supports_descriptor_heap=0\nspirv.supports_float_controls2=0\n"
+        "spirv.supports_nv_raw_access_chains=0\nspirv.supports_resource_indexing=0\nspirv.sz_inf_nan_preserve16=0\n"
+        "spirv.sz_inf_nan_preserve32=0\nspirv.sz_inf_nan_preserve64=0\n";
+    const ShaderProfile p11 = determine_profile(f11);
+    CHECK(p11.record() == rec11);
+    if (p11.record() != rec11) std::printf("  the 1.1 record:\n%s", p11.record().c_str());
+    CHECK(p11.vk11 && p11.state_words && !p11.no_clip_distance);
+    // the clip-distance fallback and the 1.1 profile together: both lines
+    f11.clip_distance = false;
+    const std::string both = determine_profile(f11).record();
+    CHECK(both.find("host2.no_clip_distance=1\n") != std::string::npos && both.find("host2.vk11=1\n") != std::string::npos);
+    DeviceFactsQuery q;
+    q.facts = facts;
+    CHECK(facts_json(q).find("vk11") == std::string::npos);
+    q.facts.vk11 = true;
+    CHECK(facts_json(q).find(",\n \"vk11\": true\n}") != std::string::npos);
+}
+
+// (b) The post-pass on synthetic modules: the alpha test's module lowered to an exact word array, and
+// each refusal by its exact reason with the words left as they were.
+void test_vk11_post_pass() {
+    using d9g::shader::lower_vk11;
+    using d9g::shader::Stage;
+    // lowered: SPIR-V 1.3, the memory-model and demote capabilities gone, Logical GLSL450, the uniform
+    // buffer out of the interface, [OpLabel, OpKill] for the demote's block, the ID bound unchanged
+    std::vector<uint32_t> words = spv_words(alpha_module());
+    CHECK(lower_vk11(words, Stage::Pixel, true) == "");
+    const SpvModule want = {
+        spv(17, {1}),
+        cat(spv(11, {1}), spv_str("GLSL.std.450")),
+        spv(14, {0, 1}),
+        cat(cat(spv(15, {4, 10}), spv_str("main")), {20, 21}),
+        spv(16, {10, 7}),
+        spv(19, {2}), spv(33, {3, 2}), spv(22, {4, 32}), spv(23, {5, 4, 4}),
+        spv(32, {6, 1, 5}), spv(32, {7, 3, 5}), spv(20, {8}), spv(30, {9, 5}), spv(32, {11, 2, 9}),
+        spv(59, {6, 20, 1}), spv(59, {7, 21, 3}), spv(59, {11, 22, 2}), spv(43, {4, 12, 0x3f000000u}),
+        spv(54, {2, 10, 0, 3}),
+        spv(248, {30}), spv(61, {5, 13, 20}), spv(81, {4, 14, 13, 3}), spv(184, {8, 15, 14, 12}),
+        spv(247, {32, 0}), spv(250, {15, 31, 32}),
+        spv(248, {31}), spv(252),
+        spv(248, {32}), spv(62, {21, 13}), spv(253),
+        spv(56)};
+    CHECK(words == spv_words(want, 0x00010300u));
+    // the same module declaring ClipDistance: kept where the device has it
+    SpvModule clip = alpha_module();
+    clip.insert(clip.begin() + 1, spv(17, {32}));
+    words = spv_words(clip);
+    CHECK(lower_vk11(words, Stage::Pixel, true) == "");
+    CHECK(words.size() > 6 && words[5] == spv(17, {1})[0] && words[6] == 1 && words[7] == spv(17, {32})[0] && words[8] == 32);
+
+    // each refusal: its reason, and the words unchanged
+    struct Case { const char* what; SpvModule m; uint32_t version; Stage stage; bool clip; std::string reason; };
+    std::vector<Case> cases;
+    const std::string u = "unmapped: vk11: ";
+    const std::string sdl = " (SDL's Vulkan 1.1 device enables no feature or extension for it)";
+    auto with = [&](size_t at, std::vector<uint32_t> inst) {
+        SpvModule m = alpha_module();
+        m.insert(m.begin() + long(at), std::move(inst));
+        return m;
+    };
+    auto replaced = [&](uint32_t op, int64_t operand1, std::vector<uint32_t> inst) {
+        SpvModule m = alpha_module();
+        m[spv_find(m, op, operand1)] = std::move(inst);
+        return m;
+    };
+    const SpvModule base = alpha_module();
+    const size_t types = spv_find(base, 19), body = spv_find(base, 61), merge = spv_find(base, 248, 32) + 1,
+                 decorations = spv_find(base, 19);
+    cases.push_back({"a PhysicalStorageBuffer pointer", with(types, spv(32, {40, 5349, 5})), 0x10600, Stage::Pixel, true,
+                     u + "the storage class PhysicalStorageBuffer"});
+    cases.push_back({"a StorageBuffer variable", with(types, spv(32, {41, 12, 9})), 0x10600, Stage::Pixel, true,
+                     u + "the storage class StorageBuffer"});
+    cases.push_back({"a PushConstant variable", with(types, spv(32, {42, 9, 9})), 0x10600, Stage::Pixel, true,
+                     u + "the storage class PushConstant"});
+    cases.push_back({"a StorageBuffer OpVariable", with(spv_find(base, 43), spv(59, {11, 43, 12})), 0x10600, Stage::Pixel,
+                     true, u + "the storage class StorageBuffer"});
+    cases.push_back({"Int8", with(1, spv(17, {39})), 0x10600, Stage::Pixel, true, u + "the capability Int8" + sdl});
+    cases.push_back({"SignedZeroInfNanPreserve", with(1, spv(17, {4466})), 0x10600, Stage::Pixel, true,
+                     u + "the capability SignedZeroInfNanPreserve" + sdl});
+    cases.push_back({"FloatControls2", with(1, spv(17, {6029})), 0x10600, Stage::Pixel, true,
+                     u + "the capability FloatControls2" + sdl});
+    cases.push_back({"ShaderNonUniform", with(1, spv(17, {5301})), 0x10600, Stage::Pixel, true,
+                     u + "the capability ShaderNonUniform" + sdl});
+    cases.push_back({"VulkanMemoryModelDeviceScope", with(1, spv(17, {5346})), 0x10600, Stage::Pixel, true,
+                     u + "the capability VulkanMemoryModelDeviceScope" + sdl});
+    cases.push_back({"an unnamed capability", with(1, spv(17, {4437})), 0x10600, Stage::Pixel, true,
+                     u + "the capability 4437" + sdl});
+    cases.push_back({"ClipDistance on a device without it", with(1, spv(17, {32})), 0x10600, Stage::Pixel, false,
+                     u + "the capability ClipDistance" + sdl});
+    cases.push_back({"an OpExtension", with(4, cat(spv(10), spv_str("SPV_KHR_float_controls"))), 0x10600, Stage::Pixel, true,
+                     u + "OpExtension SPV_KHR_float_controls (SDL's Vulkan 1.1 device enables no extension)"});
+    cases.push_back({"another OpExtInstImport", with(5, cat(spv(11, {50}), spv_str("NonSemantic.Debug"))), 0x10600,
+                     Stage::Pixel, true, u + "OpExtInstImport NonSemantic.Debug (only GLSL.std.450)"});
+    cases.push_back({"the SignedZeroInfNanPreserve mode", with(spv_find(base, 16) + 1, spv(16, {10, 4461, 32})), 0x10600,
+                     Stage::Pixel, true, u + "the execution mode SignedZeroInfNanPreserve"});
+    cases.push_back({"OpExecutionModeId", with(spv_find(base, 16) + 1, spv(331, {10, 6028, 4, 12})), 0x10600, Stage::Pixel,
+                     true, u + "OpExecutionModeId"});
+    cases.push_back({"NonPrivatePointer", replaced(61, 5, spv(61, {5, 13, 20, 0x20})), 0x10600, Stage::Pixel, true,
+                     u + "the memory operand NonPrivatePointer on OpLoad"});
+    cases.push_back({"an image operand above 0xFF", with(body + 1, spv(95, {5, 51, 52, 53, 0x400})), 0x10600, Stage::Pixel,
+                     true, u + "the image operand NonPrivateTexel on OpImageFetch"});
+    cases.push_back({"NoSignedWrap", with(decorations, spv(71, {13, 4469})), 0x10600, Stage::Pixel, true,
+                     u + "the decoration NoSignedWrap"});
+    cases.push_back({"OpDecorateId", with(decorations, spv(332, {13, 46, 12})), 0x10600, Stage::Pixel, true, u + "OpDecorateId"});
+    cases.push_back({"a composite OpSelect", with(spv_find(base, 247), spv(169, {9, 45, 15, 13, 13})), 0x10600, Stage::Pixel,
+                     true, u + "an OpSelect whose result is not a scalar or a vector (SPIR-V 1.4's)"});
+    cases.push_back({"a vector OpSelect on a scalar condition", with(spv_find(base, 247), spv(169, {5, 45, 15, 13, 13})),
+                     0x10600, Stage::Pixel, true,
+                     u + "an OpSelect whose condition and result have different component counts (SPIR-V 1.4's)"});
+    cases.push_back({"OpCopyMemory", with(body + 1, spv(63, {21, 20})), 0x10600, Stage::Pixel, true, u + "OpCopyMemory"});
+    cases.push_back({"an OpKill already", with(body + 1, spv(252)), 0x10600, Stage::Pixel, true, u + "OpKill"});
+    cases.push_back({"an atomic", with(body + 1, spv(234, {4, 47, 20, 1, 0, 12})), 0x10600, Stage::Pixel, true,
+                     u + "OpAtomicIAdd"});
+    cases.push_back({"version 1.5", base, 0x10500, Stage::Pixel, true,
+                     "vk11 lowering: SPIR-V version 1.5; the lowering takes the pinned translator's 1.6"});
+    cases.push_back({"the GLSL450 memory model", replaced(14, -1, spv(14, {0, 1})), 0x10600, Stage::Pixel, true,
+                     u + "OpMemoryModel Logical GLSL450; the lowering takes PhysicalStorageBuffer64 Vulkan"});
+    cases.push_back({"a vertex module for a pixel shader", alpha_module(0), 0x10600, Stage::Pixel, true,
+                     u + "the execution model 0 in a pixel module"});
+    cases.push_back({"a demote in a vertex module", alpha_module(0), 0x10600, Stage::Vertex, true,
+                     u + "a demote in a vertex module"});
+    {
+        SpvModule m = alpha_module();
+        const size_t ep = spv_find(m, 15);
+        m[ep] = cat(m[ep], {13});
+        cases.push_back({"an interface id that is not a variable", m, 0x10600, Stage::Pixel, true,
+                         u + "an entry point interface id that is not a global variable"});
+    }
+    {
+        SpvModule m = alpha_module();
+        m.insert(m.begin() + long(spv_find(m, 15)), cat(cat(spv(15, {4, 10}), spv_str("other")), {20}));
+        cases.push_back({"two entry points", m, 0x10600, Stage::Pixel, true, u + "2 entry points (the lowering takes one)"});
+    }
+    {
+        SpvModule m = alpha_module();
+        m[spv_find(m, 5380) + 1] = spv(253);   // [OpLabel, OpDemote, OpReturn]
+        cases.push_back({"a demote not followed by OpBranch", m, 0x10600, Stage::Pixel, true,
+                         u + "a demote whose block is not [OpLabel, OpDemoteToHelperInvocation, OpBranch]"});
+    }
+    const std::string derivatives = ": OpKill would leave its quad's derivatives undefined, and SDL's 1.1 device has no demote";
+    cases.push_back({"a demote followed by an implicit-LOD sample", with(merge, spv(87, {5, 47, 48, 49})), 0x10600,
+                     Stage::Pixel, true, u + "a demote (D3D9 texkill) followed by OpImageSampleImplicitLod" + derivatives});
+    {
+        // a second function using OpDPdx, called after the demote
+        SpvModule m = with(merge, spv(57, {2, 61, 60}));
+        for (auto& i : SpvModule{spv(54, {2, 60, 0, 3}), spv(248, {62}), spv(207, {4, 63, 12}), spv(253), spv(56)})
+            m.push_back(i);
+        cases.push_back({"a demote followed by a call to a function using OpDPdx", m, 0x10600, Stage::Pixel, true,
+                         u + "a demote (D3D9 texkill) followed by a call to a function using OpDPdx" + derivatives});
+    }
+    {
+        // the call before the demote is no use of it
+        SpvModule m = with(body, spv(57, {2, 61, 60}));
+        for (auto& i : SpvModule{spv(54, {2, 60, 0, 3}), spv(248, {62}), spv(207, {4, 63, 12}), spv(253), spv(56)})
+            m.push_back(i);
+        std::vector<uint32_t> w = spv_words(m);
+        CHECK(lower_vk11(w, Stage::Pixel, true) == "");
+    }
+    {
+        SpvModule m = alpha_module();
+        m[spv_find(m, 253)] = spv(249, {31});   // the merge branches back to the demote's block
+        cases.push_back({"a demote inside a loop", m, 0x10600, Stage::Pixel, true, u + "a demote inside a loop"});
+    }
+    cases.push_back({"an OpPhi naming the demote's block", with(merge, spv(245, {4, 70, 12, 31, 14, 30})), 0x10600,
+                     Stage::Pixel, true, u + "an OpPhi takes a value from a demote's block"});
+    {
+        // a demote in a function the entry point calls
+        SpvModule m = with(body, spv(57, {2, 61, 60}));
+        for (auto& i : SpvModule{spv(54, {2, 60, 0, 3}), spv(248, {62}), spv(247, {64, 0}), spv(250, {15, 63, 64}),
+                                 spv(248, {63}), spv(5380), spv(249, {64}), spv(248, {64}), spv(253), spv(56)})
+            m.push_back(i);
+        cases.push_back({"a demote outside the entry function", m, 0x10600, Stage::Pixel, true,
+                         u + "a demote outside the entry point's function"});
+    }
+    for (const Case& c : cases) {
+        std::vector<uint32_t> w = spv_words(c.m, c.version);
+        const std::vector<uint32_t> before = w;
+        const std::string got = lower_vk11(w, c.stage, c.clip);
+        CHECK(got == c.reason && w == before);
+        if (got != c.reason) std::printf("  %s: %s\n", c.what, got.c_str());
+    }
+    // a module that is not the translator's is a failure, not an unmapped construct: no "unmapped:" prefix
+    std::vector<uint32_t> w = spv_words(alpha_module());
+    w.push_back(0);   // an instruction of length 0
+    const std::vector<uint32_t> before = w;
+    std::string got = lower_vk11(w, Stage::Pixel, true);
+    CHECK(got == "vk11 lowering: malformed SPIR-V (an instruction of length 0 at word " + std::to_string(before.size() - 1) + ")" &&
+          w == before);
+    w = spv_words(alpha_module());
+    w.push_back((3u << 16) | 249u);   // an OpBranch claiming three words
+    got = lower_vk11(w, Stage::Pixel, true);
+    CHECK(got.rfind("vk11 lowering: malformed SPIR-V (an instruction overruns the module", 0) == 0);
+    w = {0x07230203u, 0x00010600u};
+    CHECK(lower_vk11(w, Stage::Pixel, true) == "vk11 lowering: malformed SPIR-V (no SPIR-V header)");
+}
+
+namespace {
+// ps_3_0 dcl_texcoord0 v0, dcl_2d s0, texkill v0, texld r0, v0, s0, mov oC0, r0: a texkill before an
+// implicit-LOD sample (D3DSIO_TEXKILL 65 takes a destination token)
+const DWORD kPsKillThenSample[] = {0xFFFF0300u, 0x0200001Fu, 0x80000005u, 0x900F0000u, 0x0200001Fu, 0x90000000u, 0xA00F0800u,
+                                   0x01000041u, 0x900F0000u, 0x03000042u, 0x800F0000u, 0x90E40000u, 0xA0E40800u,
+                                   0x02000001u, 0x800F0800u, 0x80E40000u, 0x0000FFFFu};
+// ps_3_0 def c0 (1, 0, 0, 1), dcl_texcoord0 v0, texkill v0, mov oC0, c0: a texkill with arithmetic only after it
+const DWORD kPsKillThenConstant[] = {0xFFFF0300u, 0x05000051u, 0xA00F0000u, 0x3F800000u, 0x00000000u, 0x00000000u,
+                                     0x3F800000u, 0x0200001Fu, 0x80000005u, 0x900F0000u, 0x01000041u, 0x900F0000u,
+                                     0x02000001u, 0x800F0800u, 0xA0E40000u, 0x0000FFFFu};
+
+// What a module declares and does, as the 1.1 device's checks read it.
+struct SpvFacts {
+    uint32_t version = 0;
+    std::vector<uint32_t> caps;
+    int extensions = 0, kills = 0, demotes = 0;
+    bool logical_glsl450 = false, interface_io_only = true;
+};
+SpvFacts spv_facts(const std::vector<uint32_t>& w) {
+    SpvFacts f;
+    if (w.size() < 5) return f;
+    f.version = w[1];
+    std::map<uint32_t, uint32_t> classes;
+    std::vector<uint32_t> iface;
+    for (size_t at = 5; at < w.size() && (w[at] >> 16);) {
+        const uint32_t op = w[at] & 0xffffu, wc = w[at] >> 16;
+        if (op == 17) f.caps.push_back(w[at + 1]);
+        if (op == 10) f.extensions++;
+        if (op == 252) f.kills++;
+        if (op == 5380) f.demotes++;
+        if (op == 14) f.logical_glsl450 = w[at + 1] == 0 && w[at + 2] == 1;
+        if (op == 59) classes[w[at + 2]] = w[at + 3];
+        if (op == 15) {
+            uint32_t k = 3;
+            while (k < wc && (w[at + k] & 0xff000000u)) k++;   // the name's words, to the one ending it
+            for (k++; k < wc; k++) iface.push_back(w[at + k]);
+        }
+        at += wc;
+    }
+    for (uint32_t id : iface) f.interface_io_only = f.interface_io_only && (classes[id] == 1 || classes[id] == 3);
+    std::sort(f.caps.begin(), f.caps.end());
+    return f;
+}
+d9g::shader::Built build_shader(const DWORD* tokens, size_t bytes, const d9g::shader::ShaderProfile& p) {
+    const d9g::shader::Translated t = d9g::shader::translate(tokens, bytes, p, d9g::shader::Variant{});
+    if (!t.ok) {
+        d9g::shader::Built b;
+        b.error = "translate: " + t.error;
+        return b;
+    }
+    return d9g::shader::build(t, p, nullptr);
+}
+}  // namespace
+
+// (c) The translator's own modules with the 1.1 profile: SPIR-V 1.3, Logical GLSL450, Shader (and
+// ClipDistance for the vertex shader, ImageQuery for a sampling pixel shader) only, no extension, the
+// alpha test's demote made OpKill, the interface inputs and outputs only. With the 1.3 profile the same
+// shaders keep SPIR-V 1.6 and the demote. A texkill before a texld is refused by name; a texkill before
+// arithmetic only lowers to two kills.
+void test_vk11_translation() {
+    using namespace d9g::shader;
+    auto gpu = d9g::make_cpu_gpu();
+    DeviceFacts f = gpu->info().shader_facts;
+    const ShaderProfile p13 = determine_profile(f);
+    f.vk11 = true;
+    const ShaderProfile p11 = determine_profile(f);
+    const Built vs = build_shader(kVs, sizeof kVs, p11), ps = build_shader(kPs, sizeof kPs, p11),
+                ps5 = build_shader(kPsSample5, sizeof kPsSample5, p11);
+    CHECK(vs.ok && ps.ok && ps5.ok);
+    if (!vs.ok || !ps.ok || !ps5.ok) std::printf("  %s | %s | %s\n", vs.error.c_str(), ps.error.c_str(), ps5.error.c_str());
+    const SpvFacts v = spv_facts(vs.spirv), p = spv_facts(ps.spirv), p5 = spv_facts(ps5.spirv);
+    CHECK(v.version == 0x00010300u && p.version == 0x00010300u && p5.version == 0x00010300u);
+    CHECK((v.caps == std::vector<uint32_t>{1, 32}));     // Shader, ClipDistance
+    CHECK((p.caps == std::vector<uint32_t>{1}));         // Shader
+    CHECK((p5.caps == std::vector<uint32_t>{1, 50}));    // Shader, ImageQuery
+    for (const SpvFacts* s : {&v, &p, &p5}) CHECK(!s->extensions && s->logical_glsl450 && s->interface_io_only && !s->demotes);
+    CHECK(v.kills == 0 && p.kills == 1 && p5.kills == 1);
+    // the control: the 1.3 profile's modules are the builder's own
+    const Built vs13 = build_shader(kVs, sizeof kVs, p13), ps13 = build_shader(kPs, sizeof kPs, p13);
+    const SpvFacts v13 = spv_facts(vs13.spirv), q13 = spv_facts(ps13.spirv);
+    CHECK(vs13.ok && ps13.ok && v13.version == 0x00010600u && q13.version == 0x00010600u);
+    CHECK(q13.demotes == 1 && q13.kills == 0 && !q13.logical_glsl450);
+    CHECK(std::find(q13.caps.begin(), q13.caps.end(), 5379u) != q13.caps.end());
+    // texkill, then texld: refused by name, never lowered; texkill, then arithmetic: two kills
+    const Built kill_sample = build_shader(kPsKillThenSample, sizeof kPsKillThenSample, p11);
+    CHECK(!kill_sample.ok && kill_sample.spirv.empty());
+    CHECK(kill_sample.error.rfind("unmapped: vk11: a demote (D3D9 texkill) followed by ", 0) == 0 &&
+          kill_sample.error.find("ImplicitLod") != std::string::npos);
+    if (kill_sample.error.rfind("unmapped: vk11: ", 0) != 0) std::printf("  texkill+texld: %s\n", kill_sample.error.c_str());
+    const Built kill_sample13 = build_shader(kPsKillThenSample, sizeof kPsKillThenSample, p13);
+    CHECK(kill_sample13.ok && spv_facts(kill_sample13.spirv).demotes == 2);
+    const Built kill_const = build_shader(kPsKillThenConstant, sizeof kPsKillThenConstant, p11);
+    CHECK(kill_const.ok && spv_facts(kill_const.spirv).kills == 2 && spv_facts(kill_const.spirv).demotes == 0);
+    if (!kill_const.ok) std::printf("  texkill+mov: %s\n", kill_const.error.c_str());
+}
+
+// (d) The device on the CPU model made at 1.1: shaders are created and drawn, nothing unmapped, the
+// report's record says host2.vk11=1 and sdl_gpu carries its "vk11" member; the default CPU model's report
+// has no such member. A texkill before a texld is one unmapped draw, its reason named. A SPIR-V 1.6 module
+// reaching a device made at 1.1 (a profile that disagrees with the device) is refused by name; the same
+// module draws on the default device.
+void test_vk11_device() {
+    const DWORD constant_ps[] = {0xFFFF0300u, 0x02000001u, 0x800F0800u, 0xA0E40005u, 0x0000FFFFu};
+    const D3DVERTEXELEMENT9 e[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0},
+                                   {0, 16, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    enum class Kind { vk11, vk13, vk11_with_13_profile };
+    for (const Kind kind : {Kind::vk11, Kind::vk13, Kind::vk11_with_13_profile}) {
+        d9g::report() = d9g::Report{};
+        d9g::DeviceSetup setup;
+        setup.pp = present_params();
+        setup.behavior = kBehavior;
+        auto gpu = d9g::make_cpu_gpu(true, true, true, true, false, kind != Kind::vk13);
+        // a device made at 1.1 whose facts missed it (the pin make_sdl_gpu makes): the 1.3 profile's modules
+        if (kind == Kind::vk11_with_13_profile) const_cast<d9g::GpuInfo&>(gpu->info()).shader_facts.vk11 = false;
+        auto* d = new d9g::Device(std::move(gpu), setup);
+        std::string why;
+        CHECK(d->init(&why));
+        IDirect3DVertexShader9* vs = nullptr;
+        IDirect3DPixelShader9 *ps = nullptr, *kill = nullptr;
+        IDirect3DVertexDeclaration9* decl = nullptr;
+        IDirect3DVertexBuffer9* vb = nullptr;
+        IDirect3DTexture9* tex = nullptr;
+        CHECK(d->CreateVertexShader(kVs, &vs) == D3D_OK && vs);
+        CHECK(d->CreatePixelShader(constant_ps, &ps) == D3D_OK && ps);
+        CHECK(d->CreatePixelShader(kPsKillThenSample, &kill) == D3D_OK && kill);   // translated; built at its draw
+        CHECK(d->CreateVertexDeclaration(e, &decl) == D3D_OK);
+        CHECK(d->CreateVertexBuffer(256, 0, 0, D3DPOOL_DEFAULT, &vb, nullptr) == D3D_OK);
+        CHECK(d->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr) == D3D_OK);
+        if (!vs || !ps || !kill || !decl || !vb || !tex) { d->Release(); return; }
+        d->SetVertexShader(vs); d->SetPixelShader(ps); d->SetVertexDeclaration(decl);
+        d->SetStreamSource(0, vb, 0, 24);
+        CHECK(d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1) == D3D_OK);
+        const d9g::Report& r = d9g::report();
+        const std::string report = r.json();
+        const bool has_vk11 = report.find("\"vk11\": {\"api_version\": \"1.1\", \"reason\": \"cpu model: a test value\", "
+                                          "\"forced\": null, \"device_type\": null, \"device_api_version\": null, "
+                                          "\"instance_api_version\": null}") != std::string::npos;
+        const auto& fails = r.draw_failures;
+        if (kind == Kind::vk11_with_13_profile) {
+            CHECK(r.drawn == 0 && r.unmapped_draws == 1 && has_vk11);
+            CHECK(std::find(fails.begin(), fails.end(), "a SPIR-V 1.6 module on a device made at Vulkan 1.1") != fails.end());
+            CHECK(report.find("host2.vk11=1") == std::string::npos);
+        } else {
+            CHECK(r.drawn == 1 && r.unmapped_draws == 0 && r.failure.empty());
+            CHECK(has_vk11 == (kind == Kind::vk11));
+            CHECK((report.find("\"vk11\"") != std::string::npos) == (kind == Kind::vk11));
+            CHECK((report.find("\"host2.vk11=1\"") != std::string::npos) == (kind == Kind::vk11));
+            // the texkill before the texld: unmapped on the 1.1 device by name, drawn on the 1.3 one
+            d->SetPixelShader(kill);
+            d->SetTexture(0, tex);
+            CHECK(d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1) == D3D_OK);
+            const bool refused = std::any_of(fails.begin(), fails.end(), [](const std::string& s) {
+                return s.rfind("unmapped: vk11: a demote (D3D9 texkill) followed by ", 0) == 0;
+            });
+            CHECK(refused == (kind == Kind::vk11));
+            CHECK(r.drawn == (kind == Kind::vk11 ? 1u : 2u) && r.unmapped_draws == (kind == Kind::vk11 ? 1u : 0u));
+            CHECK(r.failure.empty());
+            d->SetTexture(0, nullptr);
+        }
+        vs->Release(); ps->Release(); kill->Release(); decl->Release(); vb->Release(); tex->Release(); d->Release();
+    }
+}
+
+// (e) The feature request: the 1.3 one exactly as before (describe(), the API version, the 1.1 struct as
+// the feature list), and the 1.1 one: API 1.1, robustBufferAccess and shaderClipDistance only, no list.
+void test_vk11_features() {
+    using d9g::shader::VulkanFeatures;
+    VulkanFeatures f13;
+    CHECK(f13.describe() ==
+          "{\"api_version\": \"1.3\", \"features\": [\"robustBufferAccess\", \"shaderClipDistance\", \"shaderInt16\", "
+          "\"storageBuffer16BitAccess\", \"uniformAndStorageBuffer16BitAccess\", \"storageBuffer8BitAccess\", "
+          "\"uniformAndStorageBuffer8BitAccess\", \"shaderInt8\", \"scalarBlockLayout\", \"bufferDeviceAddress\", "
+          "\"vulkanMemoryModel\", \"vulkanMemoryModelDeviceScope\", \"shaderDemoteToHelperInvocation\"], \"extensions\": []}");
+    CHECK(f13.api_version() == ((1u << 22) | (3u << 12)) && f13.feature_list() && f13.level() == ApiLevel::vk13);
+    CHECK(f13.sub_dword() && f13.clip_distance() && f13.scalar_layout());
+    VulkanFeatures f13min(false, false, false);
+    CHECK(f13min.describe() == "{\"api_version\": \"1.3\", \"features\": [\"robustBufferAccess\", \"bufferDeviceAddress\", "
+                               "\"vulkanMemoryModel\", \"vulkanMemoryModelDeviceScope\", \"shaderDemoteToHelperInvocation\"], "
+                               "\"extensions\": []}");
+    VulkanFeatures f11(true, true, true, ApiLevel::vk11);
+    CHECK(f11.describe() == "{\"api_version\": \"1.1\", \"features\": [\"robustBufferAccess\", \"shaderClipDistance\"], "
+                            "\"extensions\": []}");
+    CHECK(f11.api_version() == ((1u << 22) | (1u << 12)) && f11.feature_list() == nullptr && f11.level() == ApiLevel::vk11);
+    CHECK(!f11.sub_dword() && f11.clip_distance() && !f11.scalar_layout());
+    const auto* f10 = static_cast<const VkPhysicalDeviceFeatures*>(f11.features10());
+    CHECK(f10->robustBufferAccess && f10->shaderClipDistance && !f10->shaderInt16 && !f10->depthClamp);
+    VulkanFeatures f11noclip(false, false, false, ApiLevel::vk11);
+    CHECK(f11noclip.describe() == "{\"api_version\": \"1.1\", \"features\": [\"robustBufferAccess\"], \"extensions\": []}");
+}
+
+namespace {
+// A stub Vulkan loader and driver (vkGetInstanceProcAddr and what the queries call), standing in for
+// devices no machine here has: each device fills only the structures its own version (or an extension
+// it lists) has, as a real 1.1 driver leaves a 1.2 or 1.3 structure untouched, and every pNext sType a
+// query chains is recorded, in order.
+namespace stubvk {
+struct Dev {
+    std::string name;
+    uint32_t api = VK_MAKE_API_VERSION(0, 1, 3, 250);
+    VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    std::vector<std::string> exts;
+    uint32_t driver_id = 4;   // VK_DRIVER_ID_NVIDIA_PROPRIETARY
+    VkPhysicalDeviceFeatures f10{};
+    bool demote = true;       // shaderDemoteToHelperInvocation, where a structure the device has holds it
+    // fills every structure it knows whatever its own version, as Mesa's common vk_get_physical_device_features
+    // fills every core structure: SDL_gpu then accepts it at 1.3, comparing no version
+    bool fills_above = false;
+};
+struct World {
+    uint32_t loader = VK_API_VERSION_1_3;   // 0: a 1.0 loader, without vkEnumerateInstanceVersion
+    std::vector<Dev> devs;
+    uint32_t instance_api = 0;              // what vkCreateInstance was asked for
+    std::vector<uint32_t> chained;          // every pNext sType the queries chained
+};
+World g;
+
+VkPhysicalDeviceFeatures all_features() {
+    VkPhysicalDeviceFeatures f;
+    VkBool32* b = reinterpret_cast<VkBool32*>(&f);
+    for (size_t i = 0; i < sizeof f / sizeof(VkBool32); i++) b[i] = VK_TRUE;
+    f.shaderStorageImageReadWithoutFormat = VK_FALSE;
+    return f;
+}
+Dev device(const std::string& name, uint32_t major, uint32_t minor, uint32_t patch, VkPhysicalDeviceType type,
+           std::vector<std::string> exts = {}, uint32_t driver_id = 4) {
+    Dev d;
+    d.name = name;
+    d.api = VK_MAKE_API_VERSION(0, major, minor, patch);
+    d.type = type;
+    d.exts = std::move(exts);
+    d.driver_id = driver_id;
+    d.f10 = all_features();
+    return d;
+}
+Dev& of(VkPhysicalDevice pd) { return *reinterpret_cast<Dev*>(pd); }
+uint32_t mm(uint32_t v) { return VK_MAKE_API_VERSION(0, VK_API_VERSION_MAJOR(v), VK_API_VERSION_MINOR(v), 0); }
+bool has(const Dev& d, const char* ext) { return std::find(d.exts.begin(), d.exts.end(), ext) != d.exts.end(); }
+
+VkResult VKAPI_CALL create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks*, VkInstance* out) {
+    g.instance_api = ci->pApplicationInfo ? ci->pApplicationInfo->apiVersion : 0;
+    *out = reinterpret_cast<VkInstance>(&g);
+    return VK_SUCCESS;
+}
+void VKAPI_CALL destroy_instance(VkInstance, const VkAllocationCallbacks*) {}
+VkResult VKAPI_CALL enumerate_instance_version(uint32_t* v) { *v = g.loader; return VK_SUCCESS; }
+VkResult VKAPI_CALL enumerate_devices(VkInstance, uint32_t* n, VkPhysicalDevice* out) {
+    if (!out) { *n = uint32_t(g.devs.size()); return VK_SUCCESS; }
+    for (uint32_t i = 0; i < *n && i < g.devs.size(); i++) out[i] = reinterpret_cast<VkPhysicalDevice>(&g.devs[i]);
+    return VK_SUCCESS;
+}
+void props_of(const Dev& d, VkPhysicalDeviceProperties& p) {
+    p = VkPhysicalDeviceProperties{};
+    p.apiVersion = d.api;
+    p.driverVersion = VK_MAKE_API_VERSION(0, 512, 0, 0);
+    p.vendorID = 0x5143;
+    p.deviceType = d.type;
+    std::snprintf(p.deviceName, sizeof p.deviceName, "%s", d.name.c_str());
+    p.limits.maxUniformBufferRange = 65536;
+    p.limits.maxPerStageDescriptorUniformBuffers = 14;
+    p.limits.minStorageBufferOffsetAlignment = 64;
+}
+void VKAPI_CALL get_props(VkPhysicalDevice pd, VkPhysicalDeviceProperties* p) { props_of(of(pd), *p); }
+void VKAPI_CALL get_props2(VkPhysicalDevice pd, VkPhysicalDeviceProperties2* p) {
+    const Dev& d = of(pd);
+    props_of(d, p->properties);
+    for (auto* s = static_cast<VkBaseOutStructure*>(p->pNext); s; s = s->pNext) {
+        g.chained.push_back(uint32_t(s->sType));
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES && (mm(d.api) >= VK_API_VERSION_1_2 || d.fills_above)) {
+            auto* p12 = reinterpret_cast<VkPhysicalDeviceVulkan12Properties*>(s);
+            p12->driverID = VkDriverId(d.driver_id);
+            std::snprintf(p12->driverName, sizeof p12->driverName, "stub driver");
+            std::snprintf(p12->driverInfo, sizeof p12->driverInfo, "stub %u.%u", VK_API_VERSION_MAJOR(d.api), VK_API_VERSION_MINOR(d.api));
+            p12->shaderSignedZeroInfNanPreserveFloat32 = VK_TRUE;
+            p12->shaderRoundingModeRTEFloat32 = VK_TRUE;
+            p12->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+            p12->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+        }
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES && has(d, "VK_KHR_driver_properties")) {
+            auto* drv = reinterpret_cast<VkPhysicalDeviceDriverProperties*>(s);
+            drv->driverID = VkDriverId(d.driver_id);
+            std::snprintf(drv->driverName, sizeof drv->driverName, "stub driver");
+            std::snprintf(drv->driverInfo, sizeof drv->driverInfo, "stub %u.%u", VK_API_VERSION_MAJOR(d.api), VK_API_VERSION_MINOR(d.api));
+        }
+    }
+}
+void VKAPI_CALL get_features(VkPhysicalDevice pd, VkPhysicalDeviceFeatures* f) { *f = of(pd).f10; }
+void VKAPI_CALL get_features2(VkPhysicalDevice pd, VkPhysicalDeviceFeatures2* f) {
+    const Dev& d = of(pd);
+    f->features = d.f10;
+    const uint32_t v = d.fills_above ? VK_API_VERSION_1_3 : mm(d.api);
+    for (auto* s = static_cast<VkBaseOutStructure*>(f->pNext); s; s = s->pNext) {
+        g.chained.push_back(uint32_t(s->sType));
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES && v >= VK_API_VERSION_1_2) {
+            auto* x = reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(s);
+            x->storageBuffer16BitAccess = x->uniformAndStorageBuffer16BitAccess = x->storagePushConstant16 = VK_TRUE;
+        }
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES && v >= VK_API_VERSION_1_2) {
+            auto* x = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(s);
+            x->storageBuffer8BitAccess = x->uniformAndStorageBuffer8BitAccess = x->storagePushConstant8 = VK_TRUE;
+            x->shaderInt8 = x->scalarBlockLayout = x->bufferDeviceAddress = x->vulkanMemoryModel = VK_TRUE;
+            x->vulkanMemoryModelDeviceScope = VK_TRUE;
+        }
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES && v >= VK_API_VERSION_1_3)
+            reinterpret_cast<VkPhysicalDeviceVulkan13Features*>(s)->shaderDemoteToHelperInvocation = d.demote;
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES && v >= VK_API_VERSION_1_1) {
+            auto* x = reinterpret_cast<VkPhysicalDevice16BitStorageFeatures*>(s);
+            x->storageBuffer16BitAccess = x->uniformAndStorageBuffer16BitAccess = x->storagePushConstant16 = VK_TRUE;
+        }
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES &&
+            has(d, "VK_EXT_shader_demote_to_helper_invocation"))
+            reinterpret_cast<VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures*>(s)->shaderDemoteToHelperInvocation = d.demote;
+    }
+}
+void VKAPI_CALL get_format_props2(VkPhysicalDevice pd, VkFormat, VkFormatProperties2* f) {
+    const Dev& d = of(pd);
+    for (auto* s = static_cast<VkBaseOutStructure*>(f->pNext); s; s = s->pNext) {
+        g.chained.push_back(uint32_t(s->sType));
+        if (s->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3 &&
+            (mm(d.api) >= VK_API_VERSION_1_3 || d.fills_above || has(d, "VK_KHR_format_feature_flags2")))
+            reinterpret_cast<VkFormatProperties3*>(s)->optimalTilingFeatures = VK_FORMAT_FEATURE_2_STORAGE_READ_WITHOUT_FORMAT_BIT;
+    }
+}
+VkResult VKAPI_CALL enumerate_extensions(VkPhysicalDevice pd, const char*, uint32_t* n, VkExtensionProperties* out) {
+    const Dev& d = of(pd);
+    if (!out) { *n = uint32_t(d.exts.size()); return VK_SUCCESS; }
+    for (uint32_t i = 0; i < *n && i < d.exts.size(); i++) {
+        out[i] = VkExtensionProperties{};
+        std::snprintf(out[i].extensionName, sizeof out[i].extensionName, "%s", d.exts[i].c_str());
+    }
+    return VK_SUCCESS;
+}
+PFN_vkVoidFunction VKAPI_CALL gipa(VkInstance instance, const char* name) {
+#define STUB_FN(n, fn) if (!std::strcmp(name, n)) return reinterpret_cast<PFN_vkVoidFunction>(fn)
+    if (!instance) {
+        STUB_FN("vkCreateInstance", create_instance);
+        if (g.loader) STUB_FN("vkEnumerateInstanceVersion", enumerate_instance_version);
+        return nullptr;
+    }
+    STUB_FN("vkDestroyInstance", destroy_instance);
+    STUB_FN("vkEnumeratePhysicalDevices", enumerate_devices);
+    STUB_FN("vkGetPhysicalDeviceProperties", get_props);
+    STUB_FN("vkGetPhysicalDeviceFeatures", get_features);
+    STUB_FN("vkEnumerateDeviceExtensionProperties", enumerate_extensions);
+    if (g.loader) {   // the 1.1 functions: a 1.0 loader has none
+        STUB_FN("vkGetPhysicalDeviceProperties2", get_props2);
+        STUB_FN("vkGetPhysicalDeviceFeatures2", get_features2);
+        STUB_FN("vkGetPhysicalDeviceFormatProperties2", get_format_props2);
+    }
+#undef STUB_FN
+    return nullptr;
+}
+void* loader() { return reinterpret_cast<void*>(&gipa); }
+void reset(std::vector<Dev> devs, uint32_t loader_version = VK_API_VERSION_1_3) {
+    g = World{};
+    g.loader = loader_version;
+    g.devs = std::move(devs);
+}
+bool chained_any(std::initializer_list<uint32_t> stypes) {
+    for (uint32_t s : g.chained)
+        if (std::find(stypes.begin(), stypes.end(), s) != stypes.end()) return true;
+    return false;
+}
+}  // namespace stubvk
+
+// lacking() at a level, on the stub world, with SDL's demands as given.
+struct Lacking {
+    std::string text, how;
+    bool fits = false;
+    d9g::shader::VulkanFeatures::Lacks lacks;
+};
+Lacking lacking_at(ApiLevel level, d9g::shader::VulkanFeatures::SdlDemands sdl = {}, bool clip = true) {
+    d9g::shader::VulkanFeatures f(true, clip, true, level);
+    Lacking l;
+    l.text = f.lacking(stubvk::loader(), &l.fits, &l.how, &l.lacks, sdl);
+    return l;
+}
+}  // namespace
+
+// (f) Detection, against stub drivers: what lacking() and query_device_facts() read, at which version,
+// through which structures, and the step make_sdl_gpu takes from it (next_device_request).
+void test_vk11_detection() {
+    using namespace d9g::shader;
+    using stubvk::device;
+    constexpr uint32_t kF11 = 49, kP11 = 50, kF12 = 51, kP12 = 52, kF13 = 53, kP13 = 54, kFmt3 = 1000360000u,
+                       kDriverProps = 1000196000u, kS16 = 1000083000u, kDemoteExt = 1000276000u;
+    const DeviceRequest full = first_device_request(false, false, false, false);
+    // GitHub #5's phone: an Adreno 610 at Vulkan 1.1.128 with VK_KHR_driver_properties (Qualcomm's driver ID 8)
+    stubvk::reset({device("Adreno (TM) 610", 1, 1, 128, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, {"VK_KHR_driver_properties"}, 8)});
+    Lacking l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Adreno (TM) 610 (Vulkan 1.1.128): the 1.3 profile needs Vulkan 1.3");
+    CHECK(!l.fits && l.lacks.api13 && !l.lacks.api11 && !l.lacks.clip_distance && !l.lacks.depth_clamp);
+    CHECK(!stubvk::chained_any({kF11, kF12, kF13}) && stubvk::g.instance_api == VK_API_VERSION_1_3);
+    DeviceStep s = next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits);
+    CHECK(s.kind == DeviceStep::attempt && s.step_down && s.request.level == ApiLevel::vk11 && !s.request.sub_dword &&
+          !s.request.scalar_layout && s.request.clip_distance && s.request.sdl.depth_clamp);
+    stubvk::g.chained.clear();
+    l = lacking_at(ApiLevel::vk11);
+    CHECK(l.text == "Adreno (TM) 610 (Vulkan 1.1.128): none" && l.fits && !l.lacks.api11 && !l.lacks.api13);
+    stubvk::g.devs[0].f10.depthClamp = VK_FALSE;
+    l = lacking_at(ApiLevel::vk11);
+    CHECK(l.text == "Adreno (TM) 610 (Vulkan 1.1.128): SDL: depthClamp" && !l.fits && l.lacks.depth_clamp);
+    // at 1.3 the same device names depthClamp beside the version, and the step down drops it
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Adreno (TM) 610 (Vulkan 1.1.128): the 1.3 profile needs Vulkan 1.3, SDL: depthClamp");
+    s = next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits);
+    CHECK(s.step_down && s.request.level == ApiLevel::vk11 && !s.request.sdl.depth_clamp && s.request.sdl.anisotropy);
+    stubvk::g.devs[0].f10.depthClamp = VK_TRUE;
+    stubvk::g.chained.clear();
+    DeviceFactsQuery q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(q.ok && q.facts.driver_id == 8 && q.facts.vk11 && q.driver_name == "stub driver" && q.driver_info == "stub 1.1");
+    CHECK(!q.facts.sz_inf_nan_preserve[1] && !q.facts.rte[1] && !q.facts.denorm_preserve[1] && !q.facts.resource_indexing);
+    CHECK(!q.facts.sub_dword_access && q.facts.storage_push_constant16 && !q.facts.storage_push_constant8 && q.facts.clip_distance);
+    // no VkFormatProperties3 without VK_KHR_format_feature_flags2: shaderStorageImageReadWithoutFormat (false here)
+    CHECK(!q.facts.r32_storage_read_without_format && determine_profile(q.facts).typed_r32_load_requires_format);
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kDriverProps, kS16}));
+    CHECK(!stubvk::chained_any({kF11, kP11, kF12, kP12, kF13, kP13, kFmt3}));
+    CHECK(q.facts.max_per_stage_descriptor_uniform_buffers == 14 && q.facts.min_storage_buffer_offset_alignment == 64);
+    // at the 1.3 cap (a device SDL_gpu made at 1.3) the structures alpha.3 read, whatever the device reports
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "Adreno (TM) 610", ApiLevel::vk13);
+    CHECK(q.ok && !q.facts.vk11 && (stubvk::g.chained == std::vector<uint32_t>{kP12, kF11, kF12, kFmt3, kFmt3, kFmt3}));
+    // with VK_KHR_format_feature_flags2 the R32 formats' own features, and shaderStorageImageReadWithoutFormat
+    // alone otherwise
+    stubvk::g.devs[0].exts.push_back("VK_KHR_format_feature_flags2");
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(q.ok && q.facts.r32_storage_read_without_format &&
+          (stubvk::g.chained == std::vector<uint32_t>{kDriverProps, kS16, kFmt3, kFmt3, kFmt3}));
+    stubvk::g.devs[0].exts = {};
+    stubvk::g.devs[0].f10.shaderStorageImageReadWithoutFormat = VK_TRUE;
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(q.ok && q.facts.driver_id == 0 && q.driver_name.empty() && q.facts.r32_storage_read_without_format);
+
+    // a Vulkan 1.0 device: refused by name before SDL_gpu is asked at 1.1, on both paths
+    stubvk::reset({device("Old GPU", 1, 0, 61, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Old GPU (Vulkan 1.0.61): the renderer needs Vulkan 1.1" && l.lacks.api11 && l.lacks.api13);
+    CHECK(next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits).kind == DeviceStep::refuse_api11);
+    const DeviceRequest forced = first_device_request(true, false, false, false);
+    l = lacking_at(ApiLevel::vk11);
+    CHECK(l.text == "Old GPU (Vulkan 1.0.61): the renderer needs Vulkan 1.1" && l.lacks.api11 && !l.lacks.api13);
+    CHECK(next_device_request(forced, DeviceAnswer::unasked, 0, l.lacks, l.fits).kind == DeviceStep::refuse_api11);
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(!q.ok && q.how == "the device reports Vulkan 1.0.61: the renderer needs Vulkan 1.1");
+
+    // a Vulkan 1.3 device: exactly the structures read before the 1.1 profile existed
+    stubvk::reset({device("Stub GPU 1.3", 1, 3, 250, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.3: none" && l.fits && !l.lacks.api13 && !l.lacks.api11);
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kF11, kF12, kF13}) && stubvk::g.instance_api == VK_API_VERSION_1_3);
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk13);
+    CHECK(q.ok && !q.facts.vk11 && q.facts.driver_id == 4 && q.facts.sz_inf_nan_preserve[1] && q.facts.rte[1] &&
+          q.facts.sub_dword_access && q.facts.r32_storage_read_without_format && q.driver_info == "stub 1.3");
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kP12, kF11, kF12, kFmt3, kFmt3, kFmt3}));
+    CHECK(q.how == "vkGetPhysicalDeviceProperties2 and vkGetPhysicalDeviceFeatures2 (Vulkan 1.1, 1.2 and the extensions' "
+                   "chains), vkGetPhysicalDeviceFormatProperties2 (R32 formats)");
+    const std::string record13 = determine_profile(q.facts).record();
+    CHECK(record13.find("host2.") == std::string::npos);
+    // the same device lacking shaderClipDistance (a Mali's): retried at 1.3, and named exactly as alpha.3
+    // named it (no version: the retry succeeds at 1.3, and this text is its report's sdl_gpu.vulkan_lacking
+    // and its stderr line's)
+    stubvk::g.devs[0].f10.shaderClipDistance = VK_FALSE;
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.3: shaderClipDistance" && !l.fits && l.lacks.clip_distance && !l.lacks.api13);
+    s = next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits);
+    CHECK(s.kind == DeviceStep::attempt && !s.step_down && s.request.level == ApiLevel::vk13 && !s.request.clip_distance &&
+          s.request.sub_dword && s.dropped == "shaderClipDistance" && s.retry == 0);
+    // lacking SDL's depthClamp (the Galaxy A05's Mali-G52): retried at 1.3 without it, alpha.3's text again
+    stubvk::g.devs[0].f10.shaderClipDistance = VK_TRUE;
+    stubvk::g.devs[0].f10.depthClamp = VK_FALSE;
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.3: SDL: depthClamp" && !l.fits && l.lacks.depth_clamp && !l.lacks.api13);
+    s = next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits);
+    CHECK(s.kind == DeviceStep::attempt && !s.step_down && s.request.level == ApiLevel::vk13 && !s.request.sdl.depth_clamp &&
+          s.dropped == "SDL's depthClamp");
+    stubvk::g.devs[0].f10.depthClamp = VK_TRUE;
+    // a device reporting 1.3 without demote (a driver short of conformance): no device takes the 1.3 profile
+    stubvk::g.devs[0].demote = false;
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.3: shaderDemoteToHelperInvocation" && l.lacks.api13 && !l.lacks.api11);
+    CHECK(next_device_request(full, DeviceAnswer::refused, 0, l.lacks, l.fits).step_down);
+
+    // a 1.2 loader with that 1.3 device: the instance still asks for 1.3, and the reading is the same
+    stubvk::reset({device("Stub GPU 1.3", 1, 3, 250, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)}, VK_MAKE_API_VERSION(0, 1, 2, 0));
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk13);
+    CHECK(q.ok && stubvk::g.instance_api == VK_API_VERSION_1_3 && determine_profile(q.facts).record() == record13);
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kP12, kF11, kF12, kFmt3, kFmt3, kFmt3}));
+    // a 1.0 loader (no vkEnumerateInstanceVersion): an instance at 1.0, so the device is read as 1.0
+    stubvk::reset({device("Stub GPU 1.3", 1, 3, 250, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)}, 0);
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(stubvk::g.instance_api == VK_API_VERSION_1_0 && l.lacks.api11 && stubvk::g.chained.empty());
+    CHECK(l.text == "Stub GPU 1.3 (Vulkan 1.3.250): the renderer needs Vulkan 1.1");
+
+    // a Vulkan 1.2 device: at 1.3 the 1.1 and 1.2 chains (and the demote extension's) for the 1.3 profile's
+    // four, the version named; its facts read at 1.1
+    stubvk::reset({device("Stub GPU 1.2", 1, 2, 199, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
+                          {"VK_KHR_driver_properties", "VK_EXT_shader_demote_to_helper_invocation"})});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.2 (Vulkan 1.2.199): the 1.3 profile needs Vulkan 1.3" && l.lacks.api13 && !l.lacks.api11);
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kF11, kF12, kDemoteExt}));
+    stubvk::g.devs[0].demote = false;
+    stubvk::g.devs[0].exts = {"VK_KHR_driver_properties"};
+    stubvk::g.chained.clear();
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.2 (Vulkan 1.2.199): the 1.3 profile needs Vulkan 1.3, shaderDemoteToHelperInvocation");
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kF11, kF12}));
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(q.ok && q.facts.vk11 && q.facts.driver_id == 4 && !q.facts.sz_inf_nan_preserve[1] && q.driver_info == "stub 1.2");
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kDriverProps, kS16}));
+    // at the 1.3 cap (SDL_gpu made it at 1.3) the structures alpha.3 read, not the 1.1 reading
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk13);
+    CHECK(q.ok && !q.facts.vk11 && (stubvk::g.chained == std::vector<uint32_t>{kP12, kF11, kF12, kFmt3, kFmt3, kFmt3}));
+
+    // a 1.2 device whose driver fills the 1.1, 1.2 and 1.3 structures above its version (Mesa's common code),
+    // so SDL_gpu accepts it at 1.3 as it did in alpha.3: its facts read in full, the 1.3 device's profile record
+    // exactly (alpha.3's, which read every device so), and the mismatch named
+    stubvk::reset({device("Stub GPU 1.2", 1, 2, 199, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)});
+    stubvk::g.devs[0].fills_above = true;
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk13);
+    CHECK(q.ok && !q.facts.vk11 && q.facts.driver_id == 4 && q.facts.sz_inf_nan_preserve[1] && q.facts.rte[1] &&
+          q.facts.sub_dword_access && q.facts.storage_push_constant8 && q.facts.r32_storage_read_without_format &&
+          q.driver_name == "stub driver" && q.driver_info == "stub 1.2");
+    CHECK(q.how == "vkGetPhysicalDeviceProperties2 and vkGetPhysicalDeviceFeatures2 (Vulkan 1.1, 1.2 and the extensions' "
+                   "chains), vkGetPhysicalDeviceFormatProperties2 (R32 formats)");
+    CHECK(determine_profile(q.facts).record() == record13);
+    CHECK((stubvk::g.chained == std::vector<uint32_t>{kP12, kF11, kF12, kFmt3, kFmt3, kFmt3}));
+    CHECK(device_below13_note(VK_MAKE_API_VERSION(0, 1, 2, 199)) ==
+          "SDL_gpu made the device at Vulkan 1.3 although it reports Vulkan 1.2.199 (its driver fills the 1.3 feature "
+          "structures SDL_gpu checks): the 1.3 profile runs, its facts read in full");
+    CHECK(device_below13_note(VK_MAKE_API_VERSION(0, 1, 3, 250)).empty() && device_below13_note(0).empty() &&
+          device_below13_note(VK_MAKE_API_VERSION(0, 1, 4, 329)).empty());
+    // at the 1.1 cap the same device is still read as a 1.1 device
+    stubvk::g.chained.clear();
+    q = query_device_facts(stubvk::loader(), "", ApiLevel::vk11);
+    CHECK(q.ok && q.facts.vk11 && !q.facts.sz_inf_nan_preserve[1] && (stubvk::g.chained == std::vector<uint32_t>{kS16}));
+
+    // two devices: a GPU at 1.2 and a CPU device at 1.3 (lavapipe). The GPU is preferred at 1.1 over the CPU
+    // device at 1.3: SDL_gpu's acceptance on the CPU device steps down, GPUs only.
+    stubvk::reset({device("Stub GPU 1.2", 1, 2, 199, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU),
+                   device("llvmpipe stub", 1, 3, 255, VK_PHYSICAL_DEVICE_TYPE_CPU)});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.text == "Stub GPU 1.2 (Vulkan 1.2.199): the 1.3 profile needs Vulkan 1.3, shaderDemoteToHelperInvocation; "
+                    "llvmpipe stub: none");
+    CHECK(l.fits && l.lacks.api13 && !l.lacks.api11);
+    s = next_device_request(full, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits);
+    CHECK(s.kind == DeviceStep::attempt && s.step_down && s.request.level == ApiLevel::vk11 && s.request.hardware_only);
+    CHECK(s.fallback.level == ApiLevel::vk13 && s.fallback.cpu_settled && !s.fallback.hardware_only && s.fallback.sub_dword &&
+          s.fallback.clip_distance && s.fallback.scalar_layout && s.fallback.sdl.depth_clamp);
+    CHECK(next_device_request(full, DeviceAnswer::accepted, 0, l.lacks, l.fits).kind == DeviceStep::done);
+    CHECK(next_device_request(s.request, DeviceAnswer::accepted, 0, l.lacks, l.fits).kind == DeviceStep::done);
+    // the GPU-only request landing on a CPU device anyway: back to the CPU device's 1.3, which stays
+    CHECK(next_device_request(s.request, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits).kind == DeviceStep::restore);
+    CHECK(next_device_request(s.fallback, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits).kind == DeviceStep::done);
+    // a non-conformant GPU at 1.2 (hasvk: conformanceVersion 0.0.0.0, which SDL_gpu refuses at any version)
+    // beside lavapipe: the GPU-only 1.1 request is refused, and the CPU device keeps the 1.3 alpha.3 gave it
+    stubvk::reset({device("hasvk stub", 1, 2, 170, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU),
+                   device("llvmpipe stub", 1, 3, 255, VK_PHYSICAL_DEVICE_TYPE_CPU)});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.lacks.api13 && !l.lacks.api11);
+    s = next_device_request(full, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits);
+    CHECK(s.step_down && s.request.hardware_only);
+    const DeviceRequest back13 = s.fallback;
+    Lacking l11 = lacking_at(ApiLevel::vk11);
+    CHECK(l11.text == "hasvk stub (Vulkan 1.2.170): none; llvmpipe stub (Vulkan 1.3.255): none" && l11.fits);
+    DeviceStep r = next_device_request(s.request, DeviceAnswer::refused, 0, l11.lacks, l11.fits);
+    CHECK(r.kind == DeviceStep::restore);
+    CHECK(back13.level == ApiLevel::vk13 && back13.cpu_settled && back13.sub_dword == full.sub_dword &&
+          back13.clip_distance == full.clip_distance && back13.scalar_layout == full.scalar_layout &&
+          back13.sdl.depth_clamp && back13.sdl.indirect_first_instance && back13.sdl.anisotropy);
+    CHECK(next_device_request(back13, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits).kind == DeviceStep::done);
+    CHECK(next_device_request(back13, DeviceAnswer::refused, 0, l.lacks, l.fits).kind == DeviceStep::give_up);
+    // a GPU at 1.2 without SDL's always-asked independentBlend beside lavapipe: refused at 1.1 too, so the same
+    stubvk::reset({device("Stub GPU 1.2", 1, 2, 199, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU),
+                   device("llvmpipe stub", 1, 3, 255, VK_PHYSICAL_DEVICE_TYPE_CPU)});
+    stubvk::g.devs[0].f10.independentBlend = VK_FALSE;
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.lacks.api13 && !l.lacks.api11);
+    s = next_device_request(full, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits);
+    CHECK(s.step_down && s.request.hardware_only);
+    l11 = lacking_at(ApiLevel::vk11);
+    CHECK(l11.text == "Stub GPU 1.2 (Vulkan 1.2.199): SDL: independentBlend; llvmpipe stub (Vulkan 1.3.255): none");
+    CHECK(next_device_request(s.request, DeviceAnswer::refused, 0, l11.lacks, l11.fits).kind == DeviceStep::restore);
+    stubvk::reset({device("Stub GPU 1.2", 1, 2, 199, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU),
+                   device("llvmpipe stub", 1, 3, 255, VK_PHYSICAL_DEVICE_TYPE_CPU)});
+    // a GPU at 1.0 beside it: no GPU takes even the 1.1 profile, so the CPU device's 1.3 stays
+    stubvk::g.devs[0].api = VK_MAKE_API_VERSION(0, 1, 0, 61);
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(l.lacks.api13 && l.lacks.api11);
+    CHECK(next_device_request(full, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits).kind == DeviceStep::done);
+    // lavapipe alone: it is the device SDL_gpu chooses among, and it takes the 1.3 profile
+    stubvk::reset({device("llvmpipe stub", 1, 3, 255, VK_PHYSICAL_DEVICE_TYPE_CPU)});
+    l = lacking_at(ApiLevel::vk13);
+    CHECK(!l.lacks.api13 && !l.lacks.api11);
+    CHECK(next_device_request(full, DeviceAnswer::accepted_cpu, 0, l.lacks, l.fits).kind == DeviceStep::done);
+}
+
+namespace {
+// `r` without shaderClipDistance (as a 1.3 retry for a Mali asks)
+d9g::shader::DeviceRequest without_clip_for_test(d9g::shader::DeviceRequest r) {
+    r.clip_distance = false;
+    return r;
+}
+}  // namespace
+
+// The choice as data (next_device_request): the first requests, the 1.3 retries as before the 1.1 profile,
+// the step down and its refusal, and the retries at 1.1, which stay at 1.1.
+void test_vk11_device_choice() {
+    using namespace d9g::shader;
+    using Lacks = VulkanFeatures::Lacks;
+    const DeviceRequest full = first_device_request(false, false, false, false);
+    CHECK(full.level == ApiLevel::vk13 && full.sub_dword && full.clip_distance && full.scalar_layout &&
+          full.sdl.depth_clamp && full.sdl.indirect_first_instance && full.sdl.anisotropy);
+    const DeviceRequest off = first_device_request(false, true, true, true);
+    CHECK(off.level == ApiLevel::vk13 && !off.sub_dword && !off.clip_distance && off.scalar_layout && !off.sdl.depth_clamp);
+    const DeviceRequest forced = first_device_request(true, false, false, false);
+    CHECK(forced.level == ApiLevel::vk11 && !forced.sub_dword && forced.clip_distance && !forced.scalar_layout &&
+          forced.sdl.depth_clamp);
+    // accepted: done
+    CHECK(next_device_request(full, DeviceAnswer::accepted, 0, Lacks{}, false).kind == DeviceStep::done);
+    // the 1.3 retries, unchanged: without what some device lacks, then without every optional one, then none
+    Lacks clip;
+    clip.clip_distance = true;
+    DeviceStep s = next_device_request(full, DeviceAnswer::refused, 0, clip, false);
+    CHECK(s.kind == DeviceStep::attempt && !s.step_down && s.retry == 0 && s.dropped == "shaderClipDistance" &&
+          s.request.level == ApiLevel::vk13 && !s.request.clip_distance && s.request.sub_dword);
+    s = next_device_request(s.request, DeviceAnswer::refused, 1, clip, false);
+    CHECK(s.kind == DeviceStep::attempt && s.retry == 1 && s.request.level == ApiLevel::vk13 &&
+          s.dropped == "the sub-dword features, scalarBlockLayout, SDL's depthClamp, SDL's drawIndirectFirstInstance, "
+                       "SDL's samplerAnisotropy" &&
+          !s.request.sub_dword && !s.request.scalar_layout && !s.request.sdl.depth_clamp && !s.request.sdl.anisotropy);
+    CHECK(next_device_request(s.request, DeviceAnswer::refused, 2, clip, false).kind == DeviceStep::give_up);
+    // a device that fits (it lacks nothing to drop): no retry
+    CHECK(next_device_request(full, DeviceAnswer::refused, 0, Lacks{}, true).kind == DeviceStep::give_up);
+    // nothing named at the first retry: straight to the second
+    s = next_device_request(full, DeviceAnswer::refused, 0, Lacks{}, false);
+    CHECK(s.kind == DeviceStep::attempt && s.retry == 1 && !s.request.clip_distance);
+    // the devices unreadable (Lacks::all): never a step down, the 1.3 retries
+    s = next_device_request(full, DeviceAnswer::refused, 0, Lacks::all(), false);
+    CHECK(s.kind == DeviceStep::attempt && !s.step_down && s.request.level == ApiLevel::vk13);
+    // no device takes the 1.3 profile: a step down, the clip distance and SDL demands lacked dropped
+    Lacks no13 = clip;
+    no13.api13 = true;
+    no13.anisotropy = true;
+    s = next_device_request(full, DeviceAnswer::refused, 0, no13, false);
+    CHECK(s.kind == DeviceStep::attempt && s.step_down && s.request.level == ApiLevel::vk11 && !s.request.clip_distance &&
+          !s.request.sdl.anisotropy && s.request.sdl.depth_clamp && !s.request.sub_dword && !s.request.scalar_layout);
+    // only from the level's first request: a 1.3 retry's refusal keeps to the 1.3 retries
+    CHECK(!next_device_request(full, DeviceAnswer::refused, 1, no13, false).step_down);
+    // and none at all where no device reports 1.1
+    Lacks none = no13;
+    none.api11 = true;
+    CHECK(next_device_request(full, DeviceAnswer::refused, 0, none, false).kind == DeviceStep::refuse_api11);
+    // at 1.1 the retries stay at 1.1, as the 1.3 ones did at 1.3
+    const DeviceRequest at11 = s.request;
+    Lacks no_clamp;
+    no_clamp.depth_clamp = true;
+    s = next_device_request(at11, DeviceAnswer::refused, 0, no_clamp, false);
+    CHECK(s.kind == DeviceStep::attempt && !s.step_down && s.request.level == ApiLevel::vk11 && s.dropped == "SDL's depthClamp");
+    s = next_device_request(s.request, DeviceAnswer::refused, 1, no_clamp, false);
+    CHECK(s.kind == DeviceStep::attempt && s.request.level == ApiLevel::vk11 && !s.request.sdl.indirect_first_instance &&
+          s.dropped == "SDL's drawIndirectFirstInstance");
+    CHECK(next_device_request(s.request, DeviceAnswer::refused, 2, no_clamp, false).kind == DeviceStep::give_up);
+    // a 1.1 refusal never steps anywhere else, even with api13 read
+    Lacks again = no13;
+    s = next_device_request(at11, DeviceAnswer::refused, 0, again, false);
+    CHECK(s.kind == DeviceStep::attempt && s.request.level == ApiLevel::vk11 && !s.step_down);
+    // the switch: refused by name where no device reports 1.1, otherwise asked as it is
+    CHECK(next_device_request(forced, DeviceAnswer::unasked, 0, none, false).kind == DeviceStep::refuse_api11);
+    s = next_device_request(forced, DeviceAnswer::unasked, 0, Lacks{}, true);
+    CHECK(s.kind == DeviceStep::attempt && s.request.level == ApiLevel::vk11 && s.request.clip_distance);
+    CHECK(next_device_request(forced, DeviceAnswer::refused, 0, none, false).kind == DeviceStep::refuse_api11);
+    // the switch on a CPU device (lavapipe alone, forced): its 1.1 stays, no GPU-only request
+    CHECK(next_device_request(forced, DeviceAnswer::accepted_cpu, 0, Lacks{}, true).kind == DeviceStep::done);
+    // a refusal's step down is not GPU-only, and returns no fallback
+    s = next_device_request(full, DeviceAnswer::refused, 0, no13, false);
+    CHECK(s.step_down && !s.request.hardware_only && !s.request.cpu_settled && !s.fallback.cpu_settled);
+
+    // the CPU step down (SDL_gpu chose a CPU device at 1.3, a GPU takes only the 1.1 profile): GPUs only at 1.1,
+    // the accepted 1.3 request returned to go back to
+    Lacks gpu11;
+    gpu11.api13 = true;
+    gpu11.depth_clamp = true;   // the GPU lacks SDL's depthClamp: the 1.1 request drops it
+    const DeviceRequest kept = without_clip_for_test(full);
+    s = next_device_request(kept, DeviceAnswer::accepted_cpu, 0, gpu11, true);
+    CHECK(s.kind == DeviceStep::attempt && s.step_down && s.request.level == ApiLevel::vk11 && s.request.hardware_only &&
+          !s.request.cpu_settled && !s.request.sdl.depth_clamp && !s.request.clip_distance);
+    CHECK(s.fallback.level == ApiLevel::vk13 && s.fallback.cpu_settled && !s.fallback.hardware_only &&
+          !s.fallback.clip_distance && s.fallback.sdl.depth_clamp && s.fallback.sub_dword && s.fallback.scalar_layout);
+    const DeviceRequest hw11 = s.request, back13 = s.fallback;
+    // a GPU takes it: done
+    CHECK(next_device_request(hw11, DeviceAnswer::accepted, 0, gpu11, true).kind == DeviceStep::done);
+    // refused where a device fits (the CPU device, which a GPU-only request excludes): restore, not give_up
+    CHECK(next_device_request(hw11, DeviceAnswer::refused, 0, Lacks{}, true).kind == DeviceStep::restore);
+    // refused where none reports 1.1 (not reachable from a reading that stepped down, but never a failure here)
+    CHECK(next_device_request(hw11, DeviceAnswer::refused, 0, none, false).kind == DeviceStep::restore);
+    // the retries at 1.1 stay GPU-only, and when they give up: restore
+    Lacks aniso11;
+    aniso11.anisotropy = true;
+    s = next_device_request(hw11, DeviceAnswer::refused, 0, aniso11, false);
+    CHECK(s.kind == DeviceStep::attempt && s.request.level == ApiLevel::vk11 && s.request.hardware_only && s.retry == 0 &&
+          s.dropped == "SDL's samplerAnisotropy");
+    s = next_device_request(s.request, DeviceAnswer::refused, 1, aniso11, false);
+    CHECK(s.kind == DeviceStep::attempt && s.request.hardware_only && s.retry == 1 &&
+          s.dropped == "SDL's drawIndirectFirstInstance");
+    CHECK(next_device_request(s.request, DeviceAnswer::refused, 2, aniso11, false).kind == DeviceStep::restore);
+    // landing on a CPU device after all: restore
+    CHECK(next_device_request(hw11, DeviceAnswer::accepted_cpu, 0, Lacks{}, true).kind == DeviceStep::restore);
+    // the CPU device's 1.3 gone back to: accepted on the CPU device again, done (the same reading that stepped
+    // down does not step down again: no loop); refused this time, give_up, never another step
+    CHECK(next_device_request(back13, DeviceAnswer::accepted_cpu, 0, gpu11, true).kind == DeviceStep::done);
+    CHECK(next_device_request(back13, DeviceAnswer::accepted, 0, gpu11, true).kind == DeviceStep::done);
+    CHECK(next_device_request(back13, DeviceAnswer::refused, 0, gpu11, false).kind == DeviceStep::give_up);
+    CHECK(next_device_request(back13, DeviceAnswer::refused, 0, clip, false).kind == DeviceStep::give_up);
+    // driven to the end as make_sdl_gpu drives it, against an SDL_gpu that takes the CPU device at any 1.3
+    // request and no GPU at all: the CPU device's 1.3, after one GPU-only 1.1 request
+    {
+        DeviceRequest req = full, saved;
+        int requests = 0, retry = 0;
+        bool restored = false;
+        for (;;) {
+            requests++;
+            const bool hw = req.hardware_only;
+            const DeviceAnswer a = hw ? DeviceAnswer::refused : DeviceAnswer::accepted_cpu;
+            const DeviceStep st = next_device_request(req, a, retry, hw ? Lacks{} : gpu11, true);
+            if (st.kind == DeviceStep::done) break;
+            CHECK(requests < 10 && (st.kind == DeviceStep::attempt || st.kind == DeviceStep::restore));
+            if (requests >= 10 || st.kind == DeviceStep::give_up || st.kind == DeviceStep::refuse_api11) break;
+            if (st.kind == DeviceStep::restore) {
+                req = saved;
+                restored = true;
+                retry = 0;
+                continue;
+            }
+            if (st.step_down) saved = st.fallback;
+            retry = st.step_down ? 0 : st.retry + 1;
+            req = st.request;
+        }
+        CHECK(requests == 3 && restored && req.level == ApiLevel::vk13 && req.cpu_settled && !req.hardware_only);
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--clear-cases") == 0) return run_clear_cases();
     if (argc > 1 && std::strcmp(argv[1], "--clear-matrix") == 0) {
@@ -1822,6 +2866,13 @@ int main(int argc, char** argv) {
     test_cube_and_volume_textures();
     test_instanced_streams();
     test_pipeline_streams();
+    test_vk11_profile();
+    test_vk11_post_pass();
+    test_vk11_translation();
+    test_vk11_device();
+    test_vk11_features();
+    test_vk11_detection();
+    test_vk11_device_choice();
     if (g_fails) {
         std::printf("TEST_D3D9GPU_FAIL %d of %d checks\n", g_fails, g_checks);
         return 1;

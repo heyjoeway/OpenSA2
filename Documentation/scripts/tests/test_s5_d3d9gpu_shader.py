@@ -1988,13 +1988,13 @@ def _receipt_validation_fixture(root, run, build, mutant=None):
                 "settings_file":str(settings), "settings_sha256":validation_run.sha(settings),
                 "environment":{**validation_run.selection_environment(selected),"SA2_VALIDATION_OBSERVER_FD":"4",
                     "VK_INSTANCE_LAYERS":":".join([validation_run.PROBE_NAME,validation_run.LAYER_NAME] +
-                    (["VK_LAYER_SA2_vkcap"] if job == "load" else [])),"VK_LAYER_SETTINGS_PATH":str(settings.parent),
+                    (["VK_LAYER_SA2_vkcap"] if job in ("load","load-vk11") else [])),"VK_LAYER_SETTINGS_PATH":str(settings.parent),
                     "VK_ADD_LAYER_PATH":":".join([str(Path(probe["manifest"]).parent),str(Path(selected["manifest"]).parent)] +
-                        ([str(run/"vkcap/vkcap")] if job=="load" else [])),
+                        ([str(run/"vkcap/vkcap")] if job in ("load","load-vk11") else [])),
                     "LD_LIBRARY_PATH":selected["loader_environment"]["LD_LIBRARY_PATH"],
                     "VK_LAYER_DUPLICATE_MESSAGE_LIMIT":"1000000","VK_LOADER_LAYERS_DISABLE":"~implicit~",
                     "VK_DRIVER_FILES":validation_run.ICDS[driver],"SDL_LOGGING":"gpu=info","SDL_VIDEO_DRIVER":"offscreen"}}
-            if job=="load":record["environment"]["VKCAP_OUT"]=str(run/driver/"load-capture")
+            if job in ("load","load-vk11"):record["environment"]["VKCAP_OUT"]=str(run/driver/(job+"-capture"))
             path.write_text(json.dumps(record))
             (run / driver / (job + ".txt")).write_bytes(validation_run.LAYER_STARTUP.encode() + b"\n" + stderr.read_bytes())
     target = run / "nvidia/validation/load.json"

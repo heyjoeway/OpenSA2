@@ -429,14 +429,31 @@ def load(args) -> int:
         if line.startswith("BORDER ") and " unwrapped " in line:
             f = dict(x.split("=", 1) for x in line.split(" unwrapped ", 1)[1].split())
             border_sites.append({"variant": line.split()[1], **{k: int(v) for k, v in f.items()}})
+    # --vk11 (the Vulkan 1.1 profile's leg, load --vk11): every module written is SPIR-V 1.3, and every
+    # device the capture saw made was made at API 1.1 with no Vulkan 1.1, 1.2 or 1.3 feature structure
+    # (sTypes 49, 51, 53), as SDL_gpu's 1.1 path makes it
+    vk11 = None
+    if args.vk11:
+        versions = sorted({int.from_bytes(s.read_bytes()[4:8], "little") for s in out.rglob("*.spv")})
+        devices = [json.loads(line) for line in (cap / "devices.jsonl").read_text().splitlines() if line.strip()] \
+            if (cap / "devices.jsonl").is_file() else []
+        made = [d for d in devices if d.get("result") == 0]
+        vk11 = {"module_versions": [f"0x{v:08x}" for v in versions], "devices_made": len(made),
+                "instance_api_versions": sorted({str(d.get("instance_api_version")) for d in made}),
+                "feature_structures": sorted({t for d in made for t in d.get("pnext", []) if t in (49, 51, 53)})}
+        vk11["ok"] = (versions == [0x00010300] and bool(made) and vk11["instance_api_versions"] == ["1.1.0"]
+                      and not vk11["feature_structures"])
     ok = (marker == "SHADERS_LOAD_OK" and counts == want and not ve and layer_loaded(text) and layer_loaded(ctrl)
-          and sum(cve.values()) > 0 and not plan_["border_unmapped"] and handed_ok)
+          and sum(cve.values()) > 0 and not plan_["border_unmapped"] and handed_ok and (vk11 is None or vk11["ok"]))
+    control_what = ("the 1.3 profile's unlowered modules (SPIR-V 1.6) on SDL_gpu's 1.1 device (load --vk11-unlowered)"
+                    if args.vk11 else "the load on SDL's default device (no SDL_GPUVulkanOptions)")
     return put(run, f"C2-{args.driver}", {
         "check": "C2", "driver": args.driver, "pass": ok, "device": device, "marker": marker, "counts": counts,
+        "vk11": vk11,
         "validation_layer_loaded": layer_loaded(text), "border_variants": plan_["border_variants"],
         "border_unmapped": plan_["border_unmapped"], "border_unwrapped": border_sites,
         "specialized": [l.split()[1] for l in text.splitlines() if l.startswith("SPECIALIZED ")],
-        "validation_errors": ve, "control": {"what": "the load on SDL's default device (no SDL_GPUVulkanOptions)",
+        "validation_errors": ve, "control": {"what": control_what,
                                              "validation_layer_loaded": layer_loaded(ctrl),
                                              "validation_errors": cve, "seen": sum(cve.values()) > 0},
         "handed_to_the_driver": {"modules_written": len(written), "modules_captured": len(handed),
@@ -1519,7 +1536,7 @@ def c4(args) -> int:
                    f"declaration; original default draw accounts {draws_ok}"})
 
 
-EXPECTED = ["C1", "corpus", "C4", "C4-caps-off", "C2-nvidia", "C2-lvp", "C3-nvidia", "C3-lvp", "C3-controls-nvidia",
+EXPECTED = ["C1", "corpus", "C4", "C4-caps-off", "C2-nvidia", "C2-lvp", "C2-nvidia-vk11", "C2-lvp-vk11", "C3-nvidia", "C3-lvp", "C3-controls-nvidia",
             "C3-controls-lvp", "C6", "C7-nvidia", "C7-lvp", "C8-nvidia", "C8-lvp", "C9-nvidia", "C9-lvp", "C10",
             "C11-nvidia", "C11-lvp", "C12-nvidia", "C12-lvp", "C13-nvidia", "C13-lvp"]
 
@@ -1726,6 +1743,7 @@ def main(argv=None) -> int:
     ld.add_argument("--run", required=True); ld.add_argument("--driver", required=True); ld.add_argument("--log", required=True)
     ld.add_argument("--control-log", required=True); ld.add_argument("--plan", required=True)
     ld.add_argument("--out-dir", required=True); ld.add_argument("--capture", required=True)
+    ld.add_argument("--vk11", action="store_true", help="the Vulkan 1.1 profile's leg (load --vk11)")
     cn = sub.add_parser("canon")
     cn.add_argument("--run", required=True); cn.add_argument("--driver", required=True); cn.add_argument("--gpl", required=True)
     cn.add_argument("--linked", required=True); cn.add_argument("--captures", nargs="+", required=True)

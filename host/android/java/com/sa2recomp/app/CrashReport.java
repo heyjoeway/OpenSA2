@@ -46,7 +46,8 @@ import java.util.regex.Pattern;
  *
  *  - the app's version, the device, its SoC, its GPU and Vulkan driver (the player's d3d9gpu.runrec,
  *    sdl_gpu; GL_RENDERER from a throwaway EGL context when the player never got that far), and the
- *    Vulkan version the system declares (the renderer needs 1.3);
+ *    Vulkan version the system declares (the renderer needs 1.1; below 1.3 it runs its Vulkan 1.1
+ *    profile, which the "gpu device:" line names from the player's record: VulkanSupport);
  *  - how the session ended (Outcome, read from last-session.txt's "ended:" line: the game's own exit
  *    status counts, and the player's exit status alone does not, since the interactive player keeps
  *    its verifier codes and a clean Back still reads "the player exited 4");
@@ -495,7 +496,8 @@ final class CrashReport {
         if (g != null) {
             out.append("gpu device: lacking ").append(g.isNull("vulkan_lacking") ? "nothing" : g.optString("vulkan_lacking", "nothing"))
                .append("; depth clip and clamp ").append(g.optBoolean("depth_clip_and_clamp"))
-               .append("; clip distance ").append(g.optBoolean("clip_distance")).append('\n');
+               .append("; clip distance ").append(g.optBoolean("clip_distance"))
+               .append(VulkanSupport.profileText(g)).append('\n');
         }
         JSONObject present = (JSONObject) gpuRec.get("present");
         JSONObject draws = (JSONObject) gpuRec.get("draws");
@@ -633,26 +635,17 @@ final class CrashReport {
         return -1;
     }
 
-    /** True when the system declares Vulkan 1.3, which the renderer's device request needs. */
-    static boolean hasVulkan13(Context c) {
-        int v = vulkanVersion(c);
-        return v >= 0 && ((v >>> 22) > 1 || ((v >>> 22) == 1 && ((v >>> 12) & 0x3ff) >= 3));
-    }
-
     static String vulkanShort(Context c) {
-        int v = vulkanVersion(c);
-        return v < 0 ? "none" : (v >>> 22) + "." + ((v >>> 12) & 0x3ff);
+        return VulkanSupport.shortText(vulkanVersion(c));
     }
 
     private static String vulkanText(Context c) {
-        int version = vulkanVersion(c), level = -1;
+        int level = -1;
         FeatureInfo[] fs = c.getPackageManager().getSystemAvailableFeatures();
         if (fs != null) {
             for (FeatureInfo f : fs) if ("android.hardware.vulkan.level".equals(f.name)) level = f.version;
         }
-        if (version < 0) return "none declared (the renderer needs Vulkan 1.3)";
-        return (version >>> 22) + "." + ((version >>> 12) & 0x3ff) + "." + (version & 0xfff)
-               + (level >= 0 ? ", level " + level : "") + (hasVulkan13(c) ? "" : " (the renderer needs 1.3)");
+        return VulkanSupport.declaredText(vulkanVersion(c), level);
     }
 
     private static String memory(Context c) {

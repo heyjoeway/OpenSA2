@@ -714,6 +714,8 @@ private:
     // a draw whose pipeline owes the depth clamp (R_DEPTH_CLAMP) on a device without depth clip and
     // clamp is drawn clip-only, not refused (GpuInfo::depth_clamp_clip_only)
     bool depth_clamp_clip_only_ = false;
+    // the GPU's device was made at Vulkan 1.1 (GpuInfo::vk11): a module above SPIR-V 1.3 is refused
+    bool vk11_ = false;
     bool vk_query_ok_ = false;
     // R1: the profile the translator compiles with, DXVK's shader options for this device
     // (d9g_shader_profile.h determine_profile of GpuInfo's shader facts)

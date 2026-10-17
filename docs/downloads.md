@@ -9,7 +9,7 @@ The downloads include recompiled game logic and the port's runtime. They include
 | Platform | Download | Requirements |
 | --- | --- | --- |
 | Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3/OpenSA2-v0.1.0-alpha.3-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
-| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3/OpenSA2-v0.1.0-alpha.3-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and compatible Vulkan graphics. Device support is experimental. |
+| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3/OpenSA2-v0.1.0-alpha.3-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and Vulkan 1.1 or later graphics. Device support is experimental. |
 | Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3/OpenSA2-v0.1.0-alpha.3-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
 
 ## Windows

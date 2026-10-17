@@ -98,6 +98,7 @@ Device::Device(std::unique_ptr<Gpu> gpu, const DeviceSetup& s) : gpu_(std::move(
     dp_.sampler_clamp_to_border = gpu_->info().sampler_clamp_to_border;
     dp_.depth_clip_and_clamp = gpu_->info().depth_clip_and_clamp;
     depth_clamp_clip_only_ = gpu_->info().depth_clamp_clip_only && !dp_.depth_clip_and_clamp;
+    vk11_ = gpu_->info().vk11;
     vk_query_ok_ = gpu_->info().vk_query_ok;
     report().pipeline.device_params = vk_query_ok_;
     // R1: DXVK's shader options for this device, from the facts the GPU read (d9g_gpu.h); without

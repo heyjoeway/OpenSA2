@@ -266,6 +266,23 @@ Translated translate(const void* bytecode, size_t bytes, const ShaderProfile& pr
                      bool disassemble = false);
 Built build(const Translated& shader, const ShaderProfile& profile, const Linkage* linkage);
 
+// The vk11 profile's lowering (ShaderProfile::vk11; d9g_shader_abi.cpp), which build() runs on each
+// module it builds with that profile. dxbc-spirv builds SPIR-V 1.6 with PhysicalStorageBuffer64 and
+// the Vulkan memory model, and the alpha test (and D3D9 texkill) as a demote; a device SDL_gpu makes at
+// Vulkan 1.1 takes SPIR-V 1.3 and has Vulkan 1.0 features only. The module becomes SPIR-V 1.3, Logical
+// GLSL450, with the two memory-model capabilities dropped, the entry point's interface trimmed to its
+// inputs and outputs, and each [OpLabel, OpDemoteToHelperInvocation, OpBranch] block made [OpLabel,
+// OpKill] (with the demote capability dropped); the ID bound is unchanged. Everything else must already
+// be a 1.0 construct, from an allowlist of capabilities (ClipDistance only where `clip_distance`), storage
+// classes, execution modes and operand bits; a demote is lowered only in a fragment shader's entry
+// function, never in a loop, never where an OpPhi reads its block, and never where a derivative or an
+// implicit-LOD sample can run after it (a texkill before a texld: OpKill would leave the quad's
+// derivatives undefined). Returns "" when lowered. Otherwise `words` is unchanged and the reason is
+// "unmapped: vk11: <what>" for a construct the 1.1 device cannot take (the draw is unmapped by name), or
+// starts "vk11 lowering:" for a module that is not the translator's (malformed, or a SPIR-V version
+// other than 1.6: a pin change), which is a failure.
+std::string lower_vk11(std::vector<uint32_t>& words, Stage stage, bool clip_distance);
+
 // DxvkShaderIo::checkStageCompatibility over the two stages' I/O (src/dxvk/dxvk_shader_io.cpp:43-93),
 // with DXVK's own code: false means DXVK's linked variant rewrites the pixel shader's I/O.
 bool stages_compatible(const Translated& vs, const Translated& ps, bool match_semantics);

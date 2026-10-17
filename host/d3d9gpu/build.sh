@@ -158,7 +158,8 @@ for pair in "GOBJS DOBJS" "GOBJS TOBJS" "DOBJS TOBJS"; do
 done
 
 echo "== test_d3d9gpu"
-$CXX "${FLAGS[@]}" -I"$HERE/test" -DSA2_TEST_TMP="\"$OUT\"" -o "$OUT/test_d3d9gpu" "$HERE/test/test_d3d9gpu.cpp" \
+# the Khronos headers of the pinned SDL tarball: the vk11 detection test's stub Vulkan driver
+$CXX "${FLAGS[@]}" -I"$HERE/test" -I"$REFS/sdl/khronos" -DSA2_TEST_TMP="\"$OUT\"" -o "$OUT/test_d3d9gpu" "$HERE/test/test_d3d9gpu.cpp" \
   "${CORE[@]}" "$HERE/d9g_gpu_cpu.cpp" "$HOST/player/texcodec.cpp" "$HOST/player/sha256.cpp" "${SHADER_LIBS[@]}" -lpng -ldl
 
 echo "== d3d9gpu_state_check"

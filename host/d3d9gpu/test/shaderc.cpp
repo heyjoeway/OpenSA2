@@ -4,7 +4,9 @@
 // (host/d3d9gpu/test_shaders.sh runs them).
 //
 //   d3d9gpu_shaderc facts                    query the Vulkan device VK_DRIVER_FILES names; print
-//                                            the facts determine_profile() reads, as JSON
+//                                            the facts determine_profile() reads, as JSON (with
+//                                            --vk11: read as on a device made at Vulkan 1.1, so
+//                                            "vk11": true, the 1.1 profile's facts file)
 //   d3d9gpu_shaderc profile FACTS.json       print the profile record those facts give
 //   d3d9gpu_shaderc compile FACTS.json OUT [--bgra MASK] [--border-u M --border-v M --border-linear M]
 //                          [--depth-clamp] [--sampler-modes WORD] [--cache DIR --repo DIR [--verify]] [--ftz-daz]
@@ -42,6 +44,12 @@
 //                                            (GPU, check C7) SDL_gpu's leg of test/null_probe.cpp:
 //                                            the input DXVK leaves to its null stream fed (R, G, B, A)
 //                                            per instance; the centre pixel, OUT/probe-null.json
+//
+// --vk11, anywhere on a GPU mode's line (load, border, modes, probe-null): SDL_gpu's device made at Vulkan
+// 1.1 as the second host makes it for a driver offering only 1.1 (VulkanFeatures at ApiLevel::vk11), its
+// facts read at 1.1, so the 1.1 profile and every module lowered to SPIR-V 1.3. --vk11-unlowered: the same
+// device with the 1.3 profile's modules (SPIR-V 1.6, unlowered), the validation layer's positive control
+// on it (VUID-VkShaderModuleCreateInfo-pCode-08737 and the capabilities' VUIDs must be printed).
 //
 // Exit status 0 only when every shader translated and built (and, for the GPU modes, their marker
 // is OK); each failure is printed with the shader's name and the translator's reason. Nothing it
@@ -110,15 +118,20 @@ std::string json_str(const std::string& s) {
   return o + "\"";
 }
 
+// The GPU modes' device (--vk11, --vk11-unlowered; GpuSession::open), and the facts mode's level.
+enum class Session { vk13, vk11, vk11_unlowered };
+Session g_session = Session::vk13;
+
 int facts() {
+  const ApiLevel cap = g_session == Session::vk13 ? ApiLevel::vk13 : ApiLevel::vk11;
 #ifdef _WIN32
   const HMODULE lib = LoadLibraryA("vulkan-1.dll");
   if (!lib) { fprintf(stderr, "no Vulkan loader\n"); return 2; }
-  DeviceFactsQuery q = query_device_facts(reinterpret_cast<void*>(GetProcAddress(lib, "vkGetInstanceProcAddr")), "");
+  DeviceFactsQuery q = query_device_facts(reinterpret_cast<void*>(GetProcAddress(lib, "vkGetInstanceProcAddr")), "", cap);
 #else
   void* lib = dlopen("libvulkan.so.1", RTLD_NOW);
   if (!lib) { fprintf(stderr, "no Vulkan loader\n"); return 2; }
-  DeviceFactsQuery q = query_device_facts(dlsym(lib, "vkGetInstanceProcAddr"), "");
+  DeviceFactsQuery q = query_device_facts(dlsym(lib, "vkGetInstanceProcAddr"), "", cap);
 #endif
   if (!q.ok) { fprintf(stderr, "facts: %s\n", q.how.c_str()); return 2; }
   fputs(facts_json(q).c_str(), stdout);
@@ -158,6 +171,7 @@ bool load_facts(const std::string& path, DeviceFacts& f, std::string& device) {
     // host 2's own fact, optional: a facts file written before it existed is a device that has them
     if (j.has("sub_dword_access")) f.sub_dword_access = j["sub_dword_access"].boolean();
     if (j.has("clip_distance")) f.clip_distance = j["clip_distance"].boolean();
+    if (j.has("vk11")) f.vk11 = j["vk11"].boolean();
   } catch (const std::exception& e) {
     fprintf(stderr, "%s: %s\n", path.c_str(), e.what());
     return false;
@@ -235,8 +249,9 @@ std::string stem(const std::string& path) {
 
 // ---------------------------------------------------------------- the GPU modes (R1 U6)
 // SDL_gpu's device made as the second host makes it (d9g_gpu_sdl.cpp make_sdl_gpu: Vulkan 1.3 and
-// VulkanFeatures), in debug mode, the profile from its own facts (query_device_facts through the
-// loader SDL loaded, as the device reads them). The validation layer is the caller's: SDL's debug
+// VulkanFeatures, or with --vk11 Vulkan 1.1 and its 1.0 features), in debug mode, the profile from its own
+// facts (query_device_facts through the loader SDL loaded, at the level the device was made at, as the
+// device reads them). The validation layer is the caller's: SDL's debug
 // mode enables VK_LAYER_KHRONOS_validation where the loader finds it, and test_shaders.sh names the
 // pinned build (VK_ADD_LAYER_PATH, VK_INSTANCE_LAYERS) and fails on any "Validation Error" printed.
 struct GpuSession {
@@ -247,7 +262,8 @@ struct GpuSession {
   bool open(bool with_features, std::string& err) {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_Init(SDL_INIT_VIDEO)) { err = std::string("SDL_Init: ") + SDL_GetError(); return false; }
-    VulkanFeatures features;
+    const ApiLevel level = g_session == Session::vk13 ? ApiLevel::vk13 : ApiLevel::vk11;
+    VulkanFeatures features(true, true, true, level);
     SDL_GPUVulkanOptions vo{};
     vo.vulkan_api_version = features.api_version();
     vo.feature_list = features.feature_list();
@@ -265,8 +281,12 @@ struct GpuSession {
     SDL_PropertiesID dp = SDL_GetGPUDeviceProperties(dev);
     device_name = SDL_GetStringProperty(dp, SDL_PROP_GPU_DEVICE_NAME_STRING, "");
     border_capability = SDL_GetBooleanProperty(dp, "SDL.gpu.device.sa2recomp.sampler_clamp_to_border", false);
-    DeviceFactsQuery q = query_device_facts(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), device_name);
+    DeviceFactsQuery q =
+        query_device_facts(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), device_name, level);
     if (!q.ok) { err = "the device facts: " + q.how; return false; }
+    // as the device pins it (make_sdl_gpu): the level it was made at; the positive control keeps the 1.3
+    // profile's modules on the 1.1 device
+    q.facts.vk11 = g_session == Session::vk11;
     profile = determine_profile(q.facts);
     std::string rec = profile.record();
     profile_sha = sha256_of(rec.data(), rec.size());
@@ -1282,6 +1302,17 @@ int main(int argc, char** argv) {
   // whole lines on stdout: a layer's or SDL's stderr text written into the same log (the capture
   // layer's account when the loader unloads it) then falls between lines, never inside a marker
   setvbuf(stdout, nullptr, _IOLBF, 0);
+  // --vk11 and --vk11-unlowered, anywhere: taken out of the line before the modes count their arguments
+  {
+    int kept = 1;
+    for (int i = 1; i < argc; i++) {
+      if (!strcmp(argv[i], "--vk11")) g_session = Session::vk11;
+      else if (!strcmp(argv[i], "--vk11-unlowered")) g_session = Session::vk11_unlowered;
+      else argv[kept++] = argv[i];
+    }
+    argc = kept;
+    argv[argc] = nullptr;
+  }
   if (argc >= 2 && !strcmp(argv[1], "facts"))
     return facts();
   if (argc >= 5 && !strcmp(argv[1], "sampler-mode")) {

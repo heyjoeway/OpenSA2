@@ -69,8 +69,8 @@ import java.util.Map;
  *
  * When the installer refuses the game, InstallVerdict puts the cause and the fix above its lines; while
  * it runs, a line under the buttons counts the time, since a check can take minutes with no output.
- * A phone whose system declares no Vulkan 1.3 is told so before it imports anything: the renderer's
- * device needs 1.3 (host/d3d9gpu).
+ * A phone whose system declares no Vulkan 1.1 is told so before it imports anything: the renderer's
+ * device needs 1.1 (host/d3d9gpu; VulkanSupport).
  *
  * The installer runs with the environment the native session sets (HOME = the files folder,
  * XDG_CONFIG_HOME = files/config, XDG_DATA_HOME = files/data), so both read the same config.
@@ -761,11 +761,9 @@ public class Sa2SetupActivity extends Activity {
         startActivity(play);
     }
 
-    /** A warning when the system declares no Vulkan 1.3, which the renderer needs; empty otherwise. */
+    /** A warning when the system declares no Vulkan 1.1, which the renderer needs; empty otherwise. */
     private String vulkanNote() {
-        if (CrashReport.hasVulkan13(this)) return "";
-        return "\n\nNote: this phone's graphics driver reports Vulkan " + CrashReport.vulkanShort(this)
-               + ". OpenSA2's renderer needs Vulkan 1.3, so the game will probably not start on this phone yet.";
+        return VulkanSupport.setupNote(CrashReport.vulkanVersion(this));
     }
 
     private String versionName() {

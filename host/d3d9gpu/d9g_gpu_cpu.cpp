@@ -36,7 +36,7 @@ public:
         return draw::Encoded{bytes};
     }
     std::vector<draw::Values> draw_requests_;
-    CpuGpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only) : bc_(bc) {
+    CpuGpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only, bool vk11) : bc_(bc) {
         if (!bc) info_.bc_unsupported = "BC1_RGBA_UNORM, BC2_RGBA_UNORM, BC3_RGBA_UNORM";
         info_.driver = "cpu";
         info_.device_name = "d9g CPU model";
@@ -67,6 +67,12 @@ public:
         f.resource_indexing = true;
         // shaderClipDistance: a test parameter (make_cpu_gpu), as on a Mali GPU when false
         f.clip_distance = info_.clip_distance = clip_distance;
+        // The Vulkan 1.1 profile: a test parameter (make_cpu_gpu), as a device made at 1.1 has it
+        if (vk11) {
+            f.vk11 = info_.vk11 = true;
+            f.sub_dword_access = info_.sub_dword_access = false;
+            info_.vk11_reason = "cpu model: a test value";
+        }
     }
     uint32_t create_texture(const TexDesc& d) override {
         if ((d.type == TexType::cube && d.w != d.h) || (d.type == TexType::volume && d.target) ||
@@ -209,8 +215,9 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only) {
-    return std::make_unique<CpuGpu>(clamp_to_border, clip_and_clamp, clip_distance, bc, clip_only);
+std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only,
+                                  bool vk11) {
+    return std::make_unique<CpuGpu>(clamp_to_border, clip_and_clamp, clip_distance, bc, clip_only, vk11);
 }
 
 bool cpu_gpu_bytes(Gpu* g, uint32_t tex, uint32_t level, std::string* out, uint32_t layer) {

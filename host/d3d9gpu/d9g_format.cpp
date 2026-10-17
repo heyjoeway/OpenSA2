@@ -13,7 +13,8 @@ constexpr uint32_t fourcc(char a, char b, char c, char d) {
 // X8R8G8B8 to VK_FORMAT_B8G8R8A8_UNORM (X8 with an A=1 swizzle), DXT1/3/5 to
 // BC1_RGBA/BC2/BC3, D24S8 to D24_UNORM_S8_UINT.
 // dxvk_view_identity per DXVK's src/d3d9/d3d9_format.cpp: A8R8G8B8 :14-17, X8R8G8B8 :19-24 (A=ONE),
-// DXT1 :211-214, DXT3 :221-224, DXT5 :231-234, D24S8 :245-248
+// DXT1 :211-214, DXT3 :221-224, DXT5 :231-234, D24S8 :245-248, R5G6B5 :26-29 (identity),
+// A8 :50-55 (R8 with a (0, 0, 0, R) swizzle, so not an identity view)
 const FormatInfo kFormats[] = {
     {21, GFmt::bgra8, 0, 4, false, false, false, true, "A8R8G8B8"},
     {22, GFmt::bgra8, 0, 4, false, false, true, false, "X8R8G8B8"},
@@ -21,6 +22,8 @@ const FormatInfo kFormats[] = {
     {fourcc('D', 'X', 'T', '3'), GFmt::bc2, 16, 0, false, false, false, true, "DXT3"},
     {fourcc('D', 'X', 'T', '5'), GFmt::bc3, 16, 0, false, false, false, true, "DXT5"},
     {75, GFmt::d24s8, 0, 4, true, true, false, true, "D24S8"},
+    {23, GFmt::bgra8, 0, 2, false, false, false, true, "R5G6B5", Expand::r5g6b5},
+    {28, GFmt::bgra8, 0, 1, false, false, false, false, "A8", Expand::a8},
 };
 }  // namespace
 
@@ -61,6 +64,22 @@ uint32_t full_chain(uint32_t w, uint32_t h) {
 
 void x8_alpha_fill(uint8_t* p, size_t bytes) {
     for (size_t i = 3; i < bytes; i += 4) p[i] = 0xFF;
+}
+
+void expand_to_bgra8(Expand e, const uint8_t* src, size_t pixels, uint8_t* dst) {
+    for (size_t i = 0; i < pixels; i++, dst += 4) {
+        if (e == Expand::r5g6b5) {
+            const uint32_t v = uint32_t(src[i * 2]) | uint32_t(src[i * 2 + 1]) << 8;   // little-endian word
+            const uint32_t r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+            dst[0] = uint8_t(b << 3 | b >> 2);
+            dst[1] = uint8_t(g << 2 | g >> 4);
+            dst[2] = uint8_t(r << 3 | r >> 2);
+            dst[3] = 0xFF;
+        } else {
+            dst[0] = dst[1] = dst[2] = 0;
+            dst[3] = src[i];
+        }
+    }
 }
 
 void decode_d3dcolor(uint32_t c, float rgba[4]) {

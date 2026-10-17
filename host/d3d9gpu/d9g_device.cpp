@@ -166,11 +166,14 @@ uint32_t Device::make_gpu_image(Image& img) {
     }
     // A new BC image is zero blocks (DXVK's initImage), which DXT1 decodes to opaque black (a zero
     // block's c0 <= c1, index 0: c0, alpha 1): the decoded texture's levels start as that, not as the
-    // backend's zero texels. DXT3's and DXT5's zero blocks decode to zero texels, as made.
-    if (t && img.decoded) {
+    // backend's zero texels. DXT3's and DXT5's zero blocks decode to zero texels, as made. A zero
+    // R5G6B5 texel samples as opaque black too (the format has no alpha); a zero A8 one as zero.
+    const bool opaque_zero = img.fi->expand == Expand::r5g6b5 && !d.target;
+    if (t && (img.decoded || opaque_zero)) {
         const uint8_t zero[16] = {};
         std::vector<uint8_t> px;
-        if (!tex::decode_level_sampled(zero, 1, 1, img.d3dfmt, 0, &px)) { release_gpu_texture(t); return 0; }
+        if (opaque_zero) px = {0, 0, 0, 0xFF};
+        else if (!tex::decode_level_sampled(zero, 1, 1, img.d3dfmt, 0, &px)) { release_gpu_texture(t); return 0; }
         if (px[0] || px[1] || px[2] || px[3]) {
             std::vector<uint8_t> fill;
             for (uint32_t layer = 0; layer < img.layers; layer++)
@@ -243,6 +246,12 @@ bool Device::upload_image_subresource(Image& img, uint32_t sub) {
     } else if (img.fi->x8) {
         filled = *src;
         x8_alpha_fill(filled.data(), filled.size());
+        src = &filled;
+    } else if (img.fi->expand != Expand::none) {
+        // R5G6B5 and A8: the store's packed pixels (every slice of a volume level) as BGRA8.
+        const size_t pixels = src->size() / img.fi->pixel_bytes;
+        filled.resize(pixels * 4);
+        expand_to_bgra8(img.fi->expand, src->data(), pixels, filled.data());
         src = &filled;
     }
     const bool ok = gpu_->upload_subresource(img.gpu, sub / img.levels, sub % img.levels, src->data(), src->size());

@@ -1,6 +1,6 @@
 # Download and play OpenSA2
 
-Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.2). The current release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. The event after Green Forest can show a black screen. Read the [limitations](status.md) before testing.
+Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.2). The current release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. The Android APK was updated to 0.1.0-alpha.2.1, which plays the story movies; in the Windows and Linux packages they still stay black. Read the [limitations](status.md) before testing.
 
 You need your own supported, unmodified **2012 PC release of Sonic Adventure 2**. That is the version Steam sells and installs today. "2012" names the release, not an old build: do not look for an older copy. Install the game through Steam, remove any mods, and use its folder as it is. The installer checks every file it reads against the known hashes, so a modified, repacked, or downloaded copy fails the check.
 

@@ -24,7 +24,7 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 
 ## Known limitations
 
-- In the Hero story, the event after Green Forest (the Prison Island movie) can show only Tails's plane on a black screen, with no sound, and then stop responding. Earlier builds stopped at the same point on a missing block in the CRT `_CItan` x87 fallback (`0x00859AC8`). Builds since 2026-10-15 run the x87 tan, sin, and cos fallbacks and the NaN tail of the two-argument math dispatch, so the event no longer traps there. Players report the black screen on those builds, and its cause is under investigation.
+- In the Windows and Linux 0.1.0-alpha.2 packages, every story movie stays black and silent and never ends, starting with the Prison Island movie after Green Forest. Sofdec's B-picture slice loop (`0x00872650`) sits in the executable section PSFD00, which the address-taken scan did not cover, so the movie decoder's thread ended on a function table miss while it held the movie library's lock. The function is lifted in the Android APK 0.1.0-alpha.2.1, where the movies play, and the scan now covers every executable section. Earlier builds stopped at the same event on a missing block in the CRT `_CItan` x87 fallback (`0x00859AC8`), fixed on 2026-10-15.
 - The renderer needs Vulkan 1.3. A device whose driver offers an older version, or lacks a feature the renderer asks for, stops before the first frame. The Android setup screen warns when the system reports an older Vulkan version.
 - Broad stage, boss, event, and game-mode testing is unfinished. Additional missing blocks can exist outside the exercised paths.
 - Widescreen rendering is in development. The viewport and main HUD have been adjusted, but several menus and overlays still need work, including the boss gauge, stage map, title cards, and story-select art.
@@ -35,6 +35,6 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 
 ## Work still needed
 
-The immediate game-path work is the event after Green Forest and smoke tests across stages and events, including the other movie events. Wider testing must then cover long sessions, saves, controllers, and rendering behavior on more hardware. Public build setup and dependency documentation also need work before the checkout can offer a complete build guide.
+The immediate game-path work is smoke tests across stages and events, including the Dark story's movies and the real-time events that embed movies. Wider testing must then cover long sessions, saves, controllers, and rendering behavior on more hardware. Public build setup and dependency documentation also need work before the checkout can offer a complete build guide.
 
 There are no release dates or platform-support promises. Check this page when reporting an issue, then include the steps and text diagnostics needed to reproduce it. On Android, the setup screen's **Report on GitHub** button copies a crash report and opens the bug-report form.

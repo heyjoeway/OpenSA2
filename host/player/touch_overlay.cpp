@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #include "touch_overlay_spirv.h"
 
@@ -19,7 +22,7 @@ constexpr int kMaxShapes = sa2_touch_spirv::kMaxShapes;
 // XInput's XINPUT_GAMEPAD_* bits.
 constexpr uint16_t kA = 0x1000, kB = 0x2000, kX = 0x4000, kY = 0x8000, kStart = 0x0010;
 
-// The controls, in pixels of a w x h surface, all sized by its short side s.
+// The controls, in pixels of a w x h surface, all sized by s (the short side, times the scale).
 struct Button {
     float x, y, hx, hy, r;       // centre, half size, corner radius
     uint16_t bit;                // an XInput button, or 0
@@ -28,31 +31,74 @@ struct Button {
     bool round;                  // hit by distance from the centre, else by the box
 };
 enum { B_A, B_B, B_X, B_Y, B_START, B_LT, B_RT, B_COUNT };
+static_assert(B_COUNT == kButtons, "Settings::sends is by button");
 struct Layout {
     float s;
     float stick_x, stick_y, stick_r;   // the stick's resting place and radius
+    bool stick_left;                   // the stick takes the left half of the window, else the right
     Button b[B_COUNT];
 };
 
-Layout layout(float w, float h) {
+// The band the controls take below the picture, and how tall they need it in units of s: the top
+// row (START, LT, RT) ends 0.12 s down, the diamond starts 0.46 s up from the bottom, 0.02 s apart.
+constexpr float kBelowNeed = 0.60f;
+constexpr float kBelowMin = 0.30f;      // the least band, in the window's short side, worth it
+
+// The picture's bottom edge as the device presents a fw x fh frame in a w x h window
+// (host/d3d9gpu/d9g_gpu.h fit_rect: centred at its own aspect, the whole window when the two
+// agree to within 2 px), or h when there is no frame.
+float picture_bottom(float w, float h, uint32_t fw, uint32_t fh) {
+    if (!fw || !fh || w <= 0 || h <= 0) return h;
+    if (double(w) * fh > double(h) * fw) return h;            // wider than the frame: bars at the sides
+    const float ph = std::min(h, std::round(w * float(fh) / float(fw)));
+    if (h - ph <= 2.0f) return h;
+    return std::floor((h - ph) / 2) + ph;
+}
+
+Layout layout(const Settings& st, float w, float h, uint32_t fw, uint32_t fh) {
     Layout l{};
-    const float s = std::min(w, h);
+    const float short_side = std::min(w, h);
+    float s = short_side * st.scale;
+    // The control area: the window, or the band under the picture.
+    float ax = 0, ay = 0, aw = w, ah = h;
+    const float bottom = picture_bottom(w, h, fw, fh);
+    const bool below = h - bottom >= kBelowMin * short_side;
+    if (below) {
+        ay = bottom;
+        ah = h - bottom;
+        s = std::min(s, ah / kBelowNeed);
+    }
+    const Place* place = below ? st.below : st.over;
+    const auto at = [&](Group g, float dx, float dy, float* x, float* y) {
+        const Place& p = place[int(g)];
+        *x = p.set ? ax + p.x * aw : dx;
+        *y = p.set ? ay + p.y * ah : dy;
+    };
     const float m = 0.04f * s;
     l.s = s;
     l.stick_r = 0.12f * s;
-    l.stick_x = m + 1.6f * l.stick_r;
-    l.stick_y = h - m - 1.6f * l.stick_r;
+    at(Group::Stick, ax + m + 1.6f * l.stick_r, ay + ah - m - 1.6f * l.stick_r, &l.stick_x, &l.stick_y);
+    l.stick_left = l.stick_x < 0.5f * w;
     const float r = 0.075f * s, d = 0.135f * s;
-    const float cx = w - m - d - r, cy = h - m - d - r;
+    float cx, cy;
+    at(Group::Face, ax + aw - m - d - r, ay + ah - m - d - r, &cx, &cy);
     l.b[B_A] = {cx, cy + d, r, r, r, kA, 0, {0.30f, 0.80f, 0.35f}, true};
     l.b[B_B] = {cx + d, cy, r, r, r, kB, 0, {0.92f, 0.30f, 0.30f}, true};
     l.b[B_X] = {cx - d, cy, r, r, r, kX, 0, {0.30f, 0.55f, 0.95f}, true};
     l.b[B_Y] = {cx, cy - d, r, r, r, kY, 0, {0.95f, 0.80f, 0.25f}, true};
     const float ph = 0.035f * s;
-    l.b[B_START] = {w * 0.5f, m + ph, 0.075f * s, ph, ph, kStart, 0, {0.85f, 0.85f, 0.85f}, false};
+    at(Group::Start, ax + aw * 0.5f, ay + m + ph, &cx, &cy);
+    l.b[B_START] = {cx, cy, 0.075f * s, ph, ph, kStart, 0, {0.85f, 0.85f, 0.85f}, false};
     const float th = 0.04f * s, tw = 0.09f * s;
-    l.b[B_LT] = {m + tw, m + th, tw, th, th, 0, 1, {0.85f, 0.85f, 0.85f}, false};
-    l.b[B_RT] = {w - m - tw, m + th, tw, th, th, 0, 2, {0.85f, 0.85f, 0.85f}, false};
+    at(Group::LT, ax + m + tw, ay + m + th, &cx, &cy);
+    l.b[B_LT] = {cx, cy, tw, th, th, 0, 1, {0.85f, 0.85f, 0.85f}, false};
+    at(Group::RT, ax + aw - m - tw, ay + m + th, &cx, &cy);
+    l.b[B_RT] = {cx, cy, tw, th, th, 0, 2, {0.85f, 0.85f, 0.85f}, false};
+    for (int i = 0; i < B_COUNT; ++i)
+        if (st.mapped[i]) {
+            l.b[i].bit = st.sends[i].bit;
+            l.b[i].trigger = st.sends[i].trigger;
+        }
     return l;
 }
 
@@ -110,13 +156,19 @@ struct Overlay {
     bool gpu_failed = false;
     Stats st;
     Uniforms u{};
+    Settings settings;
+    uint32_t frame_w = 0, frame_h = 0;   // the game's frame at the last Present (set_frame)
+    uint32_t no_window_w = 1280, no_window_h = 720;   // set_size
 };
 
 namespace {
 
 void window_size(const Overlay* o, float* w, float* h) {
     int iw = 0, ih = 0;
-    if (!o->win || !SDL_GetWindowSizeInPixels(o->win, &iw, &ih) || iw <= 0 || ih <= 0) { iw = 1280; ih = 720; }
+    if (!o->win || !SDL_GetWindowSizeInPixels(o->win, &iw, &ih) || iw <= 0 || ih <= 0) {
+        iw = int(o->no_window_w);
+        ih = int(o->no_window_h);
+    }
     *w = float(iw);
     *h = float(ih);
 }
@@ -143,7 +195,7 @@ void recompute(Overlay* o) {
         s.connected = true;
         float w, h;
         window_size(o, &w, &h);
-        const Layout l = layout(w, h);
+        const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h);
         for (const Finger& f : o->fingers) {
             if (f.role == R_BUTTON && f.button >= 0) {
                 const Button& b = l.b[f.button];
@@ -247,6 +299,7 @@ bool ensure_pipeline(Overlay* o) {
 
 struct ShapeList {
     Uniforms* u;
+    float opacity;               // SA2_TOUCH_OPACITY: every alpha times this, at most 1
     int n = 0;
     void add(float x, float y, float hx, float hy, float r, float ring, const float rgb[3], float a) {
         if (n >= kMaxShapes) return;
@@ -255,7 +308,7 @@ struct ShapeList {
         float* s = u->style[n];
         s[0] = r; s[1] = ring; s[2] = 0; s[3] = 0;
         float* c = u->color[n];
-        c[0] = rgb[0]; c[1] = rgb[1]; c[2] = rgb[2]; c[3] = a;
+        c[0] = rgb[0]; c[1] = rgb[1]; c[2] = rgb[2]; c[3] = std::min(1.0f, a * opacity);
         ++n;
     }
 };
@@ -283,7 +336,7 @@ bool handle_event(Overlay* o, const SDL_Event& e) {
     ++o->st.finger_events;
     float w, h;
     window_size(o, &w, &h);
-    const Layout l = layout(w, h);
+    const Layout l = layout(o->settings, w, h, o->frame_w, o->frame_h);
     Finger* f = find(o, t.touchID, t.fingerID);
     if (e.type == SDL_EVENT_FINGER_DOWN) {
         if (!o->active) { o->active = true; ++o->st.activations; }
@@ -297,7 +350,7 @@ bool handle_event(Overlay* o, const SDL_Event& e) {
         f->y = f->oy = t.y;
         f->button = hit(l, t.x * w, t.y * h);
         if (f->button >= 0) f->role = R_BUTTON;
-        else if (t.x < 0.5f && !stick_held(o)) f->role = R_STICK;
+        else if ((t.x < 0.5f) == l.stick_left && !stick_held(o)) f->role = R_STICK;
         else f->role = R_NONE;
     } else if (e.type == SDL_EVENT_FINGER_MOTION) {
         if (!f) return true;
@@ -340,14 +393,14 @@ void set_target_format(Overlay* o, SDL_GPUTextureFormat format) {
 }
 
 void draw(Overlay* o, SDL_GPUCommandBuffer* cb, SDL_GPUTexture* target, uint32_t w, uint32_t h) {
-    if (!o || !o->active) return;
+    if (!o || !o->active || o->settings.opacity <= 0) return;
     if (!o->dev || !cb || !target || !w || !h) return;
     if (!ensure_pipeline(o)) { ++o->st.draw_failures; return; }
     const float fw = float(w), fh = float(h);
-    const Layout l = layout(fw, fh);
+    const Layout l = layout(o->settings, fw, fh, o->frame_w, o->frame_h);
     Uniforms& u = o->u;
     u.target[0] = fw; u.target[1] = fh; u.target[2] = 0; u.target[3] = 0;
-    ShapeList sh{&u};
+    ShapeList sh{&u, o->settings.opacity};
     static const float white[3] = {1, 1, 1}, dark[3] = {0.05f, 0.05f, 0.08f};
     // The stick: its base where the finger landed, or at its resting place, and its knob at the
     // push, clamped to the base's rim.
@@ -409,8 +462,111 @@ Stats stats(const Overlay* o) {
     return s;
 }
 
-void control_centre(uint32_t w, uint32_t h, Control c, float* x, float* y) {
-    const Layout l = layout(float(w), float(h));
+namespace {
+
+const Settings kNoSettings{};
+
+Layout layout_of(const Overlay* o, uint32_t w, uint32_t h) {
+    return o ? layout(o->settings, float(w), float(h), o->frame_w, o->frame_h)
+             : layout(kNoSettings, float(w), float(h), 0, 0);
+}
+
+// A decimal number from lo to hi, digits and a point only (no sign, no exponent).
+bool parse_number(const std::string& v, float lo, float hi, float* out) {
+    if (v.empty() || v.size() > 12 || v.find_first_not_of("0123456789.") != std::string::npos) return false;
+    char* end = nullptr;
+    const float f = std::strtof(v.c_str(), &end);
+    if (!end || *end || !std::isfinite(f) || f < lo || f > hi) return false;
+    *out = f;
+    return true;
+}
+
+// The KEY=VALUE items of `v`, `sep` between them (an item with no '=' has an empty value).
+std::vector<std::pair<std::string, std::string>> items(const std::string& v, char sep) {
+    std::vector<std::pair<std::string, std::string>> out;
+    size_t at = 0;
+    while (at <= v.size()) {
+        size_t end = v.find(sep, at);
+        if (end == std::string::npos) end = v.size();
+        const std::string item = v.substr(at, end - at);
+        const size_t eq = item.find('=');
+        out.emplace_back(item.substr(0, eq), eq == std::string::npos ? "" : item.substr(eq + 1));
+        at = end + 1;
+    }
+    return out;
+}
+
+}  // namespace
+
+bool parse_setting(const std::string& name, const std::string& value, Settings* s, std::string* why) {
+    Settings n = *s;
+    if (name == "SA2_TOUCH_SCALE") {
+        if (!parse_number(value, 0.5f, 2.0f, &n.scale)) { *why = "not a number from 0.5 to 2"; return false; }
+    } else if (name == "SA2_TOUCH_OPACITY") {
+        if (!parse_number(value, 0.0f, 2.0f, &n.opacity)) { *why = "not a number from 0 to 2"; return false; }
+    } else if (name == "SA2_TOUCH_LAYOUT" || name == "SA2_TOUCH_LAYOUT_BELOW") {
+        static const char* const groups[kGroups] = {"STICK", "FACE", "START", "LT", "RT"};
+        Place* places = name == "SA2_TOUCH_LAYOUT" ? n.over : n.below;
+        for (const auto& [k, v] : items(value, ';')) {
+            int g = 0;
+            while (g < kGroups && k != groups[g]) ++g;
+            const size_t comma = v.find(',');
+            Place p;
+            p.set = true;
+            if (g == kGroups || comma == std::string::npos || !parse_number(v.substr(0, comma), 0, 1, &p.x) ||
+                !parse_number(v.substr(comma + 1), 0, 1, &p.y)) {
+                *why = "\"" + k + "\" is not GROUP=X,Y with GROUP one of STICK FACE START LT RT and X and Y 0 to 1";
+                return false;
+            }
+            places[g] = p;
+        }
+    } else if (name == "SA2_TOUCH_MAP") {
+        static const char* const buttons[kButtons] = {"A", "B", "X", "Y", "START", "LT", "RT"};
+        for (const auto& [k, v] : items(value, ',')) {
+            int b = 0;
+            while (b < kButtons && k != buttons[b]) ++b;
+            sa2_input::PadOutput out;
+            if (b == kButtons || !sa2_input::pad_output_named(v, &out)) {
+                *why = "\"" + k + "\" is not BUTTON=OUTPUT with BUTTON one of A B X Y START LT RT and OUTPUT a game button";
+                return false;
+            }
+            n.sends[b] = out;
+            n.mapped[b] = true;
+        }
+    } else {
+        *why = "not a touch setting";
+        return false;
+    }
+    *s = n;
+    return true;
+}
+
+void set_settings(Overlay* o, const Settings& s) {
+    if (!o) return;
+    o->settings = s;
+    recompute(o);
+}
+
+void set_size(Overlay* o, uint32_t w, uint32_t h) {
+    if (!o || !w || !h) return;
+    o->no_window_w = w;
+    o->no_window_h = h;
+}
+
+void set_frame(Overlay* o, uint32_t frame_w, uint32_t frame_h) {
+    if (!o) return;
+    o->frame_w = frame_w;
+    o->frame_h = frame_h;
+}
+
+bool below_picture(const Overlay* o, uint32_t w, uint32_t h) {
+    if (!o) return false;
+    return float(h) - picture_bottom(float(w), float(h), o->frame_w, o->frame_h) >=
+           kBelowMin * float(std::min(w, h));
+}
+
+void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y) {
+    const Layout l = layout_of(o, w, h);
     int i = -1;
     switch (c) {
     case Control::Stick: *x = l.stick_x; *y = l.stick_y; return;
@@ -426,6 +582,6 @@ void control_centre(uint32_t w, uint32_t h, Control c, float* x, float* y) {
     *y = l.b[i].y;
 }
 
-float stick_radius(uint32_t w, uint32_t h) { return layout(float(w), float(h)).stick_r; }
+float stick_radius(const Overlay* o, uint32_t w, uint32_t h) { return layout_of(o, w, h).stick_r; }
 
 }  // namespace sa2_touch

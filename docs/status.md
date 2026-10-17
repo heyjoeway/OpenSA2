@@ -16,7 +16,7 @@ This status reflects development on 2026-10-16. The [prereleases](downloads.md) 
 
 ## What is implemented
 
-The runtime can boot the original game logic and reach stages. Graphics, video, and decoded audio pass through the player. Desktop keyboard and controller input are implemented, including controller hot-plug. Android has touch controls and external controller input.
+The runtime can boot the original game logic and reach stages. Graphics, video, and decoded audio pass through the player. Desktop keyboard and controller input are implemented, including controller hot-plug. Android has touch controls, external controller input, portrait play, and a settings screen for the picture and the controls.
 
 Metal Harbor has been played to the goal ring on the desktop renderers. City Escape has run on the tested Android devices. The Hero story's movies play from 0.1.0-alpha.2.1: Sofdec's B-picture slice loop (`0x00872650`) sits in the executable section PSFD00, which the address-taken scan did not cover, and earlier builds left every story movie black and waiting. The scan now covers every executable section. Those results do not establish compatibility for every stage, character, boss, story event, or mode.
 

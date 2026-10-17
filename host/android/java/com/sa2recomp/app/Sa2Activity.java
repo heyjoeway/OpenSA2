@@ -1,8 +1,6 @@
 package com.sa2recomp.app;
 
 import android.content.Intent;
-import android.graphics.Point;
-import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -28,9 +26,11 @@ import org.libsdl.app.SDLActivity;
  * Intent extras (from Sa2SetupActivity): sa2.stream (a recorded stream file to play with no
  * game: the renderer's check), sa2.max_frames, sa2.no_audio, sa2.no_pace.
  *
- * The session is also given the screen's size in pixels, landscape (--screen WxH), from which it
- * sizes the game's back buffer (SA2_PLAY_RES, runtime/sa2_widescreen.c), so the picture fills the
- * screen with no bars.
+ * The session is also given the screen's size in pixels in its orientation (--screen WxH), from
+ * which it sizes the game's back buffer (SA2_PLAY_RES, runtime/sa2_widescreen.c), so the picture
+ * fills the screen with no bars, and the settings screen's choices (GameSettings): the orientation
+ * (--orientation, and this activity asks the system for it: the manifest's sensorLandscape is the
+ * default's) and the SA2_ settings that are not at their defaults (--setting SA2_K=V).
  */
 public class Sa2Activity extends SDLActivity {
     public static final String EXTRA_STREAM = "sa2.stream";
@@ -41,6 +41,7 @@ public class Sa2Activity extends SDLActivity {
     private static final long BACK_AGAIN_MS = 2500;
     private boolean mQuitSent;
     private long mLastBack;
+    private GameSettings mSettings;
 
     @Override
     protected String[] getLibraries() {
@@ -61,10 +62,21 @@ public class Sa2Activity extends SDLActivity {
         a.add(getCacheDir().getAbsolutePath());
         a.add("--libdir");
         a.add(getApplicationInfo().nativeLibraryDir);
-        String screen = screenSize();
+        GameSettings s = settings();
+        int[] screen = GameSettings.screen(this);
         if (screen != null) {
             a.add("--screen");
-            a.add(screen);
+            a.add(s.screenArgument(screen[0], screen[1]));
+        }
+        if (!GameSettings.LANDSCAPE.equals(s.orientation)) {
+            a.add("--orientation");
+            a.add(s.orientation);
+        }
+        if (screen != null) {
+            for (String kv : s.sessionSettings(screen[0], screen[1])) {
+                a.add("--setting");
+                a.add(kv);
+            }
         }
         File ext = getExternalFilesDir(null);
         if (ext != null) {
@@ -89,35 +101,27 @@ public class Sa2Activity extends SDLActivity {
         return a.toArray(new String[0]);
     }
 
-    /** The largest window this activity can have, in pixels, longer side first ("2340x1080"): the
-     * whole screen, cutout included (the activity lays out into it, LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
-     * and hides the system bars). API 30's maximum window metrics; on API 29 the display's real
-     * size. Null when neither answers. */
-    @SuppressWarnings("deprecation")
-    private String screenSize() {
-        int w = 0, h = 0;
-        try {
-            if (Build.VERSION.SDK_INT >= 30) {
-                Rect b = getWindowManager().getMaximumWindowMetrics().getBounds();
-                w = b.width();
-                h = b.height();
-            } else {
-                Point p = new Point();
-                getWindowManager().getDefaultDisplay().getRealSize(p);
-                w = p.x;
-                h = p.y;
-            }
-        } catch (RuntimeException e) {
-            return null;
-        }
-        if (w <= 0 || h <= 0) return null;
-        return Math.max(w, h) + "x" + Math.min(w, h);
+    private GameSettings settings() {
+        if (mSettings == null) mSettings = GameSettings.load(this);
+        return mSettings;
+    }
+
+    /** SDL asks for the orientation its hint names when it makes the window: the settings' instead,
+     * unless they keep landscape, SDL's own answer to the session's landscape hint. */
+    @Override
+    public void setOrientationBis(int w, int h, boolean resizable, String hint) {
+        int o = settings().requestedOrientation();
+        if (o == -1) super.setOrientationBis(w, h, resizable, hint);
+        else setRequestedOrientation(o);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // Back's note belongs to one session: an older one's must not match this session's end.
         new File(getFilesDir(), CrashReport.END_ASKED_FILE).delete();
+        // Portrait or auto-rotate from the start, so the window is not made landscape first.
+        int o = settings().requestedOrientation();
+        if (o != -1) setRequestedOrientation(o);
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // The sustained-performance mode holds the clocks to what the device can keep up for

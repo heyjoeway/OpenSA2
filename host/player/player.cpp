@@ -196,7 +196,15 @@
 // drawn over each frame on the swapchain texture, after the frame is read back (so no frames
 // file holds it), when the second host's device calls the function the window's property
 // "sa2.present_overlay" holds at Present (host/d3d9gpu/d9g_gpu_sdl.cpp), with the frame and the
-// swapchain texture; nothing is drawn before the first touch. The report's "host_pads" counts
+// swapchain texture; nothing is drawn before the first touch. The frame's size goes to the
+// overlay at each Present, which then knows where the picture is (its controls go below a
+// portrait window's picture). The overlay's settings (SA2_TOUCH_SCALE, SA2_TOUCH_OPACITY,
+// SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_BELOW, SA2_TOUCH_MAP: touch_overlay.h) and SA2_PAD_MAP are
+// read from the environment when the pads are set up, each said in the log ("pads: ..."), a
+// malformed one with why it is not used. SA2_PAD_MAP=BUTTON=OUTPUT,... changes what a physical
+// pad's button sends: BUTTON an SDL button by position (SOUTH EAST WEST NORTH BACK GUIDE START LS
+// RS LB RB UP DOWN LEFT RIGHT MISC1 PADDLE1-4 TOUCHPAD), OUTPUT a game button (input.h
+// pad_output_named; LT and RT hold that trigger all the way). The report's "host_pads" counts
 // the pads, the records asked for and the overlay's draws.
 // --synthetic-input F.tsv is the test of all this (Documentation/scripts/tests/
 // test_player_pads_touch.py): lines "MS VERB ARGS", MS after the first Present: "pad-attach K",
@@ -1151,6 +1159,7 @@ private:
     void pad_event(const SDL_Event& e);
     void open_pad(SDL_JoystickID id);
     void read_pad(PadSlot* s);
+    void derive_pad(PadSlot* s) const;
     PadSlot* slot_of(SDL_JoystickID id);
     void send_pads();
     void close_pads();
@@ -1270,9 +1279,12 @@ private:
         SDL_JoystickID id = 0;
         SDL_Gamepad* pad = nullptr;
         std::string name;        // SDL's name for it, read when it opens: the report makes no SDL call
-        sa2_input::PadState state;
+        uint32_t held = 0;       // the SDL buttons held, bit SDL_GamepadButton
+        sa2_input::PadState axes;  // its sticks and triggers as SDL gives them
+        sa2_input::PadState state; // what the game is sent: axes, and held through pad_map_
     };
     PadSlot pad_slots_[sa2_input::kPadSlots];
+    sa2_input::PadOutput pad_map_[SDL_GAMEPAD_BUTTON_COUNT];   // SA2_PAD_MAP, over kPadButtonBits
     sa2_touch::Overlay* touch_ = nullptr;
     sa2_touch::Stats touch_final_;                 // the overlay's counts, kept when it is destroyed
     bool pads_up_ = false, pads_closed_ = false, pads_dirty_ = false, touch_platform_ = false;
@@ -4275,7 +4287,8 @@ void Player::do_present(const Sa2Record* fr) {
 namespace {
 
 // SDL's gamepad buttons as XInput's XINPUT_GAMEPAD_* bits (input.h PadState), by position: SDL's
-// SOUTH is XInput's A whatever the pad prints on it. GUIDE and the rest have no XInput bit.
+// SOUTH is XInput's A whatever the pad prints on it. GUIDE and the rest have no XInput bit. The
+// pads' map until SA2_PAD_MAP changes it.
 struct PadButtonBit { SDL_GamepadButton button; uint16_t bit; };
 constexpr PadButtonBit kPadButtonBits[] = {
     {SDL_GAMEPAD_BUTTON_SOUTH, 0x1000}, {SDL_GAMEPAD_BUTTON_EAST, 0x2000},
@@ -4287,10 +4300,47 @@ constexpr PadButtonBit kPadButtonBits[] = {
     {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 0x0004}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 0x0008},
 };
 
-uint16_t pad_bit(int button) {
-    for (const PadButtonBit& b : kPadButtonBits)
-        if (b.button == button) return b.bit;
-    return 0;
+static_assert(SDL_GAMEPAD_BUTTON_COUNT <= 32, "PadSlot::held");
+
+// SDL's buttons by the names SA2_PAD_MAP gives them: by position, as SDL reports them.
+struct PadButtonName { SDL_GamepadButton button; const char* name; };
+constexpr PadButtonName kPadButtonNames[] = {
+    {SDL_GAMEPAD_BUTTON_SOUTH, "SOUTH"}, {SDL_GAMEPAD_BUTTON_EAST, "EAST"}, {SDL_GAMEPAD_BUTTON_WEST, "WEST"},
+    {SDL_GAMEPAD_BUTTON_NORTH, "NORTH"}, {SDL_GAMEPAD_BUTTON_BACK, "BACK"}, {SDL_GAMEPAD_BUTTON_GUIDE, "GUIDE"},
+    {SDL_GAMEPAD_BUTTON_START, "START"}, {SDL_GAMEPAD_BUTTON_LEFT_STICK, "LS"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_STICK, "RS"}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "LB"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "RB"}, {SDL_GAMEPAD_BUTTON_DPAD_UP, "UP"},
+    {SDL_GAMEPAD_BUTTON_DPAD_DOWN, "DOWN"}, {SDL_GAMEPAD_BUTTON_DPAD_LEFT, "LEFT"},
+    {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, "RIGHT"}, {SDL_GAMEPAD_BUTTON_MISC1, "MISC1"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, "PADDLE1"}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, "PADDLE2"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, "PADDLE3"}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, "PADDLE4"},
+    {SDL_GAMEPAD_BUTTON_TOUCHPAD, "TOUCHPAD"},
+};
+
+// SA2_PAD_MAP's "BUTTON=OUTPUT,...": each SDL button named (kPadButtonNames) sends that game button
+// (input.h pad_output_named) in place of its own; `map` is unchanged unless the whole value reads.
+bool parse_pad_map(const std::string& value, sa2_input::PadOutput* map, std::string* why) {
+    sa2_input::PadOutput next[SDL_GAMEPAD_BUTTON_COUNT];
+    std::copy(map, map + SDL_GAMEPAD_BUTTON_COUNT, next);
+    size_t at = 0;
+    while (at <= value.size()) {
+        size_t end = value.find(',', at);
+        if (end == std::string::npos) end = value.size();
+        const std::string item = value.substr(at, end - at);
+        const size_t eq = item.find('=');
+        const std::string key = item.substr(0, eq), out = eq == std::string::npos ? "" : item.substr(eq + 1);
+        const PadButtonName* b = nullptr;
+        for (const PadButtonName& n : kPadButtonNames)
+            if (key == n.name) b = &n;
+        if (!b || !sa2_input::pad_output_named(out, &next[b->button])) {
+            *why = "\"" + item + "\" is not BUTTON=OUTPUT with BUTTON one of SOUTH EAST WEST NORTH BACK GUIDE START "
+                   "LS RS LB RB UP DOWN LEFT RIGHT MISC1 PADDLE1-4 TOUCHPAD and OUTPUT a game button";
+            return false;
+        }
+        at = end + 1;
+    }
+    std::copy(next, next + SDL_GAMEPAD_BUTTON_COUNT, map);
+    return true;
 }
 
 // An SDL axis value into an XInput slot: a trigger's 0..32767 as 0..255; a stick's value as it
@@ -4381,6 +4431,7 @@ bool SDLCALL Player::pad_watch(void* self, SDL_Event* e) {
 // The pads and the overlay, at the first service once the key sender has started.
 void Player::setup_pads() {
     pads_up_ = true;
+    for (const PadButtonBit& b : kPadButtonBits) pad_map_[b.button].bit = b.bit;
     const bool synthetic = !o_.synthetic_input.empty();
     if (synthetic && !load_synthetic_input()) return;
     if (!o_.overlay_out.empty())
@@ -4396,6 +4447,19 @@ void Player::setup_pads() {
     if (const char* t = getenv("SA2_TOUCH_CONTROLS"); t && *t) touch_platform_ = std::strcmp(t, "0") != 0;
     if (synthetic) SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     touch_ = sa2_touch::create(nullptr, win_);
+    // The overlay's settings and the pads' map ("Gamepads" above), each said in the log.
+    sa2_touch::Settings touch_settings;
+    for (const char* k : {"SA2_TOUCH_SCALE", "SA2_TOUCH_OPACITY", "SA2_TOUCH_LAYOUT", "SA2_TOUCH_LAYOUT_BELOW",
+                          "SA2_TOUCH_MAP", "SA2_PAD_MAP"}) {
+        const char* v = getenv(k);
+        if (!v || !*v) continue;
+        std::string why;
+        const bool ok = std::strcmp(k, "SA2_PAD_MAP") == 0 ? parse_pad_map(v, pad_map_, &why)
+                                                            : sa2_touch::parse_setting(k, v, &touch_settings, &why);
+        if (ok) std::printf("pads: %s=%s\n", k, v);
+        else std::printf("pads: %s=%s not used: %s\n", k, v, why.c_str());
+    }
+    sa2_touch::set_settings(touch_, touch_settings);
     const SDL_PropertiesID props = SDL_GetWindowProperties(win_);
     if (!props || !SDL_SetPointerProperty(props, kPresentOverlayContext, this) ||
         !SDL_SetPointerProperty(props, kPresentOverlayProperty, reinterpret_cast<void*>(&Player::present_overlay)))
@@ -4452,11 +4516,26 @@ Player::PadSlot* Player::slot_of(SDL_JoystickID id) {
 
 // A slot's whole state, read from SDL.
 void Player::read_pad(PadSlot* s) {
-    sa2_input::PadState st;
+    s->held = 0;
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
+        if (SDL_GetGamepadButton(s->pad, SDL_GamepadButton(b))) s->held |= 1u << b;
+    s->axes = sa2_input::PadState{};
+    for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a)
+        set_pad_axis(&s->axes, a, SDL_GetGamepadAxis(s->pad, SDL_GamepadAxis(a)));
+    derive_pad(s);
+}
+
+// What the game is sent for a slot: its sticks and triggers, and the game buttons its held
+// buttons send (pad_map_), a button sending a trigger holding it all the way.
+void Player::derive_pad(PadSlot* s) const {
+    sa2_input::PadState st = s->axes;
     st.connected = true;
-    for (const PadButtonBit& b : kPadButtonBits)
-        if (SDL_GetGamepadButton(s->pad, b.button)) st.buttons |= b.bit;
-    for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) set_pad_axis(&st, a, SDL_GetGamepadAxis(s->pad, SDL_GamepadAxis(a)));
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
+        if (s->held & (1u << b)) {
+            st.buttons |= pad_map_[b].bit;
+            if (pad_map_[b].trigger == 1) st.lt = 255;
+            if (pad_map_[b].trigger == 2) st.rt = 255;
+        }
     s->state = st;
 }
 
@@ -4508,14 +4587,19 @@ void Player::pad_event(const SDL_Event& e) {
             ++touch_hides_;
             pads_dirty_ = true;
         }
-        const uint16_t bit = pad_bit(e.gbutton.button), was = s->state.buttons;
-        s->state.buttons = uint16_t(e.gbutton.down ? was | bit : was & ~bit);
-        if (s->state.buttons != was || pads_dirty_) send_pads();   // a press and its release: a record each
+        const sa2_input::PadState was = s->state;
+        const uint32_t bit = e.gbutton.button < SDL_GAMEPAD_BUTTON_COUNT ? 1u << e.gbutton.button : 0;
+        s->held = e.gbutton.down ? s->held | bit : s->held & ~bit;
+        derive_pad(s);
+        // a press and its release: a record each
+        if (s->state.buttons != was.buttons || s->state.lt != was.lt || s->state.rt != was.rt || pads_dirty_)
+            send_pads();
         return;
     }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         if (PadSlot* s = slot_of(e.gaxis.which)) {
-            set_pad_axis(&s->state, e.gaxis.axis, e.gaxis.value);
+            set_pad_axis(&s->axes, e.gaxis.axis, e.gaxis.value);
+            derive_pad(s);
             pads_dirty_ = true;
         }
         return;
@@ -4709,8 +4793,8 @@ void Player::push_due_synthetic_input() {
             float x = in.x, y = in.y;
             if (in.at_control && w > 0 && h > 0) {
                 float cx = 0, cy = 0;
-                sa2_touch::control_centre(uint32_t(w), uint32_t(h), in.control, &cx, &cy);
-                const float r = sa2_touch::stick_radius(uint32_t(w), uint32_t(h));
+                sa2_touch::control_centre(touch_, uint32_t(w), uint32_t(h), in.control, &cx, &cy);
+                const float r = sa2_touch::stick_radius(touch_, uint32_t(w), uint32_t(h));
                 x = (cx + in.x * r) / float(w);
                 y = (cy + in.y * r) / float(h);
             }
@@ -4744,6 +4828,7 @@ void Player::present_overlay(void* self, SDL_GPUDevice* dev, SDL_GPUCommandBuffe
     auto* p = static_cast<Player*>(self);
     if (!p || !p->touch_ || p->pads_closed_ || !dev || !cb) return;
     sa2_touch::attach_device(p->touch_, dev);
+    sa2_touch::set_frame(p->touch_, frame_w, frame_h);
     if (sa2_touch::active(p->touch_)) {
         sa2_touch::draw(p->touch_, cb, target, w, h);
         ++p->overlay_presents_;

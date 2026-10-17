@@ -76,6 +76,28 @@ struct PadSet {
     PadState slot[kPadSlots];
 };
 
+// A game button, as a remapping names it (the touch overlay's SA2_TOUCH_MAP, the player's
+// SA2_PAD_MAP): an XINPUT_GAMEPAD_* bit, or a trigger held all the way (1 LT, 2 RT), or nothing.
+struct PadOutput {
+    uint16_t bit = 0;
+    uint8_t trigger = 0;
+};
+// A PadOutput's name: A B X Y LB RB LT RT START BACK LS RS UP DOWN LEFT RIGHT NONE.
+inline bool pad_output_named(const std::string& name, PadOutput* out) {
+    static const struct { const char* name; uint16_t bit; uint8_t trigger; } kNames[] = {
+        {"A", 0x1000, 0}, {"B", 0x2000, 0}, {"X", 0x4000, 0}, {"Y", 0x8000, 0}, {"LB", 0x0100, 0},
+        {"RB", 0x0200, 0}, {"LT", 0, 1}, {"RT", 0, 2}, {"START", 0x0010, 0}, {"BACK", 0x0020, 0},
+        {"LS", 0x0040, 0}, {"RS", 0x0080, 0}, {"UP", 0x0001, 0}, {"DOWN", 0x0002, 0}, {"LEFT", 0x0004, 0},
+        {"RIGHT", 0x0008, 0}, {"NONE", 0, 0}};
+    for (const auto& n : kNames)
+        if (name == n.name) {
+            out->bit = n.bit;
+            out->trigger = n.trigger;
+            return true;
+        }
+    return false;
+}
+
 // The DirectInput key code (DIK_*, zig's any-windows-any/dinput.h) of an SDL
 // scancode on a US layout; 0, which no key has, when the table maps none.
 uint8_t dik_of(SDL_Scancode s);

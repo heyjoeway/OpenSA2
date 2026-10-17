@@ -12,7 +12,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -65,6 +64,9 @@ import java.util.Map;
  * does not start the game by itself the next time it opens, so a new session does not replace the
  * crashed one's records before the player has copied them; Play or a copy marks the crash seen.
  *
+ * Game settings opens the settings screen (Sa2SettingsActivity). Opened while a check runs, it keeps
+ * that check from starting the game: the player comes back here and taps Play.
+ *
  * When the installer refuses the game, InstallVerdict puts the cause and the fix above its lines; while
  * it runs, a line under the buttons counts the time, since a check can take minutes with no output.
  * A phone whose system declares no Vulkan 1.3 is told so before it imports anything: the renderer's
@@ -91,13 +93,14 @@ public class Sa2SetupActivity extends Activity {
 
     private TextView mStatus, mBanner, mProgress, mLog;
     private LinearLayout mActions;       // Play and the install buttons, arranged by layoutActions
-    private Button mZip, mCheck, mPlay, mGithub, mCopy, mSummary, mShare;
+    private Button mZip, mCheck, mPlay, mSettings, mGithub, mCopy, mSummary, mShare;
     private final List<String> mInstallOut = new ArrayList<>();      // the last installer run's lines
     private String mInstallVerdict;      // InstallVerdict's account of the last refused run; null otherwise
     private int mWaitedForPlay;          // 2 s checks spent waiting for a closing play process
     private final Runnable mRefresh = this::refresh;
     private final Handler mTicker = new Handler(Looper.getMainLooper());
     private boolean mBusy, mAutoPlayDone, mInstallTried, mPlayLaunched, mShowingLast;
+    private boolean mHoldPlay;           // the settings screen was opened: a check that passes does not start the game
     private final ArrayDeque<String> mLines = new ArrayDeque<>();
 
     @Override
@@ -490,10 +493,10 @@ public class Sa2SetupActivity extends Activity {
         runInstaller("Checking the game folder", new String[] {"--source", "folder", root.getAbsolutePath(), "--yes",
                      "--threads", "0", "--record", new File(logs, "install.runrec").getAbsolutePath()}, code -> {
             if (code == 0) {
-                addLine("The game folder verified. Starting the game.");
+                addLine("The game folder verified." + (mHoldPlay ? "" : " Starting the game."));
                 mAutoPlayDone = true;
                 refresh();
-                play();
+                playUnlessHeld();
             } else {
                 mInstallVerdict = InstallVerdict.explain(mInstallOut, code, false);
                 banner("The game folder did not pass the check.\n\n" + mInstallVerdict
@@ -595,10 +598,10 @@ public class Sa2SetupActivity extends Activity {
                              "--threads", "0", "--record", new File(logs, "install.runrec").getAbsolutePath()}, code -> {
                     copy.delete();
                     if (code == 0) {
-                        addLine("The game ZIP verified. Starting the game.");
+                        addLine("The game ZIP verified." + (mHoldPlay ? "" : " Starting the game."));
                         mAutoPlayDone = true;
                         refresh();
-                        play();
+                        playUnlessHeld();
                     } else {
                         mInstallVerdict = InstallVerdict.explain(mInstallOut, code, true);
                         banner("The game ZIP did not pass the check.\n\n" + mInstallVerdict
@@ -614,12 +617,29 @@ public class Sa2SetupActivity extends Activity {
         runInstaller("Checking the installation", new String[] {"--verify", "--threads", "0", "--record",
                      new File(logs, "verify.runrec").getAbsolutePath()}, code -> {
             if (code == 0) {
-                play();
+                playUnlessHeld();
             } else {
                 banner("The installation no longer verifies (exit " + code + "). Reinstall it from a ZIP, or "
                        + "copy the game folder again and tap Reinstall from folder.");
             }
         });
+    }
+
+    /** Starts the game after a check, unless the settings screen was opened while it ran: the
+     * player is then back here to tap Play. */
+    private void playUnlessHeld() {
+        if (mHoldPlay) {
+            mHoldPlay = false;
+            addLine("The game did not start because the settings were opened. Tap Play.");
+            return;
+        }
+        play();
+    }
+
+    private void openSettings() {
+        mAutoPlayDone = true;
+        mHoldPlay = mBusy;
+        startActivity(new Intent(this, Sa2SettingsActivity.class));
     }
 
     private void play() {
@@ -754,101 +774,38 @@ public class Sa2SetupActivity extends Activity {
 
     // ------------------------------------------------------------ the layout
 
-    private static final int PRIMARY = 0, SECONDARY = 1, QUIET = 2, ALERT = 3;
-    private static final int BACKGROUND = Color.rgb(0x10, 0x18, 0x30);
-
     private int dp(float v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+        return Ui.dp(this, v);
     }
 
-    /** A rounded button: PRIMARY (the one main action), SECONDARY, QUIET (outlined), or ALERT (the
-     * report button after a crash). Pressed and disabled states included. */
-    private Button button(String text, View.OnClickListener click) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        b.setStateListAnimator(null);
-        b.setOnClickListener(click);
-        return b;
-    }
-
-    private void style(Button b, int kind) {
-        int fill, stroke = 0, text;
-        switch (kind) {
-            case PRIMARY: fill = Color.rgb(0x2B, 0x6B, 0xE8); text = Color.WHITE; break;
-            case ALERT: fill = Color.rgb(0xD9, 0x4F, 0x4F); text = Color.WHITE; break;
-            case SECONDARY: fill = Color.rgb(0x24, 0x30, 0x4D); text = Color.rgb(0xE8, 0xED, 0xF7); break;
-            default: fill = Color.TRANSPARENT; stroke = Color.rgb(0x3A, 0x48, 0x66); text = Color.rgb(0xB8, 0xC4, 0xDA);
-        }
-        GradientDrawable shape = new GradientDrawable();
-        shape.setCornerRadius(dp(12));
-        shape.setColor(fill);
-        if (stroke != 0) shape.setStroke(dp(1), stroke);
-        GradientDrawable off = new GradientDrawable();
-        off.setCornerRadius(dp(12));
-        off.setColor(kind == QUIET ? Color.TRANSPARENT : Color.rgb(0x1A, 0x23, 0x40));
-        if (kind == QUIET) off.setStroke(dp(1), Color.rgb(0x26, 0x30, 0x48));
-        StateListDrawable bg = new StateListDrawable();
-        bg.addState(new int[] {-android.R.attr.state_enabled}, off);
-        bg.addState(new int[] {}, new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, null));
-        b.setBackground(bg);
-        b.setTextColor(new ColorStateList(new int[][] {{-android.R.attr.state_enabled}, {}},
-                                          new int[] {Color.rgb(0x5D, 0x6A, 0x85), text}));
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, kind == PRIMARY ? 18 : kind == QUIET ? 14 : 15);
-        b.setTypeface(kind == PRIMARY || kind == ALERT ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-        int h = dp(kind == PRIMARY ? 56 : kind == QUIET ? 44 : 48);
-        b.setMinHeight(h);
-        b.setMinimumHeight(h);
-        b.setPadding(dp(kind == QUIET ? 6 : 12), 0, dp(kind == QUIET ? 6 : 12), 0);
-    }
-
-    /** Buttons side by side at equal widths, 8 dp apart. */
-    private LinearLayout row(Button... buttons) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        for (int i = 0; i < buttons.length; i++) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            lp.leftMargin = i == 0 ? 0 : dp(4);
-            lp.rightMargin = i == buttons.length - 1 ? 0 : dp(4);
-            detach(buttons[i]);
-            row.addView(buttons[i], lp);
-        }
-        return row;
-    }
-
-    private LinearLayout.LayoutParams full(int topMargin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                                                                     ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = topMargin;
-        return lp;
-    }
-
-    private static void detach(View v) {
-        if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
-    }
-
-    /** Installed: Play on its own, then the two ways to install again. Not installed: Choose game ZIP
-     * on its own, then the folder check. */
+    /** Installed: Play on its own, the settings, then the two ways to install again. Not installed:
+     * Choose game ZIP on its own, then the folder check and the settings. */
     private void layoutActions(boolean installed) {
         mActions.removeAllViews();
         if (installed) {
             mZip.setText("Reinstall from ZIP");
             mCheck.setText("Reinstall from folder");
-            style(mPlay, PRIMARY);
-            style(mZip, SECONDARY);
-            style(mCheck, SECONDARY);
-            detach(mPlay);
-            mActions.addView(mPlay, full(0));
-            mActions.addView(row(mZip, mCheck), full(dp(8)));
+            Ui.style(mPlay, Ui.PRIMARY);
+            Ui.style(mZip, Ui.SECONDARY);
+            Ui.style(mCheck, Ui.SECONDARY);
+            Ui.style(mSettings, Ui.SECONDARY);
+            Ui.detach(mPlay);
+            Ui.detach(mSettings);
+            mActions.addView(mPlay, Ui.full(0));
+            mActions.addView(mSettings, Ui.full(dp(8)));
+            mActions.addView(Ui.row(this, mZip, mCheck), Ui.full(dp(8)));
         } else {
             mZip.setText("Choose game ZIP");
             mCheck.setText("Check game folder");
-            style(mZip, PRIMARY);
-            style(mCheck, SECONDARY);
-            detach(mZip);
-            detach(mCheck);
-            mActions.addView(mZip, full(0));
-            mActions.addView(mCheck, full(dp(8)));
+            Ui.style(mZip, Ui.PRIMARY);
+            Ui.style(mCheck, Ui.SECONDARY);
+            Ui.style(mSettings, Ui.QUIET);
+            Ui.detach(mZip);
+            Ui.detach(mCheck);
+            Ui.detach(mSettings);
+            mActions.addView(mZip, Ui.full(0));
+            mActions.addView(mCheck, Ui.full(dp(8)));
+            mActions.addView(mSettings, Ui.full(dp(8)));
         }
         mZip.setEnabled(!mBusy);
         mCheck.setEnabled(!mBusy);
@@ -860,26 +817,7 @@ public class Sa2SetupActivity extends Activity {
     private void banner(String text) {
         mBanner.setText(text == null ? "" : text);
         mBanner.setVisibility(text == null ? View.GONE : View.VISIBLE);
-        style(mGithub, text == null ? QUIET : ALERT);
-    }
-
-    /** A column no wider than maxWidth, so the buttons do not stretch across a landscape screen. */
-    private static final class Column extends LinearLayout {
-        private final int maxWidth;
-
-        Column(android.content.Context c, int maxWidth) {
-            super(c);
-            this.maxWidth = maxWidth;
-            setOrientation(VERTICAL);
-        }
-
-        @Override
-        protected void onMeasure(int widthSpec, int heightSpec) {
-            if (MeasureSpec.getSize(widthSpec) > maxWidth) {
-                widthSpec = MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.EXACTLY);
-            }
-            super.onMeasure(widthSpec, heightSpec);
-        }
+        Ui.style(mGithub, text == null ? Ui.QUIET : Ui.ALERT);
     }
 
     /** The footer: who makes the app, buttons to its GitHub page (source, releases and issues) and to
@@ -957,7 +895,7 @@ public class Sa2SetupActivity extends Activity {
 
     /** A small rounded, outlined button for the footer's links. */
     private Button pill(String text, View.OnClickListener click) {
-        Button b = button(text, click);
+        Button b = Ui.button(this, text, click);
         GradientDrawable shape = new GradientDrawable();
         shape.setCornerRadius(dp(20));
         shape.setColor(Color.rgb(0x18, 0x22, 0x3D));
@@ -981,10 +919,9 @@ public class Sa2SetupActivity extends Activity {
         if (bold) b.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
-    @SuppressWarnings("deprecation")
     private void buildUi() {
         int pad = dp(16);
-        Column col = new Column(this, dp(640));
+        Ui.Column col = new Ui.Column(this, dp(640));
         col.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
@@ -1005,78 +942,66 @@ public class Sa2SetupActivity extends Activity {
         mBanner.setBackground(card);
         mBanner.setPadding(dp(14), dp(12), dp(14), dp(12));
         mBanner.setVisibility(View.GONE);
-        col.addView(mBanner, full(dp(12)));
+        col.addView(mBanner, Ui.full(dp(12)));
 
         mStatus = new TextView(this);
         mStatus.setTextColor(Color.rgb(0xE0, 0xE6, 0xF0));
         mStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         mStatus.setTextIsSelectable(true);
-        col.addView(mStatus, full(dp(12)));
+        col.addView(mStatus, Ui.full(dp(12)));
 
-        mPlay = button("Play", v -> {
+        mPlay = Ui.button(this, "Play", v -> {
             mAutoPlayDone = true;
+            mHoldPlay = false;
             verifyThenPlay();
         });
-        mZip = button("Choose game ZIP", v -> pickZip());
-        mCheck = button("Check game folder", v -> {
+        mSettings = Ui.button(this, "Game settings", v -> openSettings());
+        mZip = Ui.button(this, "Choose game ZIP", v -> pickZip());
+        mCheck = Ui.button(this, "Check game folder", v -> {
             mAutoPlayDone = true;
             install();
         });
         mActions = new LinearLayout(this);
         mActions.setOrientation(LinearLayout.VERTICAL);
-        col.addView(mActions, full(dp(16)));
+        col.addView(mActions, Ui.full(dp(16)));
 
         mProgress = new TextView(this);
         mProgress.setTextColor(Color.rgb(0xFF, 0xD8, 0x70));
         mProgress.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         mProgress.setVisibility(View.GONE);
-        col.addView(mProgress, full(dp(12)));
+        col.addView(mProgress, Ui.full(dp(12)));
 
         TextView caption = new TextView(this);
         caption.setText("Something went wrong?");
         caption.setTextColor(Color.rgb(0x8A, 0x97, 0xB2));
         caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        col.addView(caption, full(dp(24)));
+        col.addView(caption, Ui.full(dp(24)));
 
-        mGithub = button("Report on GitHub", v -> report(GITHUB));
-        mCopy = button("Copy report", v -> report(COPY));
-        mSummary = button("Copy summary", v -> report(SUMMARY));
-        mShare = button("Share report", v -> report(SHARE));
-        style(mGithub, QUIET);
-        style(mCopy, QUIET);
-        style(mSummary, QUIET);
-        style(mShare, QUIET);
-        col.addView(mGithub, full(dp(8)));
-        col.addView(row(mCopy, mSummary, mShare), full(dp(8)));
-        col.addView(about(), full(dp(32)));
+        mGithub = Ui.button(this, "Report on GitHub", v -> report(GITHUB));
+        mCopy = Ui.button(this, "Copy report", v -> report(COPY));
+        mSummary = Ui.button(this, "Copy summary", v -> report(SUMMARY));
+        mShare = Ui.button(this, "Share report", v -> report(SHARE));
+        Ui.style(mGithub, Ui.QUIET);
+        Ui.style(mCopy, Ui.QUIET);
+        Ui.style(mSummary, Ui.QUIET);
+        Ui.style(mShare, Ui.QUIET);
+        col.addView(mGithub, Ui.full(dp(8)));
+        col.addView(Ui.row(this, mCopy, mSummary, mShare), Ui.full(dp(8)));
+        col.addView(about(), Ui.full(dp(32)));
 
         mLog = new TextView(this);
         mLog.setTextColor(Color.rgb(0xA8, 0xB4, 0xC8));
         mLog.setTypeface(Typeface.MONOSPACE);
         mLog.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         mLog.setTextIsSelectable(true);
-        col.addView(mLog, full(dp(16)));
+        col.addView(mLog, Ui.full(dp(16)));
 
         FrameLayout center = new FrameLayout(this);
         center.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                                          ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(BACKGROUND);
-        // Android 15 draws apps edge to edge whatever fitsSystemWindows says: the system bars' insets
-        // become padding, so scrolled content stays clear of the status bar and the gesture bar.
-        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
-            int l, t, r, b;
-            if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets i = insets.getInsets(android.view.WindowInsets.Type.systemBars()
-                                                             | android.view.WindowInsets.Type.displayCutout());
-                l = i.left; t = i.top; r = i.right; b = i.bottom;
-            } else {
-                l = insets.getSystemWindowInsetLeft(); t = insets.getSystemWindowInsetTop();
-                r = insets.getSystemWindowInsetRight(); b = insets.getSystemWindowInsetBottom();
-            }
-            v.setPadding(l, t, r, b);
-            return insets;
-        });
+        scroll.setBackgroundColor(Ui.BACKGROUND);
+        Ui.padForSystemBars(scroll);
         scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                                            ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);

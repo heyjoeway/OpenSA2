@@ -20,7 +20,11 @@ FIFO this test reads, so each record the game would read is checked byte for byt
     frame before the first touch, and the controls after it, in the corners and not in the
     middle;
   * frames: the frames file (read back before Present) holds no overlay: a run without input
-    has the same frames table, frame for frame.
+    has the same frames table, frame for frame;
+  * settings: the same script with SA2_PAD_MAP (a pad's SOUTH and EAST swapped), SA2_TOUCH_MAP
+    (the overlay's A sends X) and the overlay bigger with its stick and diamond swapped
+    (SA2_TOUCH_SCALE, SA2_TOUCH_LAYOUT) sends the same records with only those buttons changed:
+    the script's touches find the controls where the settings put them.
 
 The window opens for a few seconds (the interactive mode refuses a hidden one). The player is
 built from this tree by host/d3d9gpu/build.sh (about a minute and a half), unless SA2_PLAYER_GPU
@@ -83,7 +87,7 @@ SCRIPT = """\
 1350 touch-move 5 @STICK 0 0
 """
 
-A, B, Y, START, DPAD_UP = 0x1000, 0x2000, 0x8000, 0x0010, 0x0001
+A, B, X, Y, START, DPAD_UP = 0x1000, 0x2000, 0x4000, 0x8000, 0x0010, 0x0001
 
 
 def slot(buttons=0, lt=0, rt=0, lx=0, ly=0, rx=0, ry=0):
@@ -118,6 +122,37 @@ EXPECTED = [
     (slot(Y), slot(START), OFF, OFF),                          # back where it landed: its origin stayed
     (slot(Y, lx=-32767), slot(START), OFF, OFF),               # a new touch a radius right: its own origin
     (OFF, OFF, OFF, OFF),                                      # the end: every slot let go
+]
+
+
+# The settings run (test_the_settings_change_only_what_they_name).
+SETTINGS = {"SA2_PAD_MAP": "SOUTH=B,EAST=A", "SA2_TOUCH_MAP": "A=X", "SA2_TOUCH_SCALE": "1.5",
+            "SA2_TOUCH_LAYOUT": "STICK=0.8,0.65;FACE=0.2,0.6"}
+# EXPECTED with pad 0's SOUTH (A) sending B, pad 2's EAST (B) sending A, and the overlay's A X.
+EXPECTED_SETTINGS = [
+    (OFF, OFF, OFF, OFF),
+    (slot(), OFF, OFF, OFF),
+    (slot(B), OFF, OFF, OFF),
+    (slot(B, lx=32767), OFF, OFF, OFF),
+    (slot(B, lx=32767, ly=32767), OFF, OFF, OFF),
+    (slot(B, rt=255, lx=32767, ly=32767), OFF, OFF, OFF),
+    (slot(rt=255, lx=32767, ly=32767), OFF, OFF, OFF),
+    (slot(DPAD_UP, rt=255, lx=32767, ly=32767), OFF, OFF, OFF),
+    (slot(DPAD_UP, rt=255, lx=32767, ly=32767), slot(), OFF, OFF),
+    (slot(DPAD_UP, rt=255, lx=32767, ly=32767), slot(START), OFF, OFF),
+    "let go",
+    (OFF, slot(START), OFF, OFF),
+    (slot(X), slot(START), OFF, OFF),
+    (slot(X, lx=32767), slot(START), OFF, OFF),
+    (slot(lx=32767), slot(START), OFF, OFF),
+    (slot(A), slot(START), OFF, OFF),
+    (slot(), slot(START), OFF, OFF),
+    (slot(Y), slot(START), OFF, OFF),
+    (slot(Y, ly=32767), slot(START), OFF, OFF),
+    (slot(Y, lx=32767), slot(START), OFF, OFF),
+    (slot(Y), slot(START), OFF, OFF),
+    (slot(Y, lx=-32767), slot(START), OFF, OFF),
+    (OFF, OFF, OFF, OFF),
 ]
 
 
@@ -175,9 +210,10 @@ def build_player(out: Path) -> Path:
     return out / "sa2_player_gpu"
 
 
-def play(player: Path, stream: Path, out: Path, script: str | None) -> dict:
-    """One live interactive run of the synthetic stream, fed in two parts FEED_GAP_S apart:
-    the records the input FIFO carried, the report, and the frames table."""
+def play(player: Path, stream: Path, out: Path, script: str | None, settings: dict | None = None) -> dict:
+    """One live interactive run of the synthetic stream, fed in two parts FEED_GAP_S apart, with
+    `settings` in the player's environment: the records the input FIFO carried, the report, and
+    the frames table."""
     out.mkdir(parents=True)
     fifo = out / "input.fifo"
     os.mkfifo(fifo)
@@ -192,7 +228,9 @@ def play(player: Path, stream: Path, out: Path, script: str | None) -> dict:
         (out / "shots").mkdir()
         argv += ["--synthetic-input", str(out / "script.tsv"), "--overlay-out", str(out / "shots")]
     env = dict(os.environ, VK_LOADER_LAYERS_DISABLE="~implicit~", SDL_AUDIO_DRIVER="dummy")
-    env.pop("SA2_TOUCH_CONTROLS", None)
+    for k in [k for k in env if k.startswith("SA2_TOUCH_") or k == "SA2_PAD_MAP"]:
+        env.pop(k)
+    env.update(settings or {})
     with (out / "player.out").open("wb") as so:
         proc = subprocess.Popen(argv, pass_fds=(video_r, cancel_r), stdout=so, stderr=subprocess.STDOUT,
                                 env=env, cwd=out)        # the player writes its device log here
@@ -256,7 +294,8 @@ def runs(tmp_path_factory):
     t = tmp_path_factory.mktemp("pads_touch")
     player = build_player(t / "bin")
     stream = build_synth(t)
-    return {"input": play(player, stream, t / "input", SCRIPT), "plain": play(player, stream, t / "plain", None)}
+    return {"input": play(player, stream, t / "input", SCRIPT), "plain": play(player, stream, t / "plain", None),
+            "settings": play(player, stream, t / "settings", SCRIPT, SETTINGS)}
 
 
 def test_the_overlay_alone(tmp_path):
@@ -293,10 +332,9 @@ def test_the_run_and_its_script(runs):
     assert (t["activations"], t["hides"], t["draw_failures"], t["gpu"], t["error"]) == (2, 1, 0, True, None)
 
 
-def test_every_gamepad_record_in_order(runs):
-    records = runs["input"]["records"]
+def records_match(records, expected):
     got, i, last = [slots for _, slots in records], 0, None
-    for want in EXPECTED:
+    for want in expected:
         if want == "let go":
             while i < len(got) and got[i][0][:2] == (1, 0) and got[i][1:] == last[1:]:
                 i += 1
@@ -306,6 +344,20 @@ def test_every_gamepad_record_in_order(runs):
     assert i == len(got), got[i:]
     seqs = [seq for seq, _ in records]
     assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+
+
+def test_every_gamepad_record_in_order(runs):
+    records_match(runs["input"]["records"], EXPECTED)
+
+
+def test_the_settings_change_only_what_they_name(runs):
+    r = runs["settings"]
+    assert r["exit"] == 0, (r["out"] / "player.out").read_text()[-3000:]
+    assert r["report"]["synthetic_input"]["failures"] == 0
+    said = (r["out"] / "player.out").read_text()
+    for k, v in SETTINGS.items():
+        assert f"pads: {k}={v}\n" in said, said[-3000:]
+    records_match(r["records"], EXPECTED_SETTINGS)
 
 
 def test_the_overlay_over_the_frame_and_only_after_a_touch(runs):

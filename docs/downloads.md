@@ -32,6 +32,20 @@ The app copies the ZIP, then shows "Checking the game ZIP" while it verifies and
 
 The app supports touch controls and external controllers. The touch controls appear when you touch the screen.
 
+### Game settings on Android
+
+Tap **Game settings** on the setup screen. Changes apply the next time the game starts. App updates keep your settings.
+
+- **Orientation** is Landscape by default. **Portrait** lets you hold the phone upright: the game is drawn at 4:3 across the screen, and the touch controls sit in the space below the picture. **Auto-rotate** follows the phone when its own auto-rotate is on. The game is then drawn at 4:3 so that it fits either way.
+- **Full-width picture** draws the game at the screen's shape. Turn it off to keep the game's own 16:9 picture, with bars at the sides of a wider screen.
+- **Aspect ratio** is the screen's shape by default. You can choose 21:9, 16:9, or 4:3 instead.
+- **Resolution** is the largest picture the screen holds. Fewer lines can run faster on a slower phone.
+- **HUD at 4:3 positions** keeps the score, time, and rings near the middle of a wide picture. It is on by default.
+- **Touch controls** sets the size and opacity of the on-screen controls. At 0% opacity the controls are hidden but still work. **Move the controls** lets you drag each control to a new place, and **Change what the touch buttons do** changes the game button each one sends.
+- **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
+
+**Reset all settings** restores the defaults.
+
 ### Report a crash on Android
 
 If the game stops, OpenSA2 returns to its setup screen and says so. Tap **Report on GitHub**. The app copies a crash report and opens the bug-report form with your device filled in. Paste the report into the **Crash report** box, then fill in the steps and what you expected. **Copy report** copies the whole report, **Copy summary** copies a shorter version that fits in a forum comment, and **Share report** sends it to another app. **Share OpenSA2** at the bottom of the screen sends a friend the download link. If the installer refuses your game files, the same buttons copy its output.

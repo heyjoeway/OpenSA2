@@ -17,8 +17,14 @@
 //    assets/game.env and the session's settings, exactly the launcher's (SA2_INSTALL,
 //    SA2_VFS_WRITE_ROOT, SA2_EXE_KIND=shipped, SA2_REC_TRACE, SA2_REC_META, SA2_REC_COUNTS,
 //    SA2_INPUT_DI_SOURCE, SA2_INPUT_DI_LOG, SA2_LAUNCH_TICKS), in a process group of its own.
-//    A measurement may add SA2_ settings in <external files>/game.env.extra (adb can push it):
-//    they come after game.env and never replace the session's own.
+//    The app's settings screen (Sa2SettingsActivity) sends its settings as --setting SA2_K=V
+//    arguments: they come after the session's defaults below and replace them. A measurement may
+//    add SA2_ settings in <external files>/game.env.extra (adb can push it): they come after
+//    game.env, the session's defaults and the app's settings, and replace those, never the
+//    session's own (the installation, the session's files and the stream's settings, set last).
+//    So game.env.extra wins over the settings screen. The player's settings among them
+//    (SA2_TOUCH_*, SA2_PAD_MAP, SA2_PLAYER_PROF*) go to the player, in this process's
+//    environment, and not to the game.
 //  - The relay (host/launch/sa2_relay.h) hands the stream on to the player, paced (lead 1).
 //  - The player: host/player's main (renamed sa2_player_main by tools/s8/android_app.py) on this
 //    thread, with the launcher's play argv: --interactive with in-process pipes for --video-fd,
@@ -62,16 +68,23 @@
 //
 // Full width (the user's request of 2026-10-12,
 // Documentation/decisions/2026-10-12-S7-widescreen-pulled-forward.md). Sa2Activity passes the
-// screen's size in pixels, landscape (--screen WxH: the largest window the activity can have, the
-// cutout included). Unless it is no wider than 4:3, the session sets SA2_PLAY_RES to it, so the
+// screen's size in pixels in the session's orientation (--screen WxH: the largest window the
+// activity can have, the cutout included; landscape unless the settings screen chose portrait).
+// Unless it is no wider than 4:3, the session sets SA2_PLAY_RES to it, so the
 // runtime rewrites the config's Width and Height (runtime/sa2_widescreen.c) and the game draws its
 // back buffer at the screen's own size and aspect: the player presents it whole, with no bars.
-// A game.env.extra line replaces it: SA2_PLAY_RES=off (the config's own size, pillarboxed),
-// SA2_PLAY_RES=WxH (that size), SA2_PLAY_RES=hNNN (NNN lines at the screen's aspect, which the
-// session resolves to WxH: h720 on a 2340x1080 screen is 1560x720), or SA2_PLAY_ASPECT=W:H alone
-// (the config's Height at that aspect). The session says what it set, and then the game's own
-// line saying what the config became ("widescreen: config 1280x720 -> 2340x1080 ...", from its
-// game.log).
+// The settings screen replaces it with its own SA2_PLAY_RES (WxH from its widescreen, resolution
+// and aspect choices, 4:3 in portrait, or off), and SA2_PLAY_HUD43=1 with 0 when it turns the
+// HUD option off. A game.env.extra line replaces either: SA2_PLAY_RES=off (the config's own size,
+// pillarboxed), SA2_PLAY_RES=WxH (that size), SA2_PLAY_RES=hNNN (NNN lines at the screen's aspect,
+// which the session resolves to WxH: h720 on a 2340x1080 screen is 1560x720), or
+// SA2_PLAY_ASPECT=W:H alone (the config's Height at that aspect). The session says what it set,
+// and then the game's own line saying what the config became ("widescreen: config 1280x720 ->
+// 2340x1080 ...", from its game.log).
+//
+// Orientation (--orientation landscape|portrait|auto, the settings screen's; landscape when
+// absent): SDL's SDL_ORIENTATIONS hint, landscape either way up, portrait either way up, or all
+// four. Sa2Activity asks the system for the same orientation itself.
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -225,11 +238,21 @@ void player_env(const std::string& session) {
     sa2p::make_dirs(session + "/play");
 }
 
+using EnvList = std::vector<std::pair<std::string, std::string>>;
+
 struct Args {
-    std::string files, cache, external, libdir, stream, screen;
+    std::string files, cache, external, libdir, stream, screen, orientation;
     bool audio = true, pace = true;
     std::string max_frames;
+    EnvList settings;         // --setting SA2_K=V: the app's settings screen
 };
+
+// The settings that are the player's, not the game's: they go to this process's environment,
+// where the player runs, and are taken out of the game's.
+bool player_setting(const std::string& k) {
+    return k == "SA2_PLAYER_PROF" || k == "SA2_PLAYER_PROF_OUT" || k == "SA2_PAD_MAP" ||
+           k.compare(0, 10, "SA2_TOUCH_") == 0;
+}
 
 // ---------------------------------------------------------------- the debug mode: a stream file
 
@@ -247,6 +270,11 @@ int play_stream(const Args& a) {
     say("mode stream %s", a.stream.c_str());
     redirect_output(session + "/player.log");
     player_env(session);
+    for (const auto& kv : a.settings)
+        if (player_setting(kv.first)) {
+            setenv(kv.first.c_str(), kv.second.c_str(), 1);
+            say("settings: %s=%s", kv.first.c_str(), kv.second.c_str());
+        }
     std::vector<std::string> args = {"sa2_player", a.stream, "--stage", "3", "--allow-truncated",
                                      "--report", session + "/player-report.runrec"};
     if (a.pace) args.push_back("--pace");
@@ -263,8 +291,6 @@ int play_stream(const Args& a) {
 }
 
 // ---------------------------------------------------------------- placement
-
-using EnvList = std::vector<std::pair<std::string, std::string>>;
 
 const std::string* env_find(const EnvList& env, const std::string& k) {
     for (const auto& e : env)
@@ -693,10 +719,12 @@ bool parse_size(const std::string& v, uint32_t& w, uint32_t& h) {
     return w >= 320 && w <= 16384 && h >= 320 && h <= 16384;
 }
 
-// The full-width settings in `env` after game.env.extra: the screen's size unless a line set
+// The full-width settings in `env` after the settings screen's and game.env.extra's: the screen's
+// size unless the settings screen set SA2_PLAY_RES (`settings_res`), or a game.env.extra line set
 // SA2_PLAY_RES (an "hNNN" one resolved here at the screen's aspect) or SA2_PLAY_ASPECT alone.
 // What was decided, in words.
-std::string full_width(EnvList& env, const std::string& screen, bool extra_res, bool extra_aspect) {
+std::string full_width(EnvList& env, const std::string& screen, bool settings_res, bool extra_res,
+                       bool extra_aspect) {
     auto drop = [&](const char* k) {
         env.erase(std::remove_if(env.begin(), env.end(), [k](const auto& e) { return e.first == k; }), env.end());
     };
@@ -728,7 +756,7 @@ std::string full_width(EnvList& env, const std::string& screen, bool extra_res, 
         return on + "; SA2_PLAY_RES=" + asked + " (game.env.extra): " + *env_find(env, "SA2_PLAY_RES");
     }
     if (extra_res) return on + "; SA2_PLAY_RES=" + (res ? *res : std::string()) + " (game.env.extra)";
-    if (res) return on + "; SA2_PLAY_RES=" + *res + " (the screen)";
+    if (res) return on + "; SA2_PLAY_RES=" + *res + (settings_res ? " (the settings screen)" : " (the screen)");
     return on + "; the config's own size" + (have ? " (the screen is no wider than 4:3)" : "");
 }
 
@@ -815,7 +843,15 @@ int play_game(const Args& a) {
     uint32_t screen_w = 0, screen_h = 0;
     if (parse_size(a.screen, screen_w, screen_h) && uint64_t(screen_w) * 3 > uint64_t(screen_h) * 4)
         env_set(genv, "SA2_PLAY_RES", a.screen);
-    env_set(genv, "SA2_PLAY_HUD43", "1");   // the HUD at its 4:3 positions; game.env.extra's SA2_PLAY_HUD43=0 turns it off
+    env_set(genv, "SA2_PLAY_HUD43", "1");   // the HUD at its 4:3 positions; SA2_PLAY_HUD43=0 turns it off
+    // The settings screen's (the header): after the session's defaults, which they replace, and
+    // before game.env.extra, whose lines replace them.
+    bool settings_res = false;
+    for (const auto& kv : a.settings) {
+        env_set(genv, kv.first, kv.second);
+        settings_res |= kv.first == "SA2_PLAY_RES";
+        say("settings: %s=%s", kv.first.c_str(), kv.second.c_str());
+    }
     bool extra_res = false, extra_aspect = false;
     // A measurement's settings for the game (the thermal unit, 2026-10-12): the SA2_ lines of
     // <external>/game.env.extra, a file adb can push without the app's own access, after the
@@ -843,13 +879,13 @@ int play_game(const Args& a) {
             }
         }
     }
-    say("widescreen: %s", full_width(genv, a.screen, extra_res, extra_aspect).c_str());
-    // The player's sampler (host/player/prof.h): SA2_PLAYER_PROF and SA2_PLAYER_PROF_OUT are the
-    // player's settings, not the game's. They leave the game's environment for this process's,
-    // where the player runs (set after player_env below).
+    say("widescreen: %s", full_width(genv, a.screen, settings_res, extra_res, extra_aspect).c_str());
+    // The player's settings (player_setting: its sampler, host/player/prof.h, the touch overlay's
+    // and the pads' map) leave the game's environment for this process's, where the player runs
+    // (set after player_env below).
     EnvList prof_env;
     for (auto it = genv.begin(); it != genv.end();) {
-        if (it->first == "SA2_PLAYER_PROF" || it->first == "SA2_PLAYER_PROF_OUT") {
+        if (player_setting(it->first)) {
             prof_env.push_back(*it);
             it = genv.erase(it);
         } else {
@@ -1034,6 +1070,7 @@ int play_game(const Args& a) {
 
 // The app's entry point (Sa2Activity.getMainFunction). Arguments (Sa2Activity.getArguments):
 //   --files DIR --cache DIR --libdir DIR [--external DIR] [--screen WxH]
+//   [--orientation landscape|portrait|auto] [--setting SA2_K=V ...]
 //   [--stream FILE [--max-frames N]] [--no-audio] [--no-pace]
 extern "C" __attribute__((visibility("default"))) int sa2_android_main(int argc, char** argv) {
     Args a;
@@ -1045,6 +1082,15 @@ extern "C" __attribute__((visibility("default"))) int sa2_android_main(int argc,
         else if (k == "--external") a.external = val();
         else if (k == "--libdir") a.libdir = val();
         else if (k == "--screen") a.screen = val();
+        else if (k == "--orientation") a.orientation = val();
+        else if (k == "--setting") {
+            const std::string kv = val();
+            const size_t eq = kv.find('=');
+            if (eq != std::string::npos && kv.compare(0, 4, "SA2_") == 0)
+                a.settings.emplace_back(kv.substr(0, eq), kv.substr(eq + 1));
+            else
+                __android_log_print(ANDROID_LOG_WARN, kTag, "--setting %s: not SA2_K=V, not used", kv.c_str());
+        }
         else if (k == "--stream") a.stream = val();
         else if (k == "--max-frames") a.max_frames = val();
         else if (k == "--no-audio") a.audio = false;
@@ -1063,8 +1109,13 @@ extern "C" __attribute__((visibility("default"))) int sa2_android_main(int argc,
     setenv("XDG_CONFIG_HOME", (a.files + "/config").c_str(), 1);
     setenv("XDG_DATA_HOME", (a.files + "/data").c_str(), 1);
     if (!a.cache.empty()) setenv("TMPDIR", a.cache.c_str(), 1);
-    // SDL's hints for the app: landscape either way up, the screen kept on.
-    setenv("SDL_ORIENTATIONS", "LandscapeLeft LandscapeRight", 1);
+    // SDL's hint for the app's orientation (the header): landscape either way up unless the
+    // settings screen chose portrait or either.
+    const char* orientations = a.orientation == "portrait" ? "Portrait PortraitUpsideDown"
+                             : a.orientation == "auto"     ? "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown"
+                                                           : "LandscapeLeft LandscapeRight";
+    setenv("SDL_ORIENTATIONS", orientations, 1);
     say("sa2recomp %s", a.stream.empty() ? "play" : "stream");
+    if (!a.orientation.empty() && a.orientation != "landscape") say("orientation: %s", a.orientation.c_str());
     return a.stream.empty() ? play_game(a) : play_stream(a);
 }

@@ -1,0 +1,414 @@
+package com.sa2recomp.app;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.CompoundButton;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.SeekBar;
+import android.widget.Switch;
+import android.widget.TextView;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * The game settings screen, opened from the setup screen: the orientation (landscape, portrait or
+ * auto-rotate), the full-width picture, the HUD at 4:3, the picture's aspect and resolution, the
+ * touch controls' size, opacity and places (Sa2LayoutActivity) and what each touch or controller
+ * button sends. Each change is saved at once (GameSettings) and applies from the next session.
+ * Every setting starts at today's behaviour, and "Reset all" puts them back.
+ */
+public class Sa2SettingsActivity extends Activity {
+    private static final int TEXT = Color.rgb(0xE8, 0xED, 0xF7), NOTE = Color.rgb(0x8A, 0x97, 0xB2);
+
+    private GameSettings mS;
+    private int mLong, mShort;
+    private Button[] mOrientation, mAspect;
+    private Switch mWidescreen, mHud;
+    private Button mResolution, mLayoutOver, mLayoutBelow;
+    private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel;
+    private SeekBar mSize, mOpacity;
+    private boolean mUpdating;
+
+    private static final String[] ORIENTATIONS = {GameSettings.LANDSCAPE, GameSettings.PORTRAIT, GameSettings.AUTO};
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        mS = GameSettings.load(this);
+        int[] screen = GameSettings.screen(this);
+        mLong = screen != null ? screen[0] : 1920;
+        mShort = screen != null ? screen[1] : 1080;
+        buildUi();
+        update();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // The layout editor saves its places itself.
+        mS = GameSettings.load(this);
+        update();
+    }
+
+    private int dp(float v) {
+        return Ui.dp(this, v);
+    }
+
+    private void save() {
+        mS.save(this);
+        update();
+    }
+
+    // ------------------------------------------------------------ the screen
+
+    private TextView text(String s, int sp, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+        return t;
+    }
+
+    /** A rounded card holding one section's rows. */
+    private LinearLayout card(LinearLayout col, String title) {
+        TextView head = text(title, 13, Color.rgb(0x8C, 0xB6, 0xFF), true);
+        head.setAllCaps(true);
+        head.setLetterSpacing(0.08f);
+        col.addView(head, Ui.full(dp(24)));
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(12));
+        bg.setColor(Color.rgb(0x18, 0x22, 0x3D));
+        bg.setStroke(dp(1), Color.rgb(0x26, 0x30, 0x48));
+        c.setBackground(bg);
+        c.setPadding(dp(14), dp(12), dp(14), dp(14));
+        col.addView(c, Ui.full(dp(8)));
+        return c;
+    }
+
+    private void label(LinearLayout c, String s, boolean first) {
+        c.addView(text(s, 15, TEXT, true), Ui.full(first ? 0 : dp(16)));
+    }
+
+    private TextView note(LinearLayout c, String s) {
+        TextView t = text(s, 13, NOTE, false);
+        c.addView(t, Ui.full(dp(4)));
+        return t;
+    }
+
+    /** Choices side by side, the chosen one filled. */
+    private Button[] segments(LinearLayout c, String[] labels, View.OnClickListener[] clicks) {
+        Button[] bs = new Button[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            bs[i] = Ui.button(this, labels[i], clicks[i]);
+            Ui.style(bs[i], Ui.SECONDARY);
+            bs[i].setMinWidth(0);
+            bs[i].setMinimumWidth(0);
+        }
+        c.addView(Ui.row(this, bs), Ui.full(dp(8)));
+        return bs;
+    }
+
+    private static void choose(Button[] bs, int chosen) {
+        for (int i = 0; i < bs.length; i++) Ui.style(bs[i], i == chosen ? Ui.PRIMARY : Ui.SECONDARY);
+        for (Button b : bs) {
+            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            b.setMinHeight(Ui.dp(b.getContext(), 44));
+            b.setMinimumHeight(Ui.dp(b.getContext(), 44));
+        }
+    }
+
+    private Switch toggle(LinearLayout c, String s, CompoundButton.OnCheckedChangeListener change) {
+        Switch w = new Switch(this);
+        w.setText(s);
+        w.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        w.setTypeface(Typeface.DEFAULT_BOLD);
+        int[][] states = {{-android.R.attr.state_enabled}, {android.R.attr.state_checked}, {}};
+        w.setThumbTintList(new ColorStateList(states, new int[] {Color.rgb(0x3A, 0x48, 0x66),
+                                              Color.rgb(0x2B, 0x6B, 0xE8), Color.rgb(0xB8, 0xC4, 0xDA)}));
+        w.setTrackTintList(new ColorStateList(states, new int[] {Color.rgb(0x24, 0x30, 0x4D),
+                                              Color.rgb(0x6F, 0x9C, 0xF0), Color.rgb(0x3A, 0x48, 0x66)}));
+        w.setTextColor(new ColorStateList(new int[][] {{-android.R.attr.state_enabled}, {}},
+                                          new int[] {Color.rgb(0x5D, 0x6A, 0x85), TEXT}));
+        w.setOnCheckedChangeListener((b, on) -> {
+            if (!mUpdating) change.onCheckedChanged(b, on);
+        });
+        c.addView(w, Ui.full(dp(16)));
+        return w;
+    }
+
+    /** A slider in steps of 10%, from lo to hi percent. */
+    private SeekBar slider(LinearLayout c, int lo, int hi, java.util.function.IntConsumer change) {
+        SeekBar b = new SeekBar(this);
+        b.setMax((hi - lo) / 10);
+        b.setProgressTintList(ColorStateList.valueOf(Color.rgb(0x2B, 0x6B, 0xE8)));
+        b.setThumbTintList(ColorStateList.valueOf(Color.rgb(0x6F, 0x9C, 0xF0)));
+        b.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean user) {
+                if (user && !mUpdating) change.accept(lo + 10 * p);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {}
+        });
+        c.addView(b, Ui.full(dp(4)));
+        return b;
+    }
+
+    private Button action(LinearLayout c, String s, View.OnClickListener click) {
+        Button b = Ui.button(this, s, click);
+        Ui.style(b, Ui.SECONDARY);
+        c.addView(b, Ui.full(dp(10)));
+        return b;
+    }
+
+    private void buildUi() {
+        int pad = dp(16);
+        Ui.Column col = new Ui.Column(this, dp(640));
+        col.setPadding(pad, pad, pad, pad);
+        col.addView(text("Game settings", 24, Color.WHITE, true));
+        col.addView(text("Changes apply the next time the game starts.", 14, NOTE, false), Ui.full(dp(6)));
+
+        // Display
+        LinearLayout d = card(col, "Display");
+        label(d, "Orientation", true);
+        View.OnClickListener[] oc = new View.OnClickListener[3];
+        for (int i = 0; i < 3; i++) {
+            final String o = ORIENTATIONS[i];
+            oc[i] = v -> {
+                mS.orientation = o;
+                save();
+            };
+        }
+        mOrientation = segments(d, new String[] {"Landscape", "Portrait", "Auto-rotate"}, oc);
+        mOrientationNote = note(d, "");
+        mWidescreen = toggle(d, "Full-width picture", (b, on) -> {
+            mS.widescreen = on;
+            save();
+        });
+        note(d, "Draws the game at the screen's shape. Off keeps the game's own 16:9 picture, with bars at "
+                + "the sides of a wider screen.");
+        label(d, "Aspect ratio", false);
+        View.OnClickListener[] ac = new View.OnClickListener[GameSettings.ASPECTS.length];
+        for (int i = 0; i < ac.length; i++) {
+            final String a = GameSettings.ASPECTS[i];
+            ac[i] = v -> {
+                mS.aspect = a;
+                save();
+            };
+        }
+        mAspect = segments(d, new String[] {"Screen", "21:9", "16:9", "4:3"}, ac);
+        label(d, "Resolution", false);
+        mResolution = Ui.button(this, "", v -> pickResolution());
+        Ui.style(mResolution, Ui.SECONDARY);
+        d.addView(mResolution, Ui.full(dp(8)));
+        note(d, "Fewer lines can run faster on a slower phone.");
+        mHud = toggle(d, "HUD at 4:3 positions", (b, on) -> {
+            mS.hud43 = on;
+            save();
+        });
+        note(d, "Keeps the score, time and rings near the middle of a wide picture.");
+        mPictureNote = text("", 14, Color.rgb(0xFF, 0xD8, 0x70), false);
+        d.addView(mPictureNote, Ui.full(dp(16)));
+
+        // Touch controls
+        LinearLayout t = card(col, "Touch controls");
+        mSizeLabel = text("", 15, TEXT, true);
+        t.addView(mSizeLabel);
+        mSize = slider(t, 50, 200, v -> {
+            mS.touchSize = v;
+            save();
+        });
+        mOpacityLabel = text("", 15, TEXT, true);
+        t.addView(mOpacityLabel, Ui.full(dp(12)));
+        mOpacity = slider(t, 0, 200, v -> {
+            mS.touchOpacity = v;
+            save();
+        });
+        note(t, "At 0% the controls are hidden but still work.");
+        mLayoutOver = action(t, "", v -> editLayout(GameSettings.LANDSCAPE));
+        mLayoutBelow = action(t, "", v -> editLayout(GameSettings.PORTRAIT));
+        action(t, "Change what the touch buttons do", v -> pickMap(true, -1));
+
+        // Controller
+        LinearLayout p = card(col, "Controller");
+        action(p, "Change what the controller buttons do", v -> pickMap(false, -1));
+        note(p, "Buttons are named by where they are: the bottom face button is A, as on an Xbox controller.");
+
+        Button reset = Ui.button(this, "Reset all settings", v -> new AlertDialog.Builder(this)
+                .setMessage("Put every game setting back to its default?")
+                .setPositiveButton("Reset", (dlg, w) -> {
+                    mS = new GameSettings();
+                    save();
+                })
+                .setNegativeButton("Cancel", null)
+                .show());
+        Ui.style(reset, Ui.QUIET);
+        Button done = Ui.button(this, "Done", v -> finish());
+        Ui.style(done, Ui.PRIMARY);
+        col.addView(Ui.row(this, reset, done), Ui.full(dp(24)));
+
+        FrameLayout center = new FrameLayout(this);
+        center.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                         ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Ui.BACKGROUND);
+        Ui.padForSystemBars(scroll);
+        scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                                           ViewGroup.LayoutParams.WRAP_CONTENT));
+        setContentView(scroll);
+    }
+
+    // ------------------------------------------------------------ the state shown
+
+    private static int indexOf(String[] a, String v) {
+        for (int i = 0; i < a.length; i++) if (a[i].equals(v)) return i;
+        return 0;
+    }
+
+    private String size(int[] p) {
+        return p[0] + "x" + p[1];
+    }
+
+    private String resolutionName(int lines) {
+        int[] p = mS.picture(mLong, mShort, lines);
+        if (p == null) return "The game's own (" + GameSettings.CONFIG_W + "x" + GameSettings.CONFIG_H + ")";
+        return (lines == 0 ? "Screen" : lines + " lines") + " (" + size(p) + ")";
+    }
+
+    private void update() {
+        mUpdating = true;
+        boolean fixed = mS.fixed43();
+        choose(mOrientation, indexOf(ORIENTATIONS, mS.orientation));
+        mOrientationNote.setText(GameSettings.PORTRAIT.equals(mS.orientation)
+                ? "Hold the phone upright: the game is drawn at 4:3 across the screen, with the touch controls "
+                  + "below it."
+                : GameSettings.AUTO.equals(mS.orientation)
+                ? "The game turns with the phone when the phone's auto-rotate is on. It is drawn at 4:3 so it "
+                  + "fits either way; upright, the touch controls go below it."
+                : "Hold the phone sideways, as before.");
+        mWidescreen.setChecked(!fixed && mS.widescreen);
+        mWidescreen.setEnabled(!fixed);
+        boolean wide = !fixed && mS.widescreen;
+        choose(mAspect, fixed ? 3 : indexOf(GameSettings.ASPECTS, mS.aspect));
+        for (Button b : mAspect) b.setEnabled(wide);
+        mResolution.setText(resolutionName(mS.resolution));
+        mResolution.setEnabled(fixed || wide);
+        mHud.setChecked(mS.hud43);
+        int[] pic = mS.picture(mLong, mShort);
+        mPictureNote.setText(pic == null
+                ? "The game keeps its own size (" + GameSettings.CONFIG_W + "x" + GameSettings.CONFIG_H + ")."
+                : "The game will draw at " + size(pic) + (fixed ? ", 4:3, as portrait and auto-rotate always do." : "."));
+        mSizeLabel.setText(String.format(Locale.US, "Size: %d%%", mS.touchSize));
+        mSize.setProgress((mS.touchSize - 50) / 10);
+        mOpacityLabel.setText(String.format(Locale.US, "Opacity: %d%%", mS.touchOpacity));
+        mOpacity.setProgress(mS.touchOpacity / 10);
+        boolean landscape = !GameSettings.PORTRAIT.equals(mS.orientation);
+        boolean portrait = !GameSettings.LANDSCAPE.equals(mS.orientation);
+        mLayoutOver.setVisibility(landscape ? View.VISIBLE : View.GONE);
+        mLayoutBelow.setVisibility(portrait ? View.VISIBLE : View.GONE);
+        mLayoutOver.setText(portrait ? "Move the controls (landscape)" : "Move the controls");
+        mLayoutBelow.setText(landscape ? "Move the controls (portrait)" : "Move the controls");
+        mUpdating = false;
+    }
+
+    // ------------------------------------------------------------ the choices
+
+    private void pickResolution() {
+        List<Integer> lines = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        int[] largest = mS.picture(mLong, mShort, 0);
+        for (int r : GameSettings.RESOLUTIONS) {
+            if (r != 0 && largest != null && r >= largest[1]) continue;
+            lines.add(r);
+            names.add(resolutionName(r));
+        }
+        int chosen = Math.max(0, lines.indexOf(mS.resolution));
+        new AlertDialog.Builder(this)
+                .setTitle("Resolution")
+                .setSingleChoiceItems(names.toArray(new String[0]), chosen, (dlg, which) -> {
+                    mS.resolution = lines.get(which);
+                    save();
+                    dlg.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void editLayout(String orientation) {
+        startActivity(new Intent(this, Sa2LayoutActivity.class).putExtra(Sa2LayoutActivity.EXTRA_ORIENTATION, orientation));
+    }
+
+    private static final String[] TOUCH_NAMES = {"A button", "B button", "X button", "Y button", "START button",
+                                                 "LT button", "RT button"};
+    private static final String[] PAD_NAMES = {"Bottom face button (A)", "Right face button (B)",
+                                               "Left face button (X)", "Top face button (Y)", "Left bumper (LB)",
+                                               "Right bumper (RB)", "Back / Select", "Start / Menu",
+                                               "Left stick press", "Right stick press", "D-pad up", "D-pad down",
+                                               "D-pad left", "D-pad right"};
+
+    private static String outputName(String out) {
+        return "NONE".equals(out) ? "nothing" : out;
+    }
+
+    /** The touch (or controller) buttons and what each sends; picking one asks what it should send,
+     * then shows the list again. */
+    private void pickMap(boolean touch, int button) {
+        String[] keys = touch ? GameSettings.TOUCH_BUTTONS : GameSettings.PAD_BUTTONS;
+        String[] owns = touch ? GameSettings.TOUCH_BUTTONS : GameSettings.PAD_DEFAULTS;
+        String[] names = touch ? TOUCH_NAMES : PAD_NAMES;
+        String map = touch ? mS.touchMap : mS.padMap;
+        if (button < 0) {
+            String[] rows = new String[keys.length];
+            for (int i = 0; i < keys.length; i++)
+                rows[i] = names[i] + ": " + outputName(GameSettings.sends(map, keys[i], owns[i]));
+            new AlertDialog.Builder(this)
+                    .setTitle(touch ? "Touch buttons" : "Controller buttons")
+                    .setItems(rows, (dlg, which) -> pickMap(touch, which))
+                    .setNeutralButton("Reset", (dlg, w) -> {
+                        if (touch) mS.touchMap = "";
+                        else mS.padMap = "";
+                        save();
+                    })
+                    .setNegativeButton("Close", null)
+                    .show();
+            return;
+        }
+        String[] outs = new String[GameSettings.OUTPUTS.length];
+        for (int i = 0; i < outs.length; i++) outs[i] = outputName(GameSettings.OUTPUTS[i]);
+        int chosen = indexOf(GameSettings.OUTPUTS, GameSettings.sends(map, keys[button], owns[button]));
+        new AlertDialog.Builder(this)
+                .setTitle(names[button] + " sends")
+                .setSingleChoiceItems(outs, chosen, (dlg, which) -> {
+                    String m = GameSettings.withSend(map, keys, owns, keys[button], GameSettings.OUTPUTS[which]);
+                    if (touch) mS.touchMap = m;
+                    else mS.padMap = m;
+                    save();
+                    dlg.dismiss();
+                    pickMap(touch, -1);
+                })
+                .setNegativeButton("Back", (dlg, w) -> pickMap(touch, -1))
+                .show();
+    }
+}

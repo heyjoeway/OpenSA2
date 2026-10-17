@@ -38,6 +38,20 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".Sa2SettingsActivity"
+            android:label="@string/app_name"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
+
+        <!-- The touch controls' layout editor: full screen, in the orientation it edits. -->
+        <activity android:name=".Sa2LayoutActivity"
+            android:label="@string/app_name"
+            android:exported="false"
+            android:theme="@style/PlayTheme"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
+
+        <!-- sensorLandscape is the default orientation's: when the settings choose portrait or
+             auto-rotate, Sa2Activity asks for that itself. -->
         <activity android:name=".Sa2Activity"
             android:label="@string/app_name"
             android:process=":play"

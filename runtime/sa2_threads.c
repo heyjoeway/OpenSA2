@@ -1048,6 +1048,13 @@ static void *thread_body(void *arg) {
     /* Returned, or called ExitThread: Windows' thread exit runs the FLS
      * callbacks before the thread ends. A thread that trapped ends there. */
     if (t->trap_status == SA2_TRAP_NONE || t->exit_called) run_fls_exit(t);
+    /* A worker that ended on its own trap is said at once: the run's record
+     * names it only when the main call returns, and a game left waiting on
+     * what that thread held (a movie's decoder dying with CRI's lock) is
+     * killed before that, with no record at all. */
+    if (t->trap_kept)
+        fprintf(stderr, "sa2 trap: guest thread %d (start %#010x) ended on trap status %u at %#010x: %s\n",
+                t->index, t->start_va, t->trap_status, t->trap_pc, t->trap_note);
 
     t->state = T_DONE;
     /* Anything waiting for this thread to end can run now. */

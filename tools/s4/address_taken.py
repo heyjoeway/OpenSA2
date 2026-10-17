@@ -20,13 +20,18 @@ stops, 30 were named by a base relocation (2026-09-23), which is the image's
 own list of every absolute address it holds. A relocation cannot be a
 coincidence the way a dword that happens to hold a `.text` value can.
 
-A relocated value in `.text` is not always a function's address, so each
+Code is every executable section, not `.text` alone: the 2012 executable keeps
+Sofdec's decoder in PSFD00, and its B-picture slice loop (0x00872650), stored
+by `mov dword ptr [0x0176ABC4], offset` at 0x007F926F, was never listed while
+only `.text` counted, so every story movie hung on the first B-picture.
+
+A relocated value in code is not always a function's address, so each
 relocation is classed by the field it is, from the decoder's own operand
 offsets:
 
   imm      the 32-bit immediate of an instruction in decoded code (`push offset
            f`, `mov [esi+10h], offset f`): the address taken.
-  data     a dword in a section that is not executable: a stored pointer
+  data     a dword in a section that is not code: a stored pointer
            (object tables, vtables, callback arrays).
   disp     the 32-bit displacement of a memory operand: the address is *read*,
            so what is there is data -- a jump table, a constant -- and the
@@ -109,17 +114,31 @@ def decodes(img: bytes, v: int, base: int = C.IMAGE_BASE) -> bool:
 
 
 MAX_ROUNDS = 20
+SCN_CODE = 0x00000020 | 0x20000000             # IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE
+
+
+def executable_sections(pe: pefile.PE) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """The image's sections as (start, size), split into code -- marked
+    executable or as holding code, `.text` and PSFD00 alike -- and the rest."""
+    base = pe.OPTIONAL_HEADER.ImageBase
+    code: list[tuple[int, int]] = []
+    data: list[tuple[int, int]] = []
+    for s in pe.sections:
+        (code if s.Characteristics & SCN_CODE else data).append(
+            (base + s.VirtualAddress, s.Misc_VirtualSize))
+    return code, data
 
 
 def analyse(img: bytes, relocs: list[int], ents: list[tuple[int, int]],
-            extras: list[tuple[int, int]], text: tuple[int, int],
+            extras: list[tuple[int, int]], code: list[tuple[int, int]],
             data: list[tuple[int, int]], base: int = C.IMAGE_BASE,
             modules: list[tuple[int, int]] | None = None) -> dict:
-    """Every relocated target in `text` outside the map's functions `ents`
+    """Every relocated target in `code` outside the map's functions `ents`
     (start, size), with its relocations classed and a verdict.
 
-    `extras` are lifted ranges (start, end) whose code is decoded like the
-    map's; `data` the non-executable sections (start, size); `modules` the
+    `code` are the executable sections (start, size), each bounding its own
+    decodes; `extras` are lifted ranges (start, end) whose code is decoded
+    like the map's; `data` the other sections (start, size); `modules` the
     lifted modules' byte ranges (start, end), which bound what lift_extra.py
     lifts from an admitted target, so an admitted target is decoded over the
     range it would be lifted over (the next map entry when none is given).
@@ -127,14 +146,25 @@ def analyse(img: bytes, relocs: list[int], ents: list[tuple[int, int]],
     "boundary": {va: str}, "rounds": n, "judge": fn}."""
     relocs = sorted(relocs)
     rset = set(relocs)
-    tb, ts = text
+    secs = sorted(code)
+    sstarts = [b for b, _ in secs]
     starts = [a for a, _ in ents]
     size = dict(ents)
     mods = sorted(modules or [])
     mstarts = [a for a, _ in mods]
 
-    def in_text(va: int) -> bool:
-        return tb <= va < tb + ts
+    def section(va: int) -> tuple[int, int] | None:
+        """The executable section (start, end) holding `va`, if any."""
+        i = bisect.bisect_right(sstarts, va) - 1
+        if i >= 0 and va < secs[i][0] + secs[i][1]:
+            return secs[i][0], secs[i][0] + secs[i][1]
+        return None
+
+    def same_code(va: int, at: int) -> bool:
+        """`va` is code in the section that holds `at`: a jump table's entries
+        point into the function that indexes it, so into its own section."""
+        s = section(at)
+        return s is not None and s[0] <= va < s[1]
 
     def value(r: int) -> int:
         return int.from_bytes(img[r - base:r - base + 4], "little")
@@ -150,7 +180,7 @@ def analyse(img: bytes, relocs: list[int], ents: list[tuple[int, int]],
         """A relocated code pointer in code with another at +-4: a jump table's
         entry, whatever a linear decode made of its bytes (the rule-5 review
         found 104 targets admitted from tables decoded as `add [eax],imm32`)."""
-        return any(n in rset and in_text(value(n)) for n in (r - 4, r + 4))
+        return any(n in rset and same_code(value(n), r) for n in (r - 4, r + 4))
 
     def classify(a: int, n: int, use: dict) -> None:
         """Class each relocation in [a, a+n) by the field it is: an imm32 is
@@ -193,12 +223,16 @@ def analyse(img: bytes, relocs: list[int], ents: list[tuple[int, int]],
         if best:
             return best[1] - v
         k = bisect.bisect_right(starts, v)
-        return (starts[k] if k < len(starts) else tb + ts) - v
+        return (starts[k] if k < len(starts) else section(v)[1]) - v
 
     def boundary(v: int) -> str | None:
         """What ends just before `v`, if anything: int3 padding, `ret`, `ret n`,
         a `jmp`, or a jump table -- the ways one function's code stops and
-        another's can start."""
+        another's can start -- or the start of its section, where the bytes
+        before it are another section's fill."""
+        s = section(v)
+        if s is not None and v == s[0]:
+            return "a section start"
         o = v - base
         if img[o - 1] == 0xCC:
             return "int3 padding"
@@ -208,23 +242,24 @@ def analyse(img: bytes, relocs: list[int], ents: list[tuple[int, int]],
             return "a ret n"
         if img[o - 5] == 0xE9 or img[o - 2] == 0xEB:
             return "a jmp"
-        if v - 4 in rset and in_text(value(v - 4)):
+        if v - 4 in rset and same_code(value(v - 4), v):
             return "a jump table"
         return None
 
     base_use: dict[int, tuple[str, int]] = {}
     for a, n in ents:
-        if in_text(a):
+        if section(a):
             classify(a, n, base_use)
     for a, e in extras:
-        if tb <= a < e <= tb + ts:
+        s = section(a)
+        if s and a < e <= s[1]:
             classify(a, e - a, base_use)
 
     def collect(use: dict) -> dict[int, dict[str, list[tuple[int, int]]]]:
         targets: dict[int, dict[str, list[tuple[int, int]]]] = {}
         for r in relocs:
             v = value(r)
-            if not in_text(v) or v in size or in_map(v):
+            if not section(v) or v in size or in_map(v):
                 continue
             kind, where = ("data", r) if in_data(r) else use.get(r, ("other", r))
             targets.setdefault(v, {}).setdefault(kind, []).append((r, where))
@@ -281,10 +316,7 @@ def main() -> int:
 
     pe = pefile.PE(str(C.EXE), fast_load=True)
     img = C.memory_image()
-    secs = [(s.Name.rstrip(b"\0").decode(), C.IMAGE_BASE + s.VirtualAddress, s.Misc_VirtualSize,
-             bool(s.Characteristics & 0x20000000)) for s in pe.sections]
-    text = next((b, n) for name, b, n, _x in secs if name == ".text")
-    data = [(b, n) for _name, b, n, x in secs if not x]
+    code, data = executable_sections(pe)
     fmap = json.loads((C.GEN / "function-map.json").read_text())["functions"]
     ents = sorted(((int(f["address"], 16) if isinstance(f["address"], str) else f["address"]),
                    max(int(f.get("size") or 0), 1)) for f in fmap)
@@ -296,7 +328,7 @@ def main() -> int:
     registered = {int(r["va"], 16) for r in live} | {va for va, _e, _n in modules}
     relocs = relocations(pe)
     res = analyse(img, relocs, ents, [(int(r["va"], 16), int(r["end"], 16)) for r in live],
-                  text, data, modules=[(a, e) for a, e, _n in modules])
+                  code, data, modules=[(a, e) for a, e, _n in modules])
     targets, verdicts = res["targets"], res["verdict"]
 
     admitted, refused, already = [], {}, 0

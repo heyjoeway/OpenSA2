@@ -747,7 +747,9 @@ bool vk_standard_border_colour(uint32_t c) {
 // identity swizzle (Image Views, VkComponentSwizzle: VK_COMPONENT_SWIZZLE_IDENTITY, or the
 // component's own R, G, B or A) maps that component to itself, so an identity mapping remaps
 // nothing; and with the identity view the border colour SDL's struct-less sampler gives is the
-// colour unswizzled. The X8 views (A=1) are not identity, and fail here.
+// colour unswizzled. The X8 views (A=1) and A8's (0,0,0,R) view are not identity, and fail here;
+// for A8, DXVK inverts the view's swizzle on the colour, which turns a standard border colour
+// into a custom one, so DXVK chains a custom border where the patch would chain none.
 //
 // The extraction's two cuts on DXVK's sampler (extract_refs.py, span DxvkSampler), re-examined now
 // that BORDER is mapped: DxvkSamplerDescriptorHeap::createSampler chains its colour index, or
@@ -2065,7 +2067,7 @@ std::vector<Control> controls() {
         {"map-depth-bias-push", {"rs_depthBiasEnable", "rs_depthBiasConstantFactor", "rs_depthBiasClamp", "rs_depthBiasSlopeFactor",
                                  "rs_depthBiasRepresentation", "rs_depthBiasExact"}},
         {"map-depth-clamp-extra", {"rs_depthClampEnable", "obligation DEPTH_CLAMP"}, false, "depth-clamp"},
-        {"map-border-swizzled-view", {"sm_borderColor", "sm_pNextBorderSwizzle",
+        {"map-border-swizzled-view", {"sm_borderColor", "sm_pNextCustomBorder", "sm_pNextBorderSwizzle",
                                       "reason: BORDER mapped where the patch cannot build DXVK's border: DXVK's view of the texture "
                                       "swizzles"}, false, "border"},
         {"map-border-fallback", {"reason: fallback BORDER where the patch builds DXVK's border (a standard colour on an "

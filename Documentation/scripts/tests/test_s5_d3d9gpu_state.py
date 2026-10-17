@@ -17,10 +17,11 @@ SDL tarball (a missing install, checkout or tarball fails, it does not skip), an
   * the domain sweep, on three device axes and every texture format d9g makes: d9g never maps a
     value DXVK does not build; BORDER is the SDL patch's CLAMP_TO_BORDER on the axes whose device
     has it (NVIDIA-like and AMD-like), equal by the BORDER_SWIZZLE rule where DXVK chains its
-    component mapping, and the shader route's fallback everywhere else (every X8 texture, every
+    component mapping, and the shader route's fallback everywhere else (every X8 or A8 texture, every
     custom colour, every device without it), never DIFFERS; mapped on a view DXVK swizzles
-    (map-border-swizzled-view) it DIFFERS on every axis, by the named reason and, where DXVK chains
-    the mapping, by sm_pNextBorderSwizzle; the unmapped list is the named one;
+    (map-border-swizzled-view: X8 and A8) it DIFFERS on every axis, by the named reason and, where
+    DXVK chains the mapping, by sm_pNextBorderSwizzle (and for A8 by the custom colour DXVK
+    chains); the unmapped list is the named one;
     DXVK's read set is inside the key; key sufficiency; the defaults; the render-state audit; the
     draw tests (vertex counts, the fan cache, the UP arena, draw_args); the comparator's self-test,
     on a plain, a mapped BORDER and a fallback BORDER sampler and the BORDER_SWIZZLE rule's
@@ -99,9 +100,10 @@ CONTROLS = ("map-blend-swap", "map-zfunc-swap", "map-normalize-off", "map-writem
 AXIS_CAPS = {"nvidia-like": True, "amd-like": True, "intel-like": False}
 RULING = ROOT / "Documentation" / "decisions" / "2026-10-05-S5-depth-clamp-ruling.json"
 # the texture formats d9g makes (d9g_format.cpp kFormats) as the sweep's tables name them, X8R8G8B8
-# (22) the one whose DXVK view swizzles; DXT1, DXT3, DXT5 by FOURCC
-IDENTITY_VIEW_TEXTURES = ("levels 6 format 21", "levels 6 format 827611204", "levels 6 format 861165636",
-                          "levels 6 format 894720068", "levels 6 format 75 depth", "none")
+# (22) and A8 (28) the ones whose DXVK view swizzles; DXT1, DXT3, DXT5 by FOURCC
+IDENTITY_VIEW_TEXTURES = ("levels 6 format 21", "levels 6 format 23", "levels 6 format 827611204",
+                          "levels 6 format 861165636", "levels 6 format 894720068", "levels 6 format 75 depth", "none")
+SWIZZLED_VIEW_TEXTURES = ("levels 6 format 22", "levels 6 format 28")
 SWIZZLED_REASON = "BORDER mapped where the patch cannot build DXVK's border: DXVK's view of the texture swizzles"
 FALLBACK_REASON = ("fallback BORDER where the patch builds DXVK's border (a standard colour on an identity view, on a device "
                    "with CLAMP_TO_BORDER)")
@@ -429,9 +431,11 @@ def test_the_domain_sweep_never_maps_a_value_dxvk_does_not_build(build, params, 
     by_tex = dom["classification"]["sampler texture with a BORDER axis"]
     outcomes = {t: set(o.split("+")) for o, ts in by_tex.items() for t in ts}
     # every format d9g makes is swept (d9g_format.h all_formats), and none
-    assert set(outcomes) == {"levels 6 format 22", *IDENTITY_VIEW_TEXTURES}, sorted(outcomes)
-    # an X8 texture's view swizzles A to 1 in DXVK: never mapped, never equal by the rule (the plan's B1)
-    assert outcomes["levels 6 format 22"] == {"fallback BORDER", "unmapped"}, outcomes
+    assert set(outcomes) == {*SWIZZLED_VIEW_TEXTURES, *IDENTITY_VIEW_TEXTURES}, sorted(outcomes)
+    # an X8 texture's view swizzles A to 1 in DXVK, and an A8 texture's is (0,0,0,R): never mapped,
+    # never equal by the rule (the plan's B1)
+    for t in SWIZZLED_VIEW_TEXTURES:
+        assert outcomes[t] == {"fallback BORDER", "unmapped"}, (t, outcomes)
     if mapped_as:
         for t in IDENTITY_VIEW_TEXTURES:
             assert mapped_as in outcomes[t], (t, outcomes)
@@ -457,7 +461,8 @@ def test_the_domain_sweep_never_maps_a_value_dxvk_does_not_build(build, params, 
         assert sw["wrong_reasons"] == [SWIZZLED_REASON], sw["wrong_reasons"]
         assert ("sm_pNextBorderSwizzle" in sw["differing_fields"]) == (axis == "nvidia-like"), sw["differing_fields"]
         sw_tex = {t: set(o.split("+")) for o, ts in sw["classification"]["sampler texture with a BORDER axis"].items() for t in ts}
-        assert "DIFFERS" in sw_tex["levels 6 format 22"] and all("DIFFERS" not in sw_tex[t] for t in IDENTITY_VIEW_TEXTURES)
+        assert all("DIFFERS" in sw_tex[t] for t in SWIZZLED_VIEW_TEXTURES), sw_tex
+        assert all("DIFFERS" not in sw_tex[t] for t in IDENTITY_VIEW_TEXTURES), sw_tex
         # and every standard colour d9g refuses where the patch builds it (map-border-fallback)
         r = check(build, "--params", params[axis], "--domain", "--fault", "map-border-fallback", "--out", out)
         fb = json.loads(out.read_text())["domain"]
@@ -771,8 +776,10 @@ def test_the_session_passes_with_both_capabilities_and_every_control_fails_by_it
     assert fields["map-depth-clamp-off"] == "rs_depthClampEnable"
     assert fields["map-depth-clamp-extra"] == "obligation DEPTH_CLAMP, rs_depthClampEnable"
     assert fields["map-border-fallback"] == "reason: " + FALLBACK_REASON
-    # on this NVIDIA-like axis the X8 cells also break the BORDER_SWIZZLE rule's identity clause
-    assert fields["map-border-swizzled-view"] == f"reason: {SWIZZLED_REASON}, sm_borderColor, sm_pNextBorderSwizzle"
+    # on this NVIDIA-like axis the X8 and A8 cells also break the BORDER_SWIZZLE rule's identity
+    # clause, and A8's swizzle turns DXVK's standard colour into a custom one, which DXVK chains
+    assert fields["map-border-swizzled-view"] == (f"reason: {SWIZZLED_REASON}, sm_borderColor, sm_pNextBorderSwizzle, "
+                                                  "sm_pNextCustomBorder")
     assert "rs_depthBiasEnable" in fields["map-depth-bias-push"]
     s = d["census"]["streams"]["session"]
     assert s["pipeline_tuples"] == 4 and s["depth_clamp"] == 0 and s["depth_clamp_property"] == 4 and s["differ"] == 0

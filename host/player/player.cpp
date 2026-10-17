@@ -2118,6 +2118,11 @@ bool Player::create_device(const Sa2Record& r, Cat* cat) {
     // host/d3d9gpu's factory, linked into this binary: no library to load or verify; the
     // renderer's bytes are this file's (files.player).
     const Create9 create9 = &Direct3DCreate9;
+    // Whether this is a live session (--interactive), read by the device as it is made
+    // (host/d3d9gpu/d9g_gpu_sdl.cpp make_sdl_gpu, GpuInfo::live_session): on a GPU without depth clip
+    // and clamp a live session draws clip-only, where a replay refuses each draw by name.
+    if (!SDL_SetBooleanProperty(SDL_GetGlobalProperties(), "sa2.live_session", o_.interactive))
+        return device_failure(strf("SDL_SetBooleanProperty(sa2.live_session): %s", SDL_GetError()));
 #else
     lib_ = dlopen(lib.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!lib_) return device_failure(strf("dlopen: %s", dlerror()));

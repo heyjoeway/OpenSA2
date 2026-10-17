@@ -23,6 +23,13 @@
 //   SA2_D3D9GPU_NO_BC    1: no BC format is sampled; each DXT texture is made BGRA8 and decoded on
 //                        the CPU, as on a GPU without BC formats (a Mali's); on Android also the
 //                        system property debug.sa2.no_bc=1 (d9g_gpu_sdl.cpp make_sdl_gpu)
+//   SA2_D3D9GPU_NO_CLIPDIST  1: the device is made without shaderClipDistance and the vertex shaders
+//                        write no ClipDistance, as on a Mali-G715; on Android also debug.sa2.no_clipdist=1
+//   SA2_D3D9GPU_NO_DEPTH_CLAMP  1: the device is made without SDL's depthClamp, so it has no depth
+//                        clip and clamp and every draw owing the clamp is encoded clip-only, in any
+//                        run, replays included (as on a Galaxy A05's Mali-G52); on Android also
+//                        debug.sa2.no_depth_clamp=1; recorded in the report's env and
+//                        sdl_gpu.depth_clamp_forced_off
 //   SA2_D3D9GPU_TEST_RUN 1: a test run (the override's and the shader faults' one condition; it
 //                        changes nothing else)
 //   SA2_D3D9GPU_SHADER_DUMP  a directory: each shader's bytecode as <sha256>.bin at its creation (the

@@ -109,6 +109,10 @@ struct Report {
     uint64_t decoded_levels = 0, decoded_block_bytes = 0, decode_ns = 0;
     // the GPU textures the device holds, in the formats made (texture_bytes), and the most held at once
     uint64_t gpu_texture_bytes = 0, gpu_texture_bytes_peak = 0;
+    // draws encoded clip-only, their pipeline owing the depth clamp the device lacks
+    // (GpuInfo::depth_clamp_clip_only), and samplers made without the anisotropy they asked for on a
+    // device made without samplerAnisotropy (GpuInfo::sampler_anisotropy)
+    uint64_t depth_clamp_clip_only_draws = 0, anisotropy_dropped_samplers = 0;
     // the pipeline and sampler descriptions computed at each skipped draw (R2b, d9g_pipeline.h)
     struct Pipeline {
         uint64_t draws_mapped = 0, recomputes = 0, sampler_recomputes = 0;
@@ -707,6 +711,9 @@ private:
     std::vector<uint32_t> key_flags_;  // per key: bit 0 BGRA, bit 1 R_DEPTH_CLAMP, bit 2 RT_FEEDBACK, bit 3 the depth-clamp property
     bool auto_depth_ = false;
     DeviceParams dp_{};                // the GPU's, kept past the GPU (the keys file at destroy)
+    // a draw whose pipeline owes the depth clamp (R_DEPTH_CLAMP) on a device without depth clip and
+    // clamp is drawn clip-only, not refused (GpuInfo::depth_clamp_clip_only)
+    bool depth_clamp_clip_only_ = false;
     bool vk_query_ok_ = false;
     // R1: the profile the translator compiles with, DXVK's shader options for this device
     // (d9g_shader_profile.h determine_profile of GpuInfo's shader facts)

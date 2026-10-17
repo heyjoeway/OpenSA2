@@ -153,11 +153,29 @@ std::string facts_json(const DeviceFactsQuery& q);
 // layout), so a device without it changes nothing the translator builds.
 class VulkanFeatures {
  public:
-  // The optional groups a device may lack, by what the translator does without them.
+  // The optional groups a device may lack, by what the translator does without them, and the
+  // three of SDL_gpu's own opt-out Vulkan 1.0 demands the device can be made without (SdlDemands).
   struct Lacks {
     bool sub_dword = false;      // any of the six sub-dword features
     bool clip_distance = false;  // shaderClipDistance
     bool scalar_layout = false;  // scalarBlockLayout
+    bool depth_clamp = false;              // SDL's depthClamp
+    bool indirect_first_instance = false;  // SDL's drawIndirectFirstInstance
+    bool anisotropy = false;               // SDL's samplerAnisotropy
+    static Lacks all() { return {true, true, true, true, true, true}; }
+  };
+  // SDL_gpu's opt-out Vulkan 1.0 demands (SDL_gpu_vulkan.c VULKAN_INTERNAL_PrepareVulkan: on by
+  // default, each off with its SDL_PROP_GPU_DEVICE_CREATE_FEATURE_*_BOOLEAN false) that a device
+  // request leaves on, less shaderClipDistance, which follows clip_distance. None is needed by a
+  // module. depthClamp is the patch's depth clip and clamp's (SDL builds the clamp only where it
+  // was asked for, so a device made without it reports none and draws clip-only or refuses:
+  // GpuInfo::depth_clamp_clip_only); host 2 issues no indirect draw, and draws with first instance
+  // 0; a sampler asking for anisotropy on a device made without samplerAnisotropy is made without it
+  // (d9g_gpu_sdl.cpp sampler_object).
+  struct SdlDemands {
+    bool depth_clamp = true;
+    bool indirect_first_instance = true;
+    bool anisotropy = true;
   };
   explicit VulkanFeatures(bool sub_dword = true, bool clip_distance = true, bool scalar_layout = true);
   ~VulkanFeatures();
@@ -175,8 +193,8 @@ class VulkanFeatures {
   // none". *fits is set when at least one device supports them all. "" with *how set when the
   // devices could not be read. *lacks (when given): the optional groups some device lacks of those
   // asked for. SDL_gpu's own Vulkan 1.0 demands a device lacks are named too ("SDL: depthClamp"),
-  // and such a device does not fit.
-  std::string lacking(void* gipa, bool* fits, std::string* how, Lacks* lacks = nullptr) const;
+  // the opt-out ones only where `sdl` leaves them asked for, and such a device does not fit.
+  std::string lacking(void* gipa, bool* fits, std::string* how, Lacks* lacks, const SdlDemands& sdl) const;
   struct Chain;
  private:
   Chain* m;

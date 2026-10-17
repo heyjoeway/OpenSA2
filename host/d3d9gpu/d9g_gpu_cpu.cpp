@@ -36,7 +36,7 @@ public:
         return draw::Encoded{bytes};
     }
     std::vector<draw::Values> draw_requests_;
-    CpuGpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc) : bc_(bc) {
+    CpuGpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only) : bc_(bc) {
         if (!bc) info_.bc_unsupported = "BC1_RGBA_UNORM, BC2_RGBA_UNORM, BC3_RGBA_UNORM";
         info_.driver = "cpu";
         info_.device_name = "d9g CPU model";
@@ -44,6 +44,7 @@ public:
         info_.sampler_clamp_to_border_detected = clamp_to_border;
         info_.depth_clip_and_clamp_detected = clip_and_clamp;
         apply_caps_off(info_, CapsOff{});
+        info_.depth_clamp_clip_only = clip_only;   // a test parameter: a live session's, when true
         info_.depth_format = gfmt_name(GFmt::d24s8);
         // The CPU model has no Vulkan device: a test value, named as one
         info_.vk_query_ok = true;
@@ -208,8 +209,8 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc) {
-    return std::make_unique<CpuGpu>(clamp_to_border, clip_and_clamp, clip_distance, bc);
+std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border, bool clip_and_clamp, bool clip_distance, bool bc, bool clip_only) {
+    return std::make_unique<CpuGpu>(clamp_to_border, clip_and_clamp, clip_distance, bc, clip_only);
 }
 
 bool cpu_gpu_bytes(Gpu* g, uint32_t tex, uint32_t level, std::string* out, uint32_t layer) {

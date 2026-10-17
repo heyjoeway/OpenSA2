@@ -145,7 +145,13 @@ draw::Prepared Device::prepare_draw(uint32_t method, uint32_t prim, uint32_t str
     v.pipeline = mapped.desc;
     const LegacyData legacy = mapped.legacy;
     std::vector<std::string> reasons = v.pipeline.unmapped;
-    if (v.pipeline.residues & R_DEPTH_CLAMP) reasons.push_back("DEPTH_CLAMP_FALLBACK_OWED");
+    // Without depth clip and clamp the pipeline owes the clamp (R_DEPTH_CLAMP): a live session (or
+    // SA2_D3D9GPU_NO_DEPTH_CLAMP=1) draws it clipped at the near and far planes, D3D9's own clip,
+    // without the clamp DXVK adds; anywhere else it is refused by name. A pipeline with depth clip
+    // off (the map-depth-clip-off fault) needs depthClamp itself, which such a device may have been
+    // made without, so it is refused there too.
+    if ((v.pipeline.residues & R_DEPTH_CLAMP) && (!depth_clamp_clip_only_ || !v.pipeline.rs.enable_depth_clip))
+        reasons.push_back("DEPTH_CLAMP_FALLBACK_OWED");
     if (v.pipeline.rt_feedback) reasons.push_back("RT_FEEDBACK");
     if (!v.pipeline.n_ct && !v.pipeline.has_ds) reasons.push_back("NO_FRAMEBUFFER_ATTACHMENT");
     if (!reads_stream_zero(v.pipeline)) {
@@ -457,10 +463,12 @@ void Device::execute_draw(const char* name, uint32_t method, uint32_t prim, uint
             cls = DrawClass::Suppressed;
         } else {
             auto& request = std::get<draw::DrawRequest>(prepared);
+            const bool clip_only = (request.values().pipeline.residues & R_DEPTH_CLAMP) != 0;
             auto outcome = gpu_->draw(request);
             spare_values_ = std::move(request.values_);   // the Gpu retains no request
             if (const auto* encoded = std::get_if<draw::Encoded>(&outcome)) {
                 cls = DrawClass::Encoded;
+                if (clip_only) report().depth_clamp_clip_only_draws++;
                 if (encoded->uploaded_up_bytes) report().up_arena_uploads++;
                 report().up_uploaded_bytes += encoded->uploaded_up_bytes;
             } else {

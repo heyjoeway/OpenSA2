@@ -1247,6 +1247,55 @@ void test_no_clip_distance() {
     }
 }
 
+// A device without depth clip and clamp (the Galaxy A05's Mali-G52 MC2 made without depthClamp, or a
+// GPU without VK_EXT_depth_clip_enable): every pipeline owes the clamp (R_DEPTH_CLAMP). Outside a live
+// session (clip_only false) each draw is refused by name, DEPTH_CLAMP_FALLBACK_OWED, as before; a live
+// session's device (GpuInfo::depth_clamp_clip_only) encodes it clip-only, enable_depth_clip on and no
+// depth-clamp property, and counts it. On a device with depth clip and clamp the switch changes
+// nothing: the property is set, nothing is owed, nothing counted.
+void test_depth_clamp_clip_only() {
+    const DWORD constant_ps[] = {0xFFFF0300u, 0x02000001u, 0x800F0800u, 0xA0E40005u, 0x0000FFFFu};
+    const D3DVERTEXELEMENT9 e[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, D3DDECL_END()};
+    struct Case { bool clip_and_clamp, clip_only; };
+    for (const Case c : {Case{false, false}, Case{false, true}, Case{true, false}, Case{true, true}}) {
+        d9g::report() = d9g::Report{};
+        d9g::DeviceSetup setup;
+        setup.pp = present_params();
+        setup.behavior = kBehavior;
+        auto* d = new d9g::Device(d9g::make_cpu_gpu(true, c.clip_and_clamp, true, true, c.clip_only), setup);
+        std::string why;
+        CHECK(d->init(&why));
+        IDirect3DVertexShader9* vs = nullptr;
+        IDirect3DPixelShader9* ps = nullptr;
+        IDirect3DVertexDeclaration9* decl = nullptr;
+        IDirect3DVertexBuffer9* vb = nullptr;
+        CHECK(d->CreateVertexShader(kVs, &vs) == D3D_OK && vs);
+        CHECK(d->CreatePixelShader(constant_ps, &ps) == D3D_OK && ps);
+        CHECK(d->CreateVertexDeclaration(e, &decl) == D3D_OK);
+        CHECK(d->CreateVertexBuffer(128, 0, 0, D3DPOOL_DEFAULT, &vb, nullptr) == D3D_OK);
+        if (!vs || !ps || !decl || !vb) { d->Release(); return; }
+        d->SetVertexShader(vs); d->SetPixelShader(ps); d->SetVertexDeclaration(decl);
+        d->SetStreamSource(0, vb, 0, 16);
+        CHECK(d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1) == D3D_OK);
+        CHECK(d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1) == D3D_OK);
+        const d9g::Report& r = d9g::report();
+        const bool refused = std::find(r.draw_failures.begin(), r.draw_failures.end(), "DEPTH_CLAMP_FALLBACK_OWED") !=
+                             r.draw_failures.end();
+        const bool drawn = c.clip_and_clamp || c.clip_only;
+        CHECK(refused == !drawn);
+        CHECK(r.drawn == (drawn ? 2u : 0u) && r.unmapped_draws == (drawn ? 0u : 2u));
+        CHECK(r.depth_clamp_clip_only_draws == (!c.clip_and_clamp && c.clip_only ? 2u : 0u));
+        const auto* trace = d9g::cpu_gpu_draws(d->gpu());
+        CHECK(trace && trace->size() == (drawn ? 2u : 0u));
+        if (trace && !trace->empty()) {
+            const d9g::PipelineDesc& pd = trace->back().pipeline;
+            CHECK(pd.rs.enable_depth_clip && pd.depth_clamp == c.clip_and_clamp &&
+                  bool(pd.residues & d9g::R_DEPTH_CLAMP) == !c.clip_and_clamp);
+        }
+        vs->Release(); ps->Release(); decl->Release(); vb->Release(); d->Release();
+    }
+}
+
 // IDirect3DCubeTexture9 and IDirect3DVolumeTexture9 (d9g_resources.cpp CubeTexture,
 // VolumeTexture) on the CPU model: DXVK's creation rules (NormalizeTextureProperties' cube and
 // volume clauses), the level counts and descriptions, a face's surface whose LockRect and UnlockRect
@@ -1752,6 +1801,7 @@ int main(int argc, char** argv) {
     test_shader_translation();
     test_draw_requests();
     test_no_clip_distance();
+    test_depth_clamp_clip_only();
     test_cube_and_volume_textures();
     test_instanced_streams();
     test_pipeline_streams();

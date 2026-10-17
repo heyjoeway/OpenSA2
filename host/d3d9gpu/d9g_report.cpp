@@ -226,7 +226,7 @@ std::string Report::json() const {
     s += strf("  \"fault\": %s,\n  \"fault_error\": %s,\n", jnull(fault.names).c_str(), jnull(fault.error).c_str());
     s += "  \"env\": {";
     const char* keys[] = {"SA2_D3D9GPU_REPORT", "SA2_D3D9GPU_FAULT", "SA2_D3D9GPU_PRESENT", "SA2_D3D9GPU_DEBUG",
-                          "SA2_D3D9GPU_CAPS_OFF", "SA2_D3D9GPU_NO_CLIPDIST", "SA2_D3D9GPU_NO_BC", "SA2_D3D9GPU_TEST_RUN", "SA2_D3D9GPU_SHADER_DUMP", "SA2_D3D9GPU_SHADER_FAULT",
+                          "SA2_D3D9GPU_CAPS_OFF", "SA2_D3D9GPU_NO_CLIPDIST", "SA2_D3D9GPU_NO_BC", "SA2_D3D9GPU_NO_DEPTH_CLAMP", "SA2_D3D9GPU_TEST_RUN", "SA2_D3D9GPU_SHADER_DUMP", "SA2_D3D9GPU_SHADER_FAULT",
                           "SDL_VIDEO_DRIVER", "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "VK_LOADER_LAYERS_DISABLE",
                           "VK_LOADER_LAYERS_ENABLE", "VK_INSTANCE_LAYERS", "SDL_ASSERT"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
@@ -248,7 +248,10 @@ std::string Report::json() const {
               "\"detected\": {\"sampler_clamp_to_border\": %s, \"depth_clip_and_clamp\": %s}, "
               "\"capability_override\": %s, "
               "\"sampler_clamp_to_border\": %s, \"depth_clip_and_clamp\": %s, "
-              "\"fallback_owed\": {\"border\": %s, \"depth_clamp\": %s}},\n",
+              "\"fallback_owed\": {\"border\": %s, \"depth_clamp\": %s}, "
+              "\"sdl_features_dropped\": %s, \"sampler_anisotropy\": %s, \"anisotropy_dropped_samplers\": %llu, "
+              "\"depth_clamp_forced_off\": %s, \"live_session\": %s, \"depth_clamp_clip_only\": %s, "
+              "\"depth_clamp_clip_only_draws\": %llu},\n",
               jstr(gpu.driver).c_str(), jstr(gpu.device_name).c_str(), jstr(gpu.driver_name).c_str(),
               jstr(gpu.driver_version).c_str(), jstr(gpu.driver_info).c_str(), jstr(gpu.depth_format).c_str(),
               gpu.debug_mode ? "true" : "false", gpu.vulkan_options.empty() ? "null" : gpu.vulkan_options.c_str(),
@@ -261,7 +264,10 @@ std::string Report::json() const {
               gpu.sampler_clamp_to_border_detected ? "true" : "false", gpu.depth_clip_and_clamp_detected ? "true" : "false",
               jnull(gpu.capability_override).c_str(),
               gpu.sampler_clamp_to_border ? "true" : "false", gpu.depth_clip_and_clamp ? "true" : "false",
-              owe_border ? "true" : "false", owe_clamp ? "true" : "false");
+              owe_border ? "true" : "false", owe_clamp ? "true" : "false", jnull(gpu.sdl_features_dropped).c_str(),
+              gpu.sampler_anisotropy ? "true" : "false", (unsigned long long)anisotropy_dropped_samplers,
+              gpu.depth_clamp_forced_off ? "true" : "false", gpu.live_session ? "true" : "false",
+              gpu.depth_clamp_clip_only ? "true" : "false", (unsigned long long)depth_clamp_clip_only_draws);
     s += strf("  \"fpu\": {\"measured\": %s, \"x87_cw_before\": \"%04x\", \"x87_cw_after\": \"%04x\", "
               "\"mxcsr_before\": \"%08x\", \"mxcsr_after\": \"%08x\", \"claim_x87_cw_before\": \"%04x\", "
               "\"claim_x87_cw_after\": \"%04x\", \"claim_mxcsr_before\": \"%08x\", \"claim_mxcsr_after\": \"%08x\", "

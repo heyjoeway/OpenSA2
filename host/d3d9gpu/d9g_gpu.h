@@ -106,6 +106,26 @@ struct GpuInfo {
     // upload (d9g_device.cpp make_gpu_image).
     std::string bc_unsupported;
     bool bc_forced_off = false;
+    // SDL_gpu's own opt-out Vulkan 1.0 demands the device was made without (shader::VulkanFeatures::
+    // SdlDemands), by name ("depthClamp, drawIndirectFirstInstance, samplerAnisotropy"), "" none: a
+    // device that lacks one (the Galaxy A05's Mali-G52 MC2 lacks depthClamp, GitHub #3), or
+    // depthClamp forced off. sampler_anisotropy: made with samplerAnisotropy; without it a sampler
+    // that asks for anisotropy is made without it (counted: Report::anisotropy_dropped_samplers).
+    std::string sdl_features_dropped;
+    bool sampler_anisotropy = true;
+    // Depth clamp. depth_clamp_forced_off: SA2_D3D9GPU_NO_DEPTH_CLAMP=1 (on Android also the property
+    // debug.sa2.no_depth_clamp=1) made the device without SDL's depthClamp on any device, so it reports
+    // no depth clip and clamp (d9g_gpu_sdl.cpp make_sdl_gpu), for testing. live_session: the player
+    // runs a live session (--interactive: the SDL global property "sa2.live_session", which
+    // host/player/player.cpp sets). depth_clamp_clip_only: where depth_clip_and_clamp is false, the
+    // draws whose pipeline owes the clamp (R_DEPTH_CLAMP) are drawn clipped at the near and far
+    // planes without it (D3D9's own clip; DXVK also clamps) instead of refused as
+    // DEPTH_CLAMP_FALLBACK_OWED: in a live session or with the switch. A replay, a host comparison
+    // or a test run without the switch keeps refusing them (ruling 3 leaves the residue on such a
+    // device to the user until the depth-clamp measurement: patches/sdl3/README.md).
+    bool depth_clamp_forced_off = false;
+    bool live_session = false;
+    bool depth_clamp_clip_only = false;
 };
 
 // A test run's capability override (SA2_D3D9GPU_CAPS_OFF, d9g_entry.cpp): the patch's
@@ -221,14 +241,17 @@ public:
 // override, applied after the patch's detection. SA2_D3D9GPU_NO_CLIPDIST=1 (on Android also the
 // property debug.sa2.no_clipdist=1) makes the device without shaderClipDistance on any device (the
 // fallback a Mali GPU takes, forced for testing); SA2_D3D9GPU_NO_BC=1 (on Android also the property
-// debug.sa2.no_bc=1) samples no BC format (GpuInfo::bc_forced_off), the CPU decode a Mali GPU takes.
+// debug.sa2.no_bc=1) samples no BC format (GpuInfo::bc_forced_off), the CPU decode a Mali GPU takes;
+// SA2_D3D9GPU_NO_DEPTH_CLAMP=1 (on Android also debug.sa2.no_depth_clamp=1) makes it without SDL's
+// depthClamp, so with no depth clip and clamp, and draws clip-only (GpuInfo::depth_clamp_clip_only).
 std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* err);
 // d9g_gpu_cpu.cpp (tests only): every texture a byte array per level. The CPU model reports the
 // patch's two capabilities as given (a test parameter, as its device name is a test value),
-// shaderClipDistance as given (false: a Mali GPU's profile, ShaderProfile::no_clip_distance), and
-// the BC formats as sampled or not (false: a Mali GPU's, GpuInfo::bc_unsupported).
+// shaderClipDistance as given (false: a Mali GPU's profile, ShaderProfile::no_clip_distance), the
+// BC formats as sampled or not (false: a Mali GPU's, GpuInfo::bc_unsupported), and
+// GpuInfo::depth_clamp_clip_only as given (true: a live session's draws without depth clip and clamp).
 std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border = false, bool clip_and_clamp = false, bool clip_distance = true,
-                                  bool bc = true);
+                                  bool bc = true, bool clip_only = false);
 // The CPU model's bytes of a subresource (tests read depth-stencil through it too):
 // BGRA8 as BGRA8; D24S8 as one uint32 per pixel, depth in bits 0-23 (unorm24) and
 // stencil in bits 24-31; a volume's level slice after slice. `layer`: a cube's face.

@@ -129,7 +129,8 @@ std::string VulkanFeatures::describe() const {
   return s + "], \"extensions\": []}";
 }
 
-std::string VulkanFeatures::lacking(void* gipa_ptr, bool* fits, std::string* how, Lacks* lacks) const {
+std::string VulkanFeatures::lacking(void* gipa_ptr, bool* fits, std::string* how, Lacks* lacks,
+                                    const SdlDemands& sdl_asked) const {
   *fits = false;
   if (lacks) *lacks = Lacks{};
   auto gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(gipa_ptr);
@@ -163,15 +164,27 @@ std::string VulkanFeatures::lacking(void* gipa_ptr, bool* fits, std::string* how
     have.f10 = f2.features;
     std::string names;
     // SDL_gpu's own Vulkan 1.0 demands (SDL_gpu_vulkan.c VULKAN_INTERNAL_IsDeviceSuitable: the three it
-    // always asks for and the opt-out ones on by default, less shaderClipDistance, which follows ours),
-    // named "SDL: <feature>": a device lacking one is refused before our features are read
-    const std::pair<const char*, VkBool32> sdl[] = {
-        {"independentBlend", have.f10.independentBlend}, {"imageCubeArray", have.f10.imageCubeArray},
-        {"sampleRateShading", have.f10.sampleRateShading}, {"depthClamp", have.f10.depthClamp},
-        {"drawIndirectFirstInstance", have.f10.drawIndirectFirstInstance},
-        {"samplerAnisotropy", have.f10.samplerAnisotropy}};
-    for (const auto& [name, supported] : sdl)
-      if (!supported) names += std::string(names.empty() ? "" : ", ") + "SDL: " + name;
+    // always asks for and the opt-out ones `sdl_asked` leaves on, less shaderClipDistance, which follows
+    // ours), named "SDL: <feature>": a device lacking one is refused before our features are read
+    struct SdlDemand {
+      const char* name;
+      VkBool32 supported;
+      bool asked;
+      bool Lacks::*lack;   // the opt-out ones' Lacks member, nullptr for the three always asked for
+    };
+    const SdlDemand sdl[] = {
+        {"independentBlend", have.f10.independentBlend, true, nullptr},
+        {"imageCubeArray", have.f10.imageCubeArray, true, nullptr},
+        {"sampleRateShading", have.f10.sampleRateShading, true, nullptr},
+        {"depthClamp", have.f10.depthClamp, sdl_asked.depth_clamp, &Lacks::depth_clamp},
+        {"drawIndirectFirstInstance", have.f10.drawIndirectFirstInstance, sdl_asked.indirect_first_instance,
+         &Lacks::indirect_first_instance},
+        {"samplerAnisotropy", have.f10.samplerAnisotropy, sdl_asked.anisotropy, &Lacks::anisotropy}};
+    for (const SdlDemand& d : sdl) {
+      if (d.supported || !d.asked) continue;
+      names += std::string(names.empty() ? "" : ", ") + "SDL: " + d.name;
+      if (lacks && d.lack) lacks->*d.lack = true;
+    }
     for (const Feature& f : kFeatures) {
       if (!f.field(*m) || f.field(have)) continue;
       names += std::string(names.empty() ? "" : ", ") + f.name;

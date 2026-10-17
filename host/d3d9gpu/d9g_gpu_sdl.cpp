@@ -1003,6 +1003,17 @@ private:
         CreateProps props(desc);
         if (!props.error().empty()) { err_ = props.error(); return nullptr; }
         auto ci = desc.create_info(props.id());
+        // A device made without samplerAnisotropy (make_sdl_gpu: one that lacks it) cannot filter
+        // anisotropically, and SDL refuses the request there: the sampler is made without it, counted,
+        // and said once. The streams recorded so far ask for none (D3DTEXF_ANISOTROPIC never set).
+        if (ci.enable_anisotropy && !info_.sampler_anisotropy) {
+            if (!report().anisotropy_dropped_samplers)
+                std::fprintf(stderr, "d3d9gpu: a sampler asks for anisotropic filtering (%g) on a device made without "
+                                     "samplerAnisotropy: made without it\n", double(ci.max_anisotropy));
+            report().anisotropy_dropped_samplers++;
+            ci.enable_anisotropy = false;
+            ci.max_anisotropy = 0.0f;
+        }
         SDL_GPUSampler* sampler = SDL_CreateGPUSampler(dev_, &ci);
         if (!sampler) { err_ = std::string("SDL_CreateGPUSampler: ") + SDL_GetError(); return nullptr; }
         try { samplers_.emplace(key, sampler); }
@@ -1517,9 +1528,11 @@ void query_shader_facts(SdlGpu* gpu) {
 
 namespace {
 
-// One SDL_CreateGPUDeviceWithProperties with `features`, the x87 control word and MXCSR recorded
-// around it (`first`: before this attempt; a retry keeps the first attempt's, so it hides no change).
-SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, bool first) {
+// One SDL_CreateGPUDeviceWithProperties with `features` and SDL's own opt-out demands `sdl`, the x87
+// control word and MXCSR recorded around it (`first`: before this attempt; a retry keeps the first
+// attempt's, so it hides no change).
+SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, const shader::VulkanFeatures::SdlDemands& sdl,
+                             bool first) {
     Report& r = report();
     SDL_GPUVulkanOptions vo{};
     vo.vulkan_api_version = features.api_version();
@@ -1532,9 +1545,17 @@ SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, bool 
     SDL_SetPointerProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vo);
     // SDL_gpu asks for shaderClipDistance itself unless told not to (SDL_gpu_vulkan.c
     // VULKAN_INTERNAL_PrepareVulkan: an opt-out feature, on by default), so a device without it is
-    // refused whatever the options say: off with ours (the default request leaves SDL's default)
+    // refused whatever the options say: off with ours (the default request leaves SDL's default).
+    // depthClamp, drawIndirectFirstInstance and samplerAnisotropy are opt-out the same way: off where
+    // `sdl` drops them (the default request leaves SDL's defaults, so the properties set are as before)
     if (!features.clip_distance())
         SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false);
+    if (!sdl.depth_clamp)
+        SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false);
+    if (!sdl.indirect_first_instance)
+        SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false);
+    if (!sdl.anisotropy)
+        SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
     if (first) {
         r.x87_before = x87_cw();
         r.mxcsr_before = mxcsr();
@@ -1547,29 +1568,77 @@ SDL_GPUDevice* create_device(bool debug, shader::VulkanFeatures& features, bool 
     return dev;
 }
 
-// What each Vulkan physical device lacks of `features` (VulkanFeatures::lacking), through the loader
-// SDL loads for it; SDL_gpu refused every device, so this names why. *lacks: the optional groups
-// some device lacks; every optional group when the devices could not be read.
-std::string lacking_features(const shader::VulkanFeatures& features, bool* fits, shader::VulkanFeatures::Lacks* lacks) {
+// What each Vulkan physical device lacks of `features` and `sdl` (VulkanFeatures::lacking), through
+// the loader SDL loads for it; SDL_gpu refused every device, so this names why. *lacks: the optional
+// groups and SDL demands some device lacks; every one when the devices could not be read.
+std::string lacking_features(const shader::VulkanFeatures& features, const shader::VulkanFeatures::SdlDemands& sdl,
+                             bool* fits, shader::VulkanFeatures::Lacks* lacks) {
     *fits = false;
-    *lacks = {true, true, true};
+    *lacks = shader::VulkanFeatures::Lacks::all();
     if (!SDL_Vulkan_LoadLibrary(nullptr)) return std::string("the Vulkan loader: ") + SDL_GetError();
     std::string how;
     shader::VulkanFeatures::Lacks read;
-    std::string out = features.lacking(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), fits, &how, &read);
+    std::string out =
+        features.lacking(reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()), fits, &how, &read, sdl);
     SDL_Vulkan_UnloadLibrary();
     if (!out.empty()) *lacks = read;
     return out.empty() ? "the devices' features could not be read (" + how + ")" : out;
 }
 
-// The optional groups `features` asks for that `lacks` names, by name ("" none).
-std::string dropped_names(const shader::VulkanFeatures& features, const shader::VulkanFeatures::Lacks& lacks) {
+// The names of SDL's opt-out demands `sdl` drops ("" none), as the report gives them.
+std::string sdl_dropped(const shader::VulkanFeatures::SdlDemands& sdl) {
     std::string out;
-    if (features.sub_dword() && lacks.sub_dword) out = "the sub-dword features";
-    if (features.clip_distance() && lacks.clip_distance) out += std::string(out.empty() ? "" : ", ") + "shaderClipDistance";
-    if (features.scalar_layout() && lacks.scalar_layout) out += std::string(out.empty() ? "" : ", ") + "scalarBlockLayout";
+    auto add = [&](bool dropped, const char* name) {
+        if (dropped) out += std::string(out.empty() ? "" : ", ") + name;
+    };
+    add(!sdl.depth_clamp, "depthClamp");
+    add(!sdl.indirect_first_instance, "drawIndirectFirstInstance");
+    add(!sdl.anisotropy, "samplerAnisotropy");
     return out;
 }
+
+// The optional groups `features` asks for, and SDL's demands `sdl` leaves on, that `lacks` names, by
+// name ("" none).
+std::string dropped_names(const shader::VulkanFeatures& features, const shader::VulkanFeatures::SdlDemands& sdl,
+                          const shader::VulkanFeatures::Lacks& lacks) {
+    std::string out;
+    auto add = [&](bool dropped, const char* name) {
+        if (dropped) out += std::string(out.empty() ? "" : ", ") + name;
+    };
+    add(features.sub_dword() && lacks.sub_dword, "the sub-dword features");
+    add(features.clip_distance() && lacks.clip_distance, "shaderClipDistance");
+    add(features.scalar_layout() && lacks.scalar_layout, "scalarBlockLayout");
+    add(sdl.depth_clamp && lacks.depth_clamp, "SDL's depthClamp");
+    add(sdl.indirect_first_instance && lacks.indirect_first_instance, "SDL's drawIndirectFirstInstance");
+    add(sdl.anisotropy && lacks.anisotropy, "SDL's samplerAnisotropy");
+    return out;
+}
+
+// A switch for testing a fallback on a device that does not need it: the environment variable `env`
+// set to 1, or on Android, where the app's session gives the in-process player no game.env.extra line
+// but SA2_PLAYER_PROF's, the system property `prop` set to 1 (adb shell setprop, no root). *which
+// names the one that asked ("SA2_D3D9GPU_NO_BC=1", "debug.sa2.no_bc=1").
+bool test_switch(const char* env, const char* prop, const char** which) {
+    const char* v = std::getenv(env);
+    if (v && std::strcmp(v, "1") == 0) {
+        *which = nullptr;
+        return true;
+    }
+#ifdef __ANDROID__
+    char value[PROP_VALUE_MAX] = {};
+    if (__system_property_get(prop, value) > 0 && std::strcmp(value, "1") == 0) {
+        *which = prop;
+        return true;
+    }
+#else
+    (void)prop;
+#endif
+    return false;
+}
+
+// The SDL global property a live session's player sets (host/player/player.cpp, --interactive):
+// GpuInfo::live_session.
+constexpr const char kLiveSessionProperty[] = "sa2.live_session";
 
 }  // namespace
 
@@ -1581,70 +1650,74 @@ std::string dropped_names(const shader::VulkanFeatures& features, const shader::
 // control word and MXCSR are recorded around the call.
 //
 // SDL_gpu refuses a device that lacks any feature asked for (SDL_gpu_vulkan.c
-// VULKAN_INTERNAL_ValidateOptInFeatures). When it refuses the full request, the features each device
-// lacks are read, and the device is asked for again without the optional groups some device lacks (all
-// of them when the devices could not be read): the sub-dword features (VulkanFeatures(false, ..)),
-// which many low-end GPUs and SwiftShader lack, the translator then reading the state buffer as 32-bit
-// words (DeviceFacts::sub_dword_access, ShaderProfile::state_words); shaderClipDistance
-// (VulkanFeatures(.., false), and SDL's own request of it off: create_device), which Mali GPUs lack
-// (the user's Pixel 9 Pro's Mali-G715, 2026-10-12), the translator then building no ClipDistance
-// output (DeviceFacts::clip_distance, ShaderProfile::no_clip_distance); and scalarBlockLayout, which no
-// module needs (d9g_shader_vulkan.cpp). If that is refused too while an optional group is still asked
-// for, once more without all three. A device that lacks any other feature, ours or SDL's own, is
-// refused with every device's list. A test run's override (CapsOff sub_dword) asks without the
-// sub-dword features from the start, and SA2_D3D9GPU_NO_CLIPDIST=1 (any run: the fallback a Mali GPU
-// takes, on a device that has the feature) without shaderClipDistance. On Android, where the app's
-// session gives the in-process player no game.env.extra line but SA2_PLAYER_PROF's, the system
-// property debug.sa2.no_clipdist=1 (adb shell setprop, no root) asks the same.
+// VULKAN_INTERNAL_ValidateOptInFeatures and VULKAN_INTERNAL_IsDeviceSuitable). When it refuses the full
+// request, the features each device lacks are read, and the device is asked for again without the
+// optional groups some device lacks (all of them when the devices could not be read): the sub-dword
+// features (VulkanFeatures(false, ..)), which many low-end GPUs and SwiftShader lack, the translator
+// then reading the state buffer as 32-bit words (DeviceFacts::sub_dword_access,
+// ShaderProfile::state_words); shaderClipDistance (VulkanFeatures(.., false), and SDL's own request of it
+// off: create_device), which Mali GPUs lack (the user's Pixel 9 Pro's Mali-G715, 2026-10-12), the
+// translator then building no ClipDistance output (DeviceFacts::clip_distance,
+// ShaderProfile::no_clip_distance); scalarBlockLayout, which no module needs (d9g_shader_vulkan.cpp); and
+// SDL's own opt-out demands (VulkanFeatures::SdlDemands, off with their
+// SDL_PROP_GPU_DEVICE_CREATE_FEATURE_*_BOOLEAN): depthClamp, which the Galaxy A05's Mali-G52 MC2 lacks
+// (GitHub #3; the device then has no depth clip and clamp: GpuInfo::depth_clamp_clip_only),
+// drawIndirectFirstInstance (host 2 issues no indirect draw) and samplerAnisotropy (sampler_object). If
+// that is refused too while an optional group is still asked for, once more without all of them. A
+// device that lacks any other feature, ours or SDL's own, is refused with every device's list. Each
+// one dropped is said once on stderr. A test run's override (CapsOff sub_dword) asks without the
+// sub-dword features from the start; SA2_D3D9GPU_NO_CLIPDIST=1 (any run: the fallback a Mali GPU
+// takes, on a device that has the feature) without shaderClipDistance; SA2_D3D9GPU_NO_DEPTH_CLAMP=1
+// without SDL's depthClamp. On Android the system properties debug.sa2.no_clipdist=1 and
+// debug.sa2.no_depth_clamp=1 ask the same (test_switch).
 std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* err) {
-    const char* no_clip = std::getenv("SA2_D3D9GPU_NO_CLIPDIST");
-    bool clip_forced_off = no_clip && std::strcmp(no_clip, "1") == 0;
-    const char* clip_switch = "SA2_D3D9GPU_NO_CLIPDIST=1";
-#ifdef __ANDROID__
-    char prop[PROP_VALUE_MAX] = {};
-    if (!clip_forced_off && __system_property_get("debug.sa2.no_clipdist", prop) > 0 && std::strcmp(prop, "1") == 0) {
-        clip_forced_off = true;
-        clip_switch = "debug.sa2.no_clipdist=1";
-    }
-#endif
+    const char* clip_prop = nullptr;
+    const bool clip_forced_off = test_switch("SA2_D3D9GPU_NO_CLIPDIST", "debug.sa2.no_clipdist", &clip_prop);
     if (clip_forced_off)
         std::fprintf(stderr, "d3d9gpu: %s: the Vulkan device is made without shaderClipDistance and the vertex shaders "
-                             "write no ClipDistance\n", clip_switch);
+                             "write no ClipDistance\n", clip_prop ? "debug.sa2.no_clipdist=1" : "SA2_D3D9GPU_NO_CLIPDIST=1");
     // SA2_D3D9GPU_NO_BC=1 (on Android also debug.sa2.no_bc=1): no BC format is sampled, each DXT
     // texture decoded to BGRA8 on the CPU as on a GPU without them (a Mali's), on any device.
-    const char* no_bc = std::getenv("SA2_D3D9GPU_NO_BC");
-    bool bc_forced_off = no_bc && std::strcmp(no_bc, "1") == 0;
-    const char* bc_switch = "SA2_D3D9GPU_NO_BC=1";
-#ifdef __ANDROID__
-    char bc_prop[PROP_VALUE_MAX] = {};
-    if (!bc_forced_off && __system_property_get("debug.sa2.no_bc", bc_prop) > 0 && std::strcmp(bc_prop, "1") == 0) {
-        bc_forced_off = true;
-        bc_switch = "debug.sa2.no_bc=1";
-    }
-#endif
+    const char* bc_prop = nullptr;
+    const bool bc_forced_off = test_switch("SA2_D3D9GPU_NO_BC", "debug.sa2.no_bc", &bc_prop);
     if (bc_forced_off)
         std::fprintf(stderr, "d3d9gpu: %s: no BC format is sampled; DXT textures are decoded to BGRA8 on the CPU\n",
-                     bc_switch);
+                     bc_prop ? "debug.sa2.no_bc=1" : "SA2_D3D9GPU_NO_BC=1");
+    // SA2_D3D9GPU_NO_DEPTH_CLAMP=1 (on Android also debug.sa2.no_depth_clamp=1): the device is made
+    // without SDL's depthClamp, as on a GPU without it (the Galaxy A05's), on any device, so it has no
+    // depth clip and clamp, and the draws are clipped without the clamp in any run.
+    const char* clamp_prop = nullptr;
+    const bool clamp_forced_off = test_switch("SA2_D3D9GPU_NO_DEPTH_CLAMP", "debug.sa2.no_depth_clamp", &clamp_prop);
+    if (clamp_forced_off)
+        std::fprintf(stderr, "d3d9gpu: %s: the Vulkan device is made without depthClamp, so with no depth clip and "
+                             "clamp, and the draws are clipped at the near and far planes without the clamp\n",
+                     clamp_prop ? "debug.sa2.no_depth_clamp=1" : "SA2_D3D9GPU_NO_DEPTH_CLAMP=1");
     std::unique_ptr<shader::VulkanFeatures> features =
         std::make_unique<shader::VulkanFeatures>(!off.sub_dword, !clip_forced_off);
-    SDL_GPUDevice* dev = create_device(debug, *features, true);
+    shader::VulkanFeatures::SdlDemands sdl;
+    sdl.depth_clamp = !clamp_forced_off;
+    SDL_GPUDevice* dev = create_device(debug, *features, sdl, true);
     std::string lacking;
     if (!dev) {
-        std::string why = std::string("SDL_CreateGPUDeviceWithProperties (Vulkan 1.3, ") + features->describe() + "): " +
-                          SDL_GetError();
+        std::string why = std::string("SDL_CreateGPUDeviceWithProperties (Vulkan 1.3, ") + features->describe() +
+                          (sdl_dropped(sdl).empty() ? "" : ", SDL without " + sdl_dropped(sdl)) + "): " + SDL_GetError();
         bool fits = false;
         shader::VulkanFeatures::Lacks lacks;
-        lacking = lacking_features(*features, &fits, &lacks);
+        lacking = lacking_features(*features, sdl, &fits, &lacks);
         if (!fits) {
             for (int attempt = 0; attempt < 2 && !dev; attempt++) {
-                if (attempt) lacks = {true, true, true};   // the second: without every optional group
-                const std::string names = dropped_names(*features, lacks);
+                if (attempt) lacks = shader::VulkanFeatures::Lacks::all();   // the second: without every optional one
+                const std::string names = dropped_names(*features, sdl, lacks);
                 if (names.empty()) continue;
                 features = std::make_unique<shader::VulkanFeatures>(features->sub_dword() && !lacks.sub_dword,
                                                                     features->clip_distance() && !lacks.clip_distance,
                                                                     features->scalar_layout() && !lacks.scalar_layout);
-                dev = create_device(debug, *features, false);
-                if (!dev) why += "; without " + names + " (" + features->describe() + "): " + SDL_GetError();
+                sdl = {sdl.depth_clamp && !lacks.depth_clamp, sdl.indirect_first_instance && !lacks.indirect_first_instance,
+                       sdl.anisotropy && !lacks.anisotropy};
+                dev = create_device(debug, *features, sdl, false);
+                if (!dev)
+                    why += "; without " + names + " (" + features->describe() +
+                           (sdl_dropped(sdl).empty() ? "" : ", SDL without " + sdl_dropped(sdl)) + "): " + SDL_GetError();
             }
         }
         if (!dev) {
@@ -1660,6 +1733,15 @@ std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* e
         if (!features->clip_distance() && !clip_forced_off)
             std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks shaderClipDistance (%s): the vertex shaders write no "
                                  "ClipDistance, and a draw with a user clip plane enabled is refused\n", lacking.c_str());
+        if (!sdl.depth_clamp && !clamp_forced_off)
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks depthClamp (%s): made without it, so with no depth "
+                                 "clip and clamp\n", lacking.c_str());
+        if (!sdl.indirect_first_instance)
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks drawIndirectFirstInstance (%s): made without it, "
+                                 "which no draw needs (no indirect draw is issued)\n", lacking.c_str());
+        if (!sdl.anisotropy)
+            std::fprintf(stderr, "d3d9gpu: the Vulkan device lacks samplerAnisotropy (%s): made without it; a sampler "
+                                 "that asks for anisotropic filtering is made without it\n", lacking.c_str());
     }
     auto gpu = std::make_unique<SdlGpu>(dev, debug, off);
     // An SDL marked as patched reports the patch's properties, and an unmarked one none: either
@@ -1680,6 +1762,24 @@ std::unique_ptr<Gpu> make_sdl_gpu(bool debug, const CapsOff& off, std::string* e
     info.clip_distance_forced_off = clip_forced_off;
     info.bc_forced_off = bc_forced_off;
     info.vulkan_lacking = lacking;
+    info.sdl_features_dropped = sdl_dropped(sdl);
+    info.sampler_anisotropy = sdl.anisotropy;
+    info.depth_clamp_forced_off = clamp_forced_off;
+    info.live_session = SDL_GetBooleanProperty(SDL_GetGlobalProperties(), kLiveSessionProperty, false);
+    info.depth_clamp_clip_only = !info.depth_clip_and_clamp && (info.live_session || clamp_forced_off);
+    // Without depth clip and clamp every pipeline owes the clamp (R_DEPTH_CLAMP), so say once which
+    // way the draws go: clip-only, or refused by name.
+    if (!info.depth_clip_and_clamp) {
+        const char* why = !info.sdl_capabilities_present ? "the SDL3 loaded is not the patched one (patches/sdl3)"
+                          : info.depth_clip_and_clamp_detected ? "forced off by a test run (SA2_D3D9GPU_CAPS_OFF)"
+                          : !sdl.depth_clamp ? "the device was made without depthClamp"
+                                             : "the device has no depthClipEnable (VK_EXT_depth_clip_enable) beside depthClamp";
+        std::fprintf(stderr, "d3d9gpu: no depth clip and clamp (%s): %s\n", why,
+                     info.depth_clamp_clip_only
+                         ? "the draws are clipped at the near and far planes without the clamp"
+                         : "outside a live session each draw is refused (DEPTH_CLAMP_FALLBACK_OWED); "
+                           "SA2_D3D9GPU_NO_DEPTH_CLAMP=1 draws them clip-only");
+    }
     query_shader_facts(gpu.get());
     // the profile's facts are what the device was made with, not what it could have been
     info.shader_facts.sub_dword_access = features->sub_dword();

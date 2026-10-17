@@ -59,8 +59,13 @@ to the patch's `CLAMP_TO_BORDER` and depth clamp to the patch's property where t
 them, and the shader route's fallback obligations where it does not (`fallback_border`,
 `R_DEPTH_CLAMP`). R1 built the border fallback's shader variants (U11, `host/d3d9gpu/d9g_shader.h`,
 `Variant::border_u` and `border_v`); the depth-clamp emulation is not built (the translator
-refuses it until the depth-clamp measurement finds that a pixel clamp changes), and host 2 draws
-nothing yet.
+refuses it until the depth-clamp measurement finds that a pixel clamp changes). Replays, host
+comparisons and test runs on such a device still refuse each draw that owes the clamp, so the
+stock build's tripwire still holds. A live session (`--interactive`, every desktop launcher and
+Android session), or any run with `SA2_D3D9GPU_NO_DEPTH_CLAMP=1`, draws those clipped at the near
+and far planes instead (`GpuInfo::depth_clamp_clip_only`): with that forced, none of the 23,778
+frames of the four recorded streams (boot, menu, story, Metal Harbor) differs from the
+reference.
 `--sdl3=system` builds DXVK against a system SDL3, which no pin holds: no player is built on it
 (`host/player/generate_expectations.py` refuses an install whose SDL no pin names), and an SDL3
 this project built, from any checkout, is refused as a system one.

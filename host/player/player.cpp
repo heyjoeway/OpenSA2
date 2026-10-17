@@ -208,9 +208,9 @@
 // the pads, the records asked for and the overlay's draws.
 //
 // The picture's place (portrait play): SA2_PLAYER_PICTURE_Y=F, F 0 to 1, puts a letterboxed
-// picture's centre at F of the window's height (0.25: the middle of its upper half), its top no
-// higher than the window's safe area and no lower than centred; unset, the picture is centred as
-// before. Before each Present the player gives the device that place and the safe area's top in
+// picture's centre at F of an upright window's height (0.25: the middle of its upper half), its
+// top no higher than the window's safe area and no lower than centred; unset, or a window no taller
+// than wide, the picture is centred as before. Before each Present the player gives the device that place and the safe area's top in
 // pixels as the window's properties "sa2.picture_y" and "sa2.picture_min_top" (read beside
 // host/d3d9gpu/d9g_gpu.h fit_rect), and the touch overlay the same (set_picture), so its band
 // under the picture starts where the picture ends. Each new place is said in the log ("picture:
@@ -1296,6 +1296,7 @@ private:
     PadSlot pad_slots_[sa2_input::kPadSlots];
     sa2_input::PadOutput pad_map_[SDL_GAMEPAD_BUTTON_COUNT];   // SA2_PAD_MAP, over kPadButtonBits
     float picture_y_ = -1;                         // SA2_PLAYER_PICTURE_Y ("The picture's place"); -1 centred
+    float picture_anchor_ = -1;                    // what the last Present used: picture_y_ in an upright window
     bool picture_read_ = false;
     std::string picture_said_;                     // the last "picture:" line, said once per change
     sa2_touch::Overlay* touch_ = nullptr;
@@ -4455,16 +4456,20 @@ void Player::place_picture() {
         }
     }
     if (picture_y_ < 0) return;
+    // Only an upright window moves the picture: a landscape one letterboxing it (auto-rotate held
+    // sideways on a screen narrower than 4:3) keeps it centred.
     int ww = 0, wh = 0, pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(win_, &pw, &ph);
+    picture_anchor_ = ph > pw ? picture_y_ : -1;
     SDL_Rect safe{};
     uint32_t min_top = 0;
-    if (SDL_GetWindowSize(win_, &ww, &wh) && SDL_GetWindowSizeInPixels(win_, &pw, &ph) && wh > 0 &&
-        SDL_GetWindowSafeArea(win_, &safe) && safe.y > 0)
+    if (picture_anchor_ >= 0 && SDL_GetWindowSize(win_, &ww, &wh) && wh > 0 && SDL_GetWindowSafeArea(win_, &safe) &&
+        safe.y > 0)
         min_top = uint32_t(int64_t(safe.y) * ph / wh);
     const SDL_PropertiesID props = SDL_GetWindowProperties(win_);
-    SDL_SetFloatProperty(props, "sa2.picture_y", picture_y_);
+    SDL_SetFloatProperty(props, "sa2.picture_y", picture_anchor_);
     SDL_SetNumberProperty(props, "sa2.picture_min_top", min_top);
-    sa2_touch::set_picture(touch_, picture_y_, min_top);
+    sa2_touch::set_picture(touch_, picture_anchor_, min_top);
 }
 
 // The pads and the overlay, at the first service once the key sender has started.
@@ -4869,7 +4874,7 @@ void Player::present_overlay(void* self, SDL_GPUDevice* dev, SDL_GPUCommandBuffe
     sa2_touch::attach_device(p->touch_, dev);
     sa2_touch::set_frame(p->touch_, frame_w, frame_h);
     uint32_t top = 0, bottom = 0;
-    if (p->picture_y_ >= 0 && sa2_touch::picture_rows(p->touch_, w, h, &top, &bottom)) {
+    if (p->picture_anchor_ >= 0 && sa2_touch::picture_rows(p->touch_, w, h, &top, &bottom)) {
         const std::string said = strf("picture: %ux%u at rows %u-%u of the window's %ux%u (SA2_PLAYER_PICTURE_Y=%.2f; "
                                       "the controls %s)", frame_w, frame_h, top, bottom, w, h, p->picture_y_,
                                       sa2_touch::below_picture(p->touch_, w, h) ? "below it" : "over it");

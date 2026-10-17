@@ -53,8 +53,8 @@ public class Sa2LayoutActivity extends Activity {
         }
         int[] screen = GameSettings.screen(this);
         int[] frame = mS.frame(screen != null ? screen[0] : 1920, screen != null ? screen[1] : 1080);
-        mEditor = new Editor(this, frame[0], frame[1], mS.touchSize / 100f, mS.pictureAnchor(), mS.layoutLandscape,
-                             mS.layoutPortrait);
+        mEditor = new Editor(this, upright, frame[0], frame[1], mS.touchSize / 100f, mS.pictureAnchor(),
+                             mS.layoutLandscape, mS.layoutPortrait);
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -184,9 +184,11 @@ public class Sa2LayoutActivity extends Activity {
 
     /** The screen: the picture's place, the control area's edge when it is a band, and the groups. */
     private static final class Editor extends View {
+        final boolean upright;       // the orientation the editor edits
         final int frameW, frameH;
         final float scale, anchor;
-        float minTop;                // the safe area's top: SDL's, from the same insets (SDLSurface)
+        float minTop;                // the safe area's top: SDL's, from the same insets (SDLSurface); SDL
+                                     // reports none below API 30, so neither does the editor there
         String landscape, portrait;  // the places, kept while the screen changes size
         GameSettings.TouchLayout layout;
         Runnable changed;                            // a new size, a drop, Reset or Swap sides
@@ -197,22 +199,20 @@ public class Sa2LayoutActivity extends Activity {
                             label = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
 
-        Editor(Context c, int frameW, int frameH, float scale, float anchor, String landscape, String portrait) {
+        Editor(Context c, boolean upright, int frameW, int frameH, float scale, float anchor, String landscape,
+               String portrait) {
             super(c);
+            this.upright = upright;
             this.frameW = frameW;
             this.frameH = frameH;
             this.scale = scale;
             this.anchor = anchor;
             setOnApplyWindowInsetsListener((v, insets) -> {
-                float top;
-                if (Build.VERSION.SDK_INT >= 30) {
+                float top = 0;
+                if (Build.VERSION.SDK_INT >= 30)
                     top = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.systemGestures()
                                            | WindowInsets.Type.mandatorySystemGestures()
                                            | WindowInsets.Type.tappableElement() | WindowInsets.Type.displayCutout()).top;
-                } else {
-                    android.view.DisplayCutout cut = insets.getDisplayCutout();
-                    top = cut != null ? cut.getSafeInsetTop() : 0;
-                }
                 if (top != minTop) {
                     minTop = top;
                     relayout();
@@ -242,16 +242,18 @@ public class Sa2LayoutActivity extends Activity {
             if (changed != null) changed.run();
         }
 
-        /** The places as they stand, for the layout's orientation, so a new size lays them out
-         * again and Save finds them. */
+        /** The places as they stand, for the orientation the editor edits, so a new size lays them out
+         * again and Save finds them; a layout of the other shape (before the screen turns) keeps
+         * nothing. */
         void keep() {
-            if (layout.upright) portrait = layout.value();
+            if (layout.upright != upright) return;
+            if (upright) portrait = layout.value();
             else landscape = layout.value();
         }
 
         void reset() {
             if (layout == null) return;
-            if (layout.upright) portrait = "";
+            if (upright) portrait = "";
             else landscape = "";
             layout = GameSettings.touchLayout(getWidth(), getHeight(), frameW, frameH, scale, anchor, minTop, landscape,
                                               portrait);

@@ -46,8 +46,9 @@ constexpr float kBelowMin = 0.30f;      // the least band, in the window's short
 
 // The picture's top and bottom rows as the device presents a fw x fh frame in a w x h window
 // (host/d3d9gpu/d9g_gpu.h fit_rect: centred at its own aspect, the whole window when the two
-// agree to within 2 px; with an anchor, its centre at anchor of the height, its top no higher than
-// min_top and no lower than centred); the whole height when there is no frame or it fills it.
+// agree to within 2 px; with an anchor in a window taller than wide, its centre at anchor of the
+// height, its top no higher than min_top and no lower than centred); the whole height when there is
+// no frame or it fills it.
 void picture_rows(float w, float h, uint32_t fw, uint32_t fh, float anchor, float min_top, float* top,
                   float* bottom) {
     *top = 0;
@@ -57,7 +58,7 @@ void picture_rows(float w, float h, uint32_t fw, uint32_t fh, float anchor, floa
     const float ph = std::min(h, std::round(w * float(fh) / float(fw)));
     if (h - ph <= 2.0f) return;
     *top = std::floor((h - ph) / 2);
-    if (anchor >= 0)
+    if (anchor >= 0 && h > w)
         *top = std::min(*top, std::max(min_top, float(std::llround(double(anchor) * h - double(ph) / 2))));
     *bottom = *top + ph;
 }

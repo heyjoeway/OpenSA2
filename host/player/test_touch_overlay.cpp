@@ -361,6 +361,11 @@ int main(int argc, char** argv) {
             CHECK((rows(0.25f, 0) == std::make_pair(240u, 1320u)), "upper-half rows %u-%u", top, bottom);
             CHECK((rows(0.25f, 300) == std::make_pair(300u, 1380u)), "under the safe area %u-%u", top, bottom);
             CHECK((rows(0.9f, 0) == std::make_pair(1020u, 2100u)), "below centred %u-%u", top, bottom);
+            // A landscape window letterboxing the picture (a screen narrower than 4:3) keeps it
+            // centred: 2176x1812 shows 4:3 as 2176x1632 at row 90.
+            sa2_touch::set_picture(a, 0.25f, 0);
+            sa2_touch::picture_rows(a, 2176, 1812, &top, &bottom);
+            CHECK(top == 90 && bottom == 1722, "landscape letterbox rows %u-%u", top, bottom);
             rows(0.25f, 0);
             CHECK(sa2_touch::below_picture(a, 1440, 3120), "no band under the raised picture");
             float sx, sy;

@@ -112,8 +112,9 @@ void set_settings(Overlay* o, const Settings& s);
 // The game's frame size, for where the picture is; the player passes it at each Present.
 void set_frame(Overlay* o, uint32_t frame_w, uint32_t frame_h);
 // Where a letterboxed picture sits, as the device places it (host/d3d9gpu/d9g_gpu.h fit_rect's
-// anchor): its centre at anchor_y of the window's height (negative: centred, the default), its top
-// no higher than min_top pixels and no lower than centred.
+// anchor, which the player sets only for an upright window): its centre at anchor_y of the height
+// of a window taller than wide (negative: centred, the default), its top no higher than min_top
+// pixels and no lower than centred.
 void set_picture(Overlay* o, float anchor_y, uint32_t min_top);
 // The picture's top and bottom rows in a w x h window; false before a frame is known.
 bool picture_rows(const Overlay* o, uint32_t w, uint32_t h, uint32_t* top, uint32_t* bottom);

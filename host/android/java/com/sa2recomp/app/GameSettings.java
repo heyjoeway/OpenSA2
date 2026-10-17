@@ -183,7 +183,10 @@ final class GameSettings {
      * default, the largest picture except where the session keeps the config's size), for
      * listing the choices; as many lines as the largest picture's, or more, is the largest. */
     int[] picture(int lng, int shrt, int lines) {
-        if (displayDefault() && lines == 0) return (long) lng * 3 > (long) shrt * 4 ? new int[] {lng, shrt} : null;
+        // At these lines the session's own rule decides, as it does when every display setting is
+        // at its default (the stored resolution is not the one asked about here).
+        boolean sessionRule = LANDSCAPE.equals(orientation) && widescreen && "auto".equals(aspect) && lines == 0;
+        if (sessionRule) return (long) lng * 3 > (long) shrt * 4 ? new int[] {lng, shrt} : null;
         int[] full = fullPicture(lng, shrt);
         if (full == null) return null;
         int w = full[0], h = full[1];
@@ -307,8 +310,9 @@ final class GameSettings {
         return Math.max(0f, Math.min(1f, v));
     }
 
-    /** `anchor` and `minTop`: the picture's place in a taller window (host/d3d9gpu/d9g_gpu.h fit_rect),
-     * its centre at anchor of the height (negative: centred), its top no higher than minTop. */
+    /** `anchor` and `minTop`: the picture's place in a window taller than wide, as the player sets it
+     * (host/d3d9gpu/d9g_gpu.h fit_rect), its centre at anchor of the height (negative: centred), its
+     * top no higher than minTop; a landscape window keeps it centred. */
     static TouchLayout touchLayout(float w, float h, int fw, int fh, float scale, float anchor, float minTop,
                                    String landscapeValue, String portraitValue) {
         TouchLayout l = new TouchLayout();
@@ -320,7 +324,8 @@ final class GameSettings {
             float ph = Math.min(h, Math.round(w * (float) fh / fw));
             if (h - ph > 2f) {
                 top = (float) Math.floor((h - ph) / 2);
-                if (anchor >= 0) top = Math.min(top, Math.max(minTop, (float) Math.round((double) anchor * h - ph / 2.0)));
+                if (anchor >= 0 && h > w)
+                    top = Math.min(top, Math.max(minTop, (float) Math.round((double) anchor * h - ph / 2.0)));
                 bottom = top + ph;
             }
         }

@@ -48,6 +48,7 @@ CASES = [
     (720, 1280, 720, 540, 1.0, 0.25, 0, "", ""),                   # a 16:9 phone: the band now holds them
     (1812, 2176, 1440, 1080, 1.0, 0.25, 0, "", ""),                # a near-square screen: a band appears
     (2340, 1080, 1440, 1080, 1.0, 0.25, 0, "", ""),                # landscape bars at the sides: no effect
+    (2176, 1812, 1440, 1080, 1.0, 0.25, 0, "", ""),                # a landscape letterbox stays centred
 ]
 
 NATIVE = r"""
@@ -87,6 +88,21 @@ int main(int argc, char** argv) {
 }
 """
 
+# GameSettings.picture() for the resolution list: the default resolution's picture (null: the
+# game's own size) and the largest picture, for a screen and the stored resolution.
+PICTURE_JAVA = r"""
+package com.sa2recomp.app;
+public class PictureDriver {
+    public static void main(String[] a) {
+        GameSettings s = new GameSettings();
+        s.resolution = Integer.parseInt(a[2]);
+        int lng = Integer.parseInt(a[0]), shrt = Integer.parseInt(a[1]);
+        int[] own = s.picture(lng, shrt, 0), full = s.fullPicture(lng, shrt);
+        System.out.println((own == null ? "own" : own[0] + "x" + own[1]) + " " + full[0] + "x" + full[1]);
+    }
+}
+"""
+
 JAVA = r"""
 package com.sa2recomp.app;
 public class LayoutDriver {
@@ -117,6 +133,7 @@ def drivers(tmp_path_factory):
     src = d / "java/com/sa2recomp/app"
     src.mkdir(parents=True)
     (src / "LayoutDriver.java").write_text(JAVA)
+    (src / "PictureDriver.java").write_text(PICTURE_JAVA)
     shutil.copy(ROOT / "host/android/java/com/sa2recomp/app/GameSettings.java", src)
     subprocess.run([str(JDK / "bin/javac"), "--release", "11", "-nowarn", "-classpath", str(ANDROID_JAR),
                     "-d", str(d / "classes"), *map(str, src.glob("*.java"))], check=True, capture_output=True)
@@ -125,9 +142,9 @@ def drivers(tmp_path_factory):
         return subprocess.run([str(d / "native"), *map(str, args)], capture_output=True, text=True,
                               check=True).stdout
 
-    def java(*args):
+    def java(*args, main="LayoutDriver"):
         return subprocess.run([str(JDK / "bin/java"), "-cp", f"{d / 'classes'}:{ANDROID_JAR}",
-                               "com.sa2recomp.app.LayoutDriver", *map(str, args)], capture_output=True, text=True,
+                               f"com.sa2recomp.app.{main}", *map(str, args)], capture_output=True, text=True,
                               check=True).stdout
     return native, java
 
@@ -152,3 +169,13 @@ def test_the_editor_places_every_group_where_the_overlay_does(drivers, case):
 def test_the_cases_cover_both_areas(drivers):
     native, _ = drivers
     assert {centres(native(*c))[0] for c in CASES} == {0, 1}
+
+
+@pytest.mark.parametrize("stored", [0, 720, 1080])
+def test_the_default_resolution_keeps_the_sessions_rule_whatever_is_stored(drivers, stored):
+    """On a 4:3 tablet with the default display settings the session keeps the game's own size at
+    the default resolution, so the list's first entry is that and the full screen is offered too,
+    whatever resolution was stored; on a wide phone the default is the screen."""
+    _, java = drivers
+    assert java(2048, 1536, stored, main="PictureDriver").split() == ["own", "2048x1536"]
+    assert java(2340, 1080, stored, main="PictureDriver").split() == ["2340x1080", "2340x1080"]

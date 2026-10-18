@@ -1,6 +1,6 @@
 # Download and play OpenSA2
 
-Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.3.1). The current release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. Read the [limitations](status.md) before testing.
+Get the builds from [GitHub Releases](https://github.com/kittycache9/OpenSA2/releases/tag/v0.1.0-alpha.4). The current release is an experimental prerelease. It has reached gameplay, but it has not completed a full-game compatibility pass. Read the [limitations](status.md) before testing.
 
 You need your own supported, unmodified **2012 PC release of Sonic Adventure 2**. That is the version Steam sells and installs today. "2012" names the release, not an old build: do not look for an older copy. Install the game through Steam, remove any mods, and use its folder as it is. The installer checks every file it reads against the known hashes, so a modified, repacked, or downloaded copy fails the check.
 
@@ -8,9 +8,9 @@ The downloads include recompiled game logic and the port's runtime. They include
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3.1/OpenSA2-v0.1.0-alpha.3.1-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
-| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3.1/OpenSA2-v0.1.0-alpha.3.1-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and Vulkan 1.1 or later graphics. Device support is experimental. |
-| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.3.1/OpenSA2-v0.1.0-alpha.3.1-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
+| Windows, x86-64 | [Windows ZIP](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.4/OpenSA2-v0.1.0-alpha.4-windows-x86_64.zip) | Windows 10 or later and a Vulkan or Direct3D 12 graphics driver. |
+| Android, arm64 | [Android APK](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.4/OpenSA2-v0.1.0-alpha.4-android-arm64.apk) | Android 10 or later, a 64-bit ARM device, and Vulkan 1.1 or later graphics. Device support is experimental. |
+| Linux, x86-64 | [Linux DEB](https://github.com/kittycache9/OpenSA2/releases/download/v0.1.0-alpha.4/OpenSA2-v0.1.0-alpha.4-linux-x86_64.deb) | Ubuntu 24.04, Debian 13, or a compatible distribution, with a working Vulkan driver. |
 
 ## Windows
 
@@ -61,7 +61,7 @@ This release uses a new release signing key. If you previously installed a devel
 Download the DEB, then install it from that directory:
 
 ```bash
-sudo apt install './OpenSA2-v0.1.0-alpha.3.1-linux-x86_64.deb'
+sudo apt install './OpenSA2-v0.1.0-alpha.4-linux-x86_64.deb'
 ```
 
 Open OpenSA2 from your application menu, or run `opensa2`. The first start finds a Steam copy or offers a game-folder picker. A controller is optional.
@@ -70,7 +70,7 @@ Saves, settings, and logs use the port's per-user `sa2recomp` directories under 
 
 ## Tweaks
 
-Tweaks are optional changes to how the game looks or plays. Each one is off until you turn it on, and replays and the launcher's self-test never use them. Tweaks need a release newer than v0.1.0-alpha.3.1.
+Tweaks are optional changes to how the game looks or plays. Each one is off until you turn it on, and replays and the launcher's self-test never use them. Tweaks arrived in v0.1.0-alpha.4.
 
 | Name | Change |
 | --- | --- |

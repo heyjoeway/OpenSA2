@@ -213,6 +213,7 @@
     X(SA2_TWEAK_REDUCE_SHAKE, "reduce-shake", "camera shake reduced", "camera shake from explosions, bosses and impacts moves the view a quarter as far") \
     X(SA2_TWEAK_RING_LOSS_CAP, "ring-loss-cap", "ring loss capped at 20", "a hit costs at most 20 rings, the ones it scatters, not all of them; picking them back up gives no second 100-ring extra life") \
     X(SA2_TWEAK_RIVAL_UPGRADES, "rival-upgrades", "rival upgrades shared", "Shadow, Rouge and Mech Tails share the upgrades Sonic, Knuckles and Eggman have found") \
+    X(SA2_TWEAK_SHADOW_LIGHTDASH_FX, "shadow-lightdash-fx", "shadow lightdash trail", "Shadow's light dash leaves the see-through after-image trail that Sonic's does, drawn with Shadow's own model") \
     X(SA2_TWEAK_SKIP_INTRO, "skip-intro", "intro skipped", "the game starts at the title screen, without the logos and the opening cutscene") \
     X(SA2_TWEAK_SPIN_DASH_FAST, "spin-dash-fast", "spin dash charges in 10 frames", "the spin dash starts after 10 frames held instead of 24; a short press still somersaults") \
     X(SA2_TWEAK_STAGE_SELECT_ALL, "stage-select-all", "all stages in Stage Select", "every stage shows in Stage Select, without clearing it in story mode first") \

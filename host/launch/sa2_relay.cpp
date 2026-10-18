@@ -5,11 +5,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <thread>
 
 #ifndef _WIN32
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #endif
 
@@ -18,7 +21,6 @@ namespace sa2l {
 namespace {
 constexpr uint8_t kMagic[8] = {'S', 'A', '2', 'D', '3', 'D', '9', 'S'};
 constexpr uint32_t kKindFrame = 3;
-constexpr size_t kChunk = 1u << 20;
 
 // Pace (sa2_relay.h). The player's pipe holds kPlayerPipe, Linux's default, so a frame is handed
 // on in full only when the player has read all but that much of it. The game waits after its
@@ -66,12 +68,23 @@ size_t resize_pipe(Fd fd, size_t bytes) {
 #endif
     return pipe_size(fd);
 }
+// The bytes the pipe holds unread; -1 where that cannot be read (Windows).
+long pipe_unread(Fd fd) {
+#ifndef _WIN32
+    int n = 0;
+    return ioctl(int(fd), FIONREAD, &n) == 0 ? long(n) : -1;
+#else
+    (void)fd;
+    return -1;
+#endif
+}
 double seconds_since(std::chrono::steady_clock::time_point t) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
 }
 uint32_t le32(const uint8_t* p) {
     return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
+const char* const kLost = ": the game's FIFO lost bytes between the game's write and the relay's read";
 }  // namespace
 
 // The bytes are read where they are: only the start of a record header (or of the file header)
@@ -83,7 +96,7 @@ void FrameParser::feed(const uint8_t* data, size_t n) {
     const uint64_t start = pos_;                      // the stream offset of data[0]
     const uint64_t kept = start - pending_.size();    // ... and of pending_[0]
     pos_ += n;
-    if (!problem_.empty()) {
+    if (stopped_) {
         pending_.clear();
         return;
     }
@@ -108,6 +121,7 @@ void FrameParser::feed(const uint8_t* data, size_t n) {
         take(0, head, 16);
         if (std::memcmp(head, kMagic, 8) != 0) {
             problem_ = "the stream does not begin with SA2D3D9S";
+            stopped_ = true;
             pending_.clear();
             return;
         }
@@ -124,14 +138,32 @@ void FrameParser::feed(const uint8_t* data, size_t n) {
             }
             break;
         }
-        uint8_t rec[8];
-        if (next_ >= start) std::memcpy(rec, data + (next_ - start), 8);
-        else take(next_, rec, 8);
-        const uint32_t kind = le32(rec), size = le32(rec + 4);
-        if (size < 12 || size % 4) {
-            problem_ = "the record at offset " + std::to_string(next_) + " has size " + std::to_string(size);
+        uint8_t rec[12];
+        if (next_ >= start) std::memcpy(rec, data + (next_ - start), 12);
+        else take(next_, rec, 12);
+        const uint32_t kind = le32(rec), size = le32(rec + 4), seq = le32(rec + 8);
+        const bool seq_ok = seq == next_seq_;
+        const bool size_ok = size >= 12 && size % 4 == 0 && size <= kMaxRecord;
+        if ((!size_ok || !seq_ok) && problem_.empty()) {
+            // The first problem is the one named. A size alone could be the writer's, so the FIFO
+            // is named only when the seq is off.
+            const std::string seq_off = "seq " + std::to_string(seq) + " where seq " + std::to_string(next_seq_) + " was due";
+            problem_ = "the record at offset " + std::to_string(next_) + " has ";
+            if (size_ok) {
+                problem_ += seq_off + kLost;
+            } else {
+                problem_ += "size " + std::to_string(size);
+                if (size > kMaxRecord) problem_ += " (the writer's limit is " + std::to_string(kMaxRecord) + " bytes)";
+                if (!seq_ok) problem_ += ", and " + seq_off + kLost;
+            }
+        }
+        // A size no record has ends the framing, as it always did. A seq off alone is only
+        // reported: the parser goes on by the sizes, as before it read seqs.
+        if (!size_ok) {
+            stopped_ = true;
             break;
         }
+        next_seq_ = seq + 1u;
         if (kind == kKindFrame) waiting_.push_back(next_ + size);
         records_++;
         next_ += size;
@@ -144,8 +176,10 @@ void FrameParser::feed(const uint8_t* data, size_t n) {
 
 // The pace pipe's bytes. Its write end is O_NONBLOCK: a game that takes no credits fills it, and
 // the relay then counts what the full pipe refused rather than wait on the game.
+// credits_mu_ is held throughout: the reader's thread may close the pipe meanwhile (close_credits).
 void Relay::give_credits(uint64_t n) {
     static const uint8_t ones[64] = {};
+    std::lock_guard<std::mutex> ck(credits_mu_);
     while (n && credits_ != kNoFd) {
         const size_t ask = size_t(std::min<uint64_t>(n, sizeof ones));
 #ifndef _WIN32
@@ -157,7 +191,7 @@ void Relay::give_credits(uint64_t n) {
             return;
         }
         if (k <= 0) {                     // the game is gone (EPIPE): nobody waits on it
-            close_credits();
+            close_fd(credits_);
             return;
         }
         n -= uint64_t(k);
@@ -170,9 +204,13 @@ void Relay::give_credits(uint64_t n) {
     }
 }
 
-// Closed when the player goes and when the stream ends: the recorder reads end of file and paces
-// no more, so the game can still be asked to stop and end through its own code.
-void Relay::close_credits() { close_fd(credits_); }
+// Closed when the player goes, when the stream ends, and at the parser's first problem: the
+// recorder reads end of file and paces no more, so the game can still be asked to stop and end
+// through its own code, and never waits for credits for frames the parser can no longer count.
+void Relay::close_credits() {
+    std::lock_guard<std::mutex> ck(credits_mu_);
+    close_fd(credits_);
+}
 
 void Relay::writer() {
     if (on_writer_start) on_writer_start();
@@ -258,6 +296,26 @@ void Relay::watch_stall(const std::atomic<bool>& game_alive) {
     if (note) note(line);
 }
 
+// The reader's look at the FIFO's unread bytes (sa2_relay.h, "Loss"). `last` is the count at the
+// look before, -1 when there was none; a baseline look (right after a read) only records the count.
+// With the relay the FIFO's one reader, the count can only rise from one of its reads to the next,
+// so a fall is bytes another reader took.
+long Relay::look_unread(long& last, bool baseline) {
+    const long u = pipe_unread(in_);
+    if (u < 0) {
+        last = -1;
+        return -1;
+    }
+    std::lock_guard<std::mutex> lk(mu_);
+    st_.unread_seen = true;
+    if (!baseline && last >= 0 && u < last) {
+        st_.unread_falls++;
+        st_.unread_fall_max = std::max<uint64_t>(st_.unread_fall_max, uint64_t(last - u));
+    }
+    last = u;
+    return u;
+}
+
 void Relay::run(const std::atomic<bool>& game_alive) {
     // The player's pipe to kPlayerPipe: only with a lead, and only where pipe sizes can be read
     // and set. Before the writer thread starts, so no write of the relay's waits on it.
@@ -273,9 +331,10 @@ void Relay::run(const std::atomic<bool>& game_alive) {
     if (lead_) give_credits(lead_);
     else close_credits();
     std::thread w([this] { writer(); });
-    std::vector<uint8_t> buf(kChunk);
+    std::vector<uint8_t> buf(read_chunk ? read_chunk : kReadChunk);
+    long unread = -1;                     // the count at look_unread's last look
     for (;;) {
-        bool still_held = false;
+        bool still_held = false, waited = false;
         {
             std::unique_lock<std::mutex> lk(mu_);
             if (held_locked()) {
@@ -286,8 +345,10 @@ void Relay::run(const std::atomic<bool>& game_alive) {
                 // when the writer hands a frame on between the two.
                 quiet_since_ = std::chrono::steady_clock::now();
                 still_held = held_locked();
+                waited = true;
             }
         }
+        if (waited) look_unread(unread);
         if (still_held) {
             if (on_hold_wait) on_hold_wait();
             continue;
@@ -299,7 +360,26 @@ void Relay::run(const std::atomic<bool>& game_alive) {
             watch_stall(game_alive);
             continue;
         }
+        const long pre = look_unread(unread);
+        if (on_read_look) on_read_look(pre);
         long n = read_some(in_, buf.data(), buf.size());
+        // The count right after the read, which the next look (a hold's wake, or the look before
+        // the next read) compares against, so a hold's whole wait is watched. A read that took
+        // nothing leaves the look before it in place.
+        if (n > 0) look_unread(unread, true);
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            st_.reads++;
+            // Readable a moment ago and empty now: with one reader, another took the bytes.
+            if (n == -1) st_.empty_after_ready++;
+            // Fewer bytes than the look a moment ago showed, with room for them: a read takes all
+            // there are up to its size, so another reader took the rest in between.
+            if (n > 0 && pre >= 0 && size_t(n) < std::min<size_t>(size_t(pre), buf.size())) {
+                st_.short_reads++;
+                st_.unread_falls++;
+                st_.unread_fall_max = std::max<uint64_t>(st_.unread_fall_max, uint64_t(pre - n));
+            }
+        }
         if (n == -1) continue;
         if (n == -2) break;
         if (n == 0) {
@@ -313,22 +393,31 @@ void Relay::run(const std::atomic<bool>& game_alive) {
             sleep_ms(20);
             continue;
         }
-        std::lock_guard<std::mutex> lk(mu_);
-        st_.writer_seen = true;
-        st_.bytes_in += uint64_t(n);
-        quiet_since_ = std::chrono::steady_clock::now();
-        next_nudge_s_ = nudge_every_s_ = kStallSeconds;
-        parser_.feed(buf.data(), size_t(n));
-        st_.records = parser_.records();
-        st_.frames_in = parser_.frame_ends().size();
-        if (st_.framing_problem.empty()) st_.framing_problem = parser_.problem();
-        if (st_.player_gone) {
-            st_.bytes_dropped += uint64_t(n);
-        } else {
-            queue_.emplace_back(buf.begin(), buf.begin() + n);
-            queued_ += size_t(n);
-            cv_.notify_all();
+        bool first_problem = false;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            st_.writer_seen = true;
+            st_.bytes_in += uint64_t(n);
+            quiet_since_ = std::chrono::steady_clock::now();
+            next_nudge_s_ = nudge_every_s_ = kStallSeconds;
+            parser_.feed(buf.data(), size_t(n));
+            st_.records = parser_.records();
+            st_.frames_in = parser_.frame_ends().size();
+            if (st_.framing_problem.empty() && !parser_.problem().empty()) {
+                st_.framing_problem = parser_.problem();
+                first_problem = true;
+            }
+            if (st_.player_gone) {
+                st_.bytes_dropped += uint64_t(n);
+            } else {
+                queue_.emplace_back(buf.begin(), buf.begin() + n);
+                queued_ += size_t(n);
+                cv_.notify_all();
+            }
         }
+        // The bytes still go on to the player, which ends the session on the gap; the game is
+        // not left waiting on credits for frames the parser may no longer count.
+        if (first_problem) close_credits();
     }
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -348,6 +437,56 @@ RelayStats Relay::stats() const {
     s.held_now = !reading_done_ && held_locked();
     s.quiet_s = s.held_now ? 0.0 : seconds_since(quiet_since_);
     return s;
+}
+
+bool status_bytes(const std::string& status_text, uint64_t* bytes) {
+    // "closed: R records, B bytes, F frames"
+    const size_t at = status_text.find("closed: ");
+    if (at == std::string::npos) return false;
+    std::istringstream in(status_text.substr(at + 8));
+    unsigned long long records = 0, b = 0;
+    std::string w1, w2;
+    if (!(in >> records >> w1 >> b >> w2) || w1 != "records," || (w2 != "bytes," && w2 != "bytes")) return false;
+    *bytes = b;
+    return true;
+}
+
+std::vector<std::string> relay_report(const RelayStats& s, const std::string& status_path) {
+    auto u = [](uint64_t v) { return std::to_string(v); };
+    std::string line = "relay counters: ended by the game's end of file " + std::string(s.ended_by_eof ? "yes" : "no") +
+                       "; " + u(s.reads) + " reads, " + u(s.empty_after_ready) + " empty right after poll said readable; ";
+    if (s.unread_seen)
+        line += "the FIFO's unread bytes fell " + u(s.unread_falls) + " times between looks (" + u(s.short_reads) +
+                " at a read shorter than the look before it; the largest " + u(s.unread_fall_max) + " bytes); ";
+    else
+        line += "the FIFO's unread bytes not read on this host; ";
+    std::string text;
+    {
+        std::ifstream f(status_path);
+        std::stringstream ss;
+        if (f) ss << f.rdbuf();
+        text = ss.str();
+    }
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+    uint64_t game = 0;
+    const bool counted = status_bytes(text, &game);
+    if (counted)
+        line += "the game wrote " + u(game) + " bytes";
+    else if (text.empty())
+        line += "the game's count of its bytes not read (no " + status_path.substr(status_path.find_last_of("/\\") + 1) + ")";
+    else
+        line += "the game's count of its bytes not in its status (\"" + text.substr(0, 120) + "\")";
+    std::vector<std::string> lines = {line};
+    if (counted && game != s.bytes_in) {
+        std::string l = "the game wrote " + u(game) + " bytes, the relay read " + u(s.bytes_in) + ": ";
+        if (game > s.bytes_in)
+            l += u(game - s.bytes_in) + (s.ended_by_eof ? " lost in the FIFO"
+                                                        : " not read (the relay ended before the game's end of file)");
+        else
+            l += "the relay read " + u(s.bytes_in - game) + " bytes the game did not count";
+        lines.push_back(l);
+    }
+    return lines;
 }
 
 }  // namespace sa2l

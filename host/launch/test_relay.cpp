@@ -20,13 +20,36 @@
 //     a frame about a second later;
 //   - the player gone: a reader that closes the player's pipe after three frames; the writer
 //     reads end of file on the pace pipe and writes the rest unpaced, and the relay ends.
+// Then loss (sa2_relay.h, "Loss"):
+//   - the parser: a whole frame's records left out is named with its record's offset and seqs, in
+//     the problem's literal words, and the parser goes on by the sizes; 4096 bytes left out 12
+//     bytes into a record, and a record over the writer's limit, are named too, fed in pieces of
+//     several sizes;
+//   - the pace on a loss: a writer that takes its pace byte after each frame, with 4096 bytes of
+//     frame 3 lost: the relay names the loss, closes the pace pipe (the writer reads its end of
+//     file instead of waiting for good on a credit for a frame nobody can count), and hands every
+//     byte it read on;
+//   - a thief: a second reader of the FIFO takes 4096 bytes while the relay holds; the FIFO's fall
+//     (or a read that found it empty) is counted, the frame before the loss reaches the player
+//     intact, and every byte left reaches it in order;
+//   - a thief in a short hold: the player keeps reading, so every hold ends within the relay's
+//     first 200 ms wait (as in a paced session), and the relay reads 64 KB at a time, so frame 1
+//     waits in the FIFO while the relay holds frame 0; the thief takes 4096 bytes inside that
+//     hold, the game writing nothing until the relay reads again, and the fall from the look
+//     after the relay's read to the look at the hold's wake is counted;
+//   - a thief between the look and the read (Relay::on_read_look): with frames 1 and 2 whole in the
+//     FIFO, 4096 bytes taken there make the read shorter than the look by 4096, counted once;
+//   - a healthy stream of 4.4 GB, past the offsets 2^31 and 2^32, paced: no problem, every frame,
+//     and every loss counter 0.
 //
 //   c++ -std=c++17 -O2 -Ihost/launch host/launch/test_relay.cpp host/launch/sa2_relay.cpp
 //       host/launch/sa2_launch_posix.cpp -lpthread -o test_relay && ./test_relay [DIR]
 //
-// Prints RELAY_PARSER_OK, RELAY_PACE_OK, RELAY_NO_RESIZE_OK, RELAY_STALL_OK, RELAY_HOLD_END_OK and
-// RELAY_GONE_OK, and exits 0 when every case holds, else names the first that does not. DIR holds
-// the FIFOs (default $TMPDIR or /tmp).
+// Prints RELAY_PARSER_OK, RELAY_PACE_OK, RELAY_NO_RESIZE_OK, RELAY_STALL_OK, RELAY_HOLD_END_OK,
+// RELAY_GONE_OK, RELAY_LOSS_PARSER_OK, RELAY_LOSS_PACE_OK, RELAY_THIEF_OK, RELAY_HOLD_THIEF_OK,
+// RELAY_SHORT_READ_OK, RELAY_BIG_OK and RELAY_REPORT_OK, and
+// exits 0 when every case holds, else names the first that does not. DIR holds the FIFOs (default
+// $TMPDIR or /tmp).
 #include "sa2_relay.h"
 
 #include <atomic>
@@ -45,10 +68,13 @@
 #ifndef _WIN32
 #include <cerrno>
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 #endif
 
 namespace {
+
+const std::string kLost = ": the game's FIFO lost bytes between the game's write and the relay's read";
 
 // The parser as it was before 2026-10-12 (sa2_relay.cpp at development_snapshot), kept as the reference.
 struct OldParser {
@@ -133,7 +159,11 @@ std::vector<uint8_t> make_stream(std::mt19937& rng, int records, bool bad_size_a
 bool same(const sa2l::FrameParser& a, const OldParser& b, std::string* why) {
     if (a.frame_ends() != b.ends_) { *why = "frame ends differ"; return false; }
     if (a.records() != b.records_) { *why = "record counts differ"; return false; }
-    if (a.problem() != b.problem_) { *why = "problems differ: '" + a.problem() + "' / '" + b.problem_ + "'"; return false; }
+    // The parser names a seq that is off as well (sa2_relay.h, "Loss"), after the old words.
+    if (a.problem().empty() != b.problem_.empty() || a.problem().compare(0, b.problem_.size(), b.problem_) != 0) {
+        *why = "problems differ: '" + a.problem() + "' / '" + b.problem_ + "'";
+        return false;
+    }
     if (a.header_bytes() != b.header_bytes_) { *why = "header lengths differ"; return false; }
     if (a.bytes() != b.pos_) { *why = "byte counts differ"; return false; }
     return true;
@@ -155,9 +185,6 @@ bool run(const std::vector<uint8_t>& s, const std::function<size_t()>& piece, st
 }
 
 }  // namespace
-
-#ifndef _WIN32
-namespace {
 
 // The header and `n` frames of three `record`-byte records and a FRAME record each.
 struct Stream {
@@ -188,6 +215,94 @@ Stream make_frames(int n, uint32_t record) {
     }
     return st;
 }
+
+// `s` with `n` bytes left out from offset `at`.
+std::vector<uint8_t> without(const std::vector<uint8_t>& s, size_t at, size_t n) {
+    std::vector<uint8_t> out(s.begin(), s.begin() + long(at));
+    out.insert(out.end(), s.begin() + long(at + n), s.end());
+    return out;
+}
+
+// Feeds `s` to a parser in pieces of `piece` bytes.
+sa2l::FrameParser parse(const std::vector<uint8_t>& s, size_t piece) {
+    sa2l::FrameParser p;
+    for (size_t at = 0; at < s.size(); at += piece) p.feed(s.data() + at, std::min(piece, s.size() - at));
+    return p;
+}
+
+// The parser on loss (the comment at the top). Returns 0 when it holds.
+int loss_parser_case() {
+    const Stream sm = make_frames(6, 1000);
+    const size_t frame = sm.frames[0].size();
+    const size_t pieces[] = {1, 5, 12, 13, 4096, size_t(1) << 20};
+    // a. Frame 2's four records (seqs 8 to 11) left out: frame 3's first record, now where frame 2
+    // began, has seq 12.
+    const std::vector<uint8_t> a = without(sm.all, sm.head.size() + 2 * frame, frame);
+    const std::string want_a = "the record at offset " + std::to_string(sm.head.size() + 2 * frame) +
+                               " has seq 12 where seq 8 was due" + kLost;
+    for (size_t piece : pieces) {
+        const sa2l::FrameParser p = parse(a, piece);
+        if (p.problem() != want_a || p.frame_ends().size() != 5 || p.records() != 20) {
+            std::printf("RELAY_LOSS_PARSER_FAIL a whole frame left out, pieces of %zu: '%s', %zu frames, %llu "
+                        "records; '%s', 5 and 20 expected\n", piece, p.problem().c_str(), p.frame_ends().size(),
+                        (unsigned long long)p.records(), want_a.c_str());
+            return 1;
+        }
+    }
+    // b. 4096 bytes left out 12 bytes into frame 2's first record (of 5000 bytes): the parser
+    // steps that record's size into the middle of the next record.
+    const Stream sb = make_frames(6, 5000);
+    const size_t rec = sb.head.size() + 2 * sb.frames[0].size();
+    const std::vector<uint8_t> b = without(sb.all, rec + 12, 4096);
+    const std::string head_b = "the record at offset " + std::to_string(rec + 5000) + " has ";
+    for (size_t piece : pieces) {
+        const sa2l::FrameParser p = parse(b, piece);
+        const std::string& got = p.problem();
+        if (got.compare(0, head_b.size(), head_b) != 0 || got.size() < kLost.size() ||
+            got.compare(got.size() - kLost.size(), kLost.size(), kLost) != 0 || p.frame_ends().size() != 2) {
+            std::printf("RELAY_LOSS_PARSER_FAIL 4096 bytes left out in a record, pieces of %zu: '%s' with %zu "
+                        "frames; '%s...%s' and 2 expected\n", piece, got.c_str(), p.frame_ends().size(),
+                        head_b.c_str(), kLost.c_str());
+            return 1;
+        }
+    }
+    const std::string got_b = parse(b, 4096).problem();
+    // c. A record past the writer's limit (its seq the one due): the parser stops there.
+    std::vector<uint8_t> c = sm.all;
+    const size_t at_c = c.size();
+    put32(c, 1);
+    put32(c, sa2l::FrameParser::kMaxRecord + 4);
+    put32(c, 24);
+    for (int i = 0; i < 64; i++) c.push_back(0);
+    const std::string want_c = "the record at offset " + std::to_string(at_c) + " has size " +
+                               std::to_string(sa2l::FrameParser::kMaxRecord + 4) + " (the writer's limit is " +
+                               std::to_string(sa2l::FrameParser::kMaxRecord) + " bytes)";
+    for (size_t piece : pieces) {
+        const sa2l::FrameParser p = parse(c, piece);
+        if (p.problem() != want_c || p.frame_ends().size() != 6 || p.records() != 24) {
+            std::printf("RELAY_LOSS_PARSER_FAIL a record past the limit, pieces of %zu: '%s', %zu frames; '%s' and 6 "
+                        "expected\n", piece, p.problem().c_str(), p.frame_ends().size(), want_c.c_str());
+            return 1;
+        }
+    }
+    // The record at the limit itself is the writer's, and no problem.
+    std::vector<uint8_t> d = sm.all;
+    put32(d, 1);
+    put32(d, sa2l::FrameParser::kMaxRecord);
+    put32(d, 24);
+    d.resize(d.size() + sa2l::FrameParser::kMaxRecord - 12, 0);
+    const sa2l::FrameParser pd = parse(d, size_t(1) << 20);
+    if (!pd.problem().empty() || pd.records() != 25) {
+        std::printf("RELAY_LOSS_PARSER_FAIL a record at the writer's limit: '%s', %llu records; none and 25 expected\n",
+                    pd.problem().c_str(), (unsigned long long)pd.records());
+        return 1;
+    }
+    std::printf("RELAY_LOSS_PARSER_OK %s; %s; %s\n", want_a.c_str(), got_b.c_str(), want_c.c_str());
+    return 0;
+}
+
+#ifndef _WIN32
+namespace {
 
 // The launcher's ends: the FIFO's reader (1 MB), the player's pipe, and the pace pipe.
 struct Ends {
@@ -618,6 +733,417 @@ int gone_case(const std::string& dir) {
                 (unsigned long long)st.bytes_dropped);
     return 0;
 }
+// The recorder's pace wait, given up after `ms`: 1, 0 at end of file, -1 error, -3 timed out.
+int take_credit_within(sa2l::Fd fd, int ms) {
+    struct pollfd q = {int(fd), POLLIN, 0};
+    for (;;) {
+        const int r = poll(&q, 1, ms);
+        if (r < 0 && errno == EINTR) continue;
+        if (r == 0) return -3;
+        if (r < 0) return -1;
+        return take_credit(fd);
+    }
+}
+
+// Waits up to `ms` for `pred`.
+bool wait_for(const std::function<bool()>& pred, int ms) {
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (!pred()) {
+        if (std::chrono::steady_clock::now() > until) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+bool loss_counters_zero(const sa2l::RelayStats& st) {
+    return st.empty_after_ready == 0 && st.unread_falls == 0 && st.unread_fall_max == 0 && st.short_reads == 0;
+}
+
+// The pace on a loss (the comment at the top). Returns 0 when it holds.
+int loss_pace_case(const std::string& dir) {
+    std::string why;
+    Ends e;
+    if (!e.make(dir, "losspace", &why)) { std::printf("RELAY_LOSS_PACE_FAIL %s\n", why.c_str()); return 1; }
+    constexpr int kFrames = 8;
+    const Stream sm = make_frames(kFrames, 100u << 10);
+    // 4096 bytes of frame 3 lost 12 bytes into its first record.
+    std::vector<std::vector<uint8_t>> frames = sm.frames;
+    frames[3] = without(frames[3], 12, 4096);
+    std::vector<uint8_t> all = sm.head;
+    for (const auto& f : frames) all.insert(all.end(), f.begin(), f.end());
+    std::atomic<bool> alive{true};
+    std::atomic<int> eof_at{-1}, timed_out_at{-1};
+    sa2l::Relay relay(e.relay_in, e.video_w, 1, 64u << 20, e.pace_w);
+    e.video_w = e.pace_w = sa2l::kNoFd;
+    std::thread relay_thread([&] { relay.run(alive); });
+    std::thread writer([&] {
+        const int fd = open(e.fifo.c_str(), O_WRONLY);
+        if (fd < 0) return;
+        bool ok = sa2l::write_all(fd, sm.head.data(), sm.head.size());
+        bool paced = true;
+        for (int f = 0; f < kFrames && ok; f++) {
+            ok = sa2l::write_all(fd, frames[f].data(), frames[f].size());
+            if (ok && paced) {
+                const int c = take_credit_within(e.pace_r, 5000);
+                if (c == 0) { paced = false; eof_at = f; }
+                if (c == -3) { paced = false; timed_out_at = f; }
+                if (c == -1) ok = false;
+            }
+        }
+        close(fd);
+    });
+    std::vector<uint8_t> got, buf(64u << 10);
+    for (;;) {
+        const long n = sa2l::read_wait(e.video_r, buf.data(), buf.size(), 15000);
+        if (n == -1) continue;
+        if (n <= 0) break;
+        got.insert(got.end(), buf.begin(), buf.begin() + n);
+    }
+    writer.join();
+    alive = false;
+    relay_thread.join();
+    const sa2l::RelayStats st = relay.stats();
+    const std::string& pr = st.framing_problem;
+    const bool named = pr.size() > kLost.size() && pr.compare(pr.size() - kLost.size(), kLost.size(), kLost) == 0;
+    if (got != all || !named || timed_out_at.load() >= 0 || eof_at.load() < 3 || st.frames_in != 3 ||
+        !loss_counters_zero(st)) {
+        std::printf("RELAY_LOSS_PACE_FAIL %zu of %zu bytes handed on (in order %d), problem '%s', the pace pipe's end "
+                    "of file at frame %d, a credit waited 5 s for at frame %d, %llu frames in, loss counters %llu %llu "
+                    "%llu; every byte, the loss named, end of file at frame 3 or later, no wait, 3 frames and 0 "
+                    "expected\n", got.size(), all.size(), int(got == all), pr.c_str(), eof_at.load(),
+                    timed_out_at.load(), (unsigned long long)st.frames_in, (unsigned long long)st.empty_after_ready,
+                    (unsigned long long)st.unread_falls, (unsigned long long)st.short_reads);
+        return 1;
+    }
+    std::printf("RELAY_LOSS_PACE_OK every one of %zu bytes handed on; the pace pipe's end of file at frame %d; %s\n",
+                all.size(), eof_at.load(), pr.c_str());
+    return 0;
+}
+
+// A thief (the comment at the top). Returns 0 when it holds.
+int thief_case(const std::string& dir) {
+    std::string why;
+    Ends e;
+    if (!e.make(dir, "thief", &why)) { std::printf("RELAY_THIEF_FAIL %s\n", why.c_str()); return 1; }
+    constexpr int kFrames = 5;
+    const Stream sm = make_frames(kFrames, 100u << 10);   // 300 KB frames: more than the player's pipe
+    const int thief = open(e.fifo.c_str(), O_RDONLY | O_NONBLOCK);
+    if (thief < 0) { std::printf("RELAY_THIEF_FAIL a second reader could not open the FIFO\n"); return 1; }
+    std::atomic<bool> alive{true}, play{false};
+    std::atomic<long> stolen{-1};
+    sa2l::Relay relay(e.relay_in, e.video_w, 1, 64u << 20, e.pace_w);
+    e.video_w = e.pace_w = sa2l::kNoFd;
+    std::thread relay_thread([&] { relay.run(alive); });
+    std::thread writer([&] {
+        const int fd = open(e.fifo.c_str(), O_WRONLY);
+        if (fd < 0) return;
+        bool ok = sa2l::write_all(fd, sm.head.data(), sm.head.size()) &&
+                  sa2l::write_all(fd, sm.frames[0].data(), sm.frames[0].size());
+        // Frame 0 read and held (the player reads nothing yet), then frames 1 and 2 into the FIFO.
+        ok = ok && wait_for([&] { return relay.stats().held_now; }, 5000);
+        ok = ok && sa2l::write_all(fd, sm.frames[1].data(), sm.frames[1].size()) &&
+             sa2l::write_all(fd, sm.frames[2].data(), sm.frames[2].size());
+        // A wake of the hold looks at the FIFO; the thief takes 4096 bytes; the next wake looks again.
+        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+        uint8_t loot[4096];
+        stolen = long(read(thief, loot, sizeof loot));
+        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+        play = true;
+        for (int f = 3; f < kFrames && ok; f++) ok = sa2l::write_all(fd, sm.frames[f].data(), sm.frames[f].size());
+        close(fd);
+    });
+    wait_for([&] { return play.load(); }, 10000);
+    std::vector<uint8_t> got, buf(64u << 10);
+    for (;;) {
+        const long n = sa2l::read_wait(e.video_r, buf.data(), buf.size(), 15000);
+        if (n == -1) continue;
+        if (n <= 0) break;
+        got.insert(got.end(), buf.begin(), buf.begin() + n);
+    }
+    writer.join();
+    alive = false;
+    relay_thread.join();
+    close(thief);
+    const sa2l::RelayStats st = relay.stats();
+    const size_t before = sm.head.size() + sm.frames[0].size();
+    const std::vector<uint8_t> left = without(sm.all, before, 4096);
+    const bool intact = got.size() >= before && std::equal(sm.all.begin(), sm.all.begin() + long(before), got.begin());
+    if (stolen.load() != 4096 || !intact || got != left || (st.unread_falls == 0 && st.empty_after_ready == 0) ||
+        st.framing_problem.empty()) {
+        std::printf("RELAY_THIEF_FAIL the thief took %ld bytes; frame 0 intact %d; %zu of the %zu bytes left handed on "
+                    "(in order %d); the FIFO fell %llu times (largest %llu), %llu reads empty after poll; problem "
+                    "'%s'\n", stolen.load(), int(intact), got.size(), left.size(), int(got == left),
+                    (unsigned long long)st.unread_falls, (unsigned long long)st.unread_fall_max,
+                    (unsigned long long)st.empty_after_ready, st.framing_problem.c_str());
+        return 1;
+    }
+    std::printf("RELAY_THIEF_OK the thief took 4096 bytes while the relay held; the FIFO fell %llu times (largest %llu "
+                "bytes), %llu reads empty after poll; frame 0 intact and every byte left handed on in order; %s\n",
+                (unsigned long long)st.unread_falls, (unsigned long long)st.unread_fall_max,
+                (unsigned long long)st.empty_after_ready, st.framing_problem.c_str());
+    return 0;
+}
+
+// The player's side for the thief cases: reads the video pipe to its end, waiting `ms` after each
+// read (a player that keeps reading, so no hold outlasts one 200 ms wait of the relay's).
+std::vector<uint8_t> play_all(sa2l::Fd video_r, int ms) {
+    std::vector<uint8_t> got, buf(64u << 10);
+    for (;;) {
+        const long n = sa2l::read_wait(video_r, buf.data(), buf.size(), 15000);
+        if (n == -1) continue;
+        if (n <= 0) break;
+        got.insert(got.end(), buf.begin(), buf.begin() + n);
+        if (ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    }
+    return got;
+}
+
+// A thief in a hold that ends within one wait (the comment at the top). Returns 0 when it holds.
+int hold_thief_case(const std::string& dir) {
+    std::string why;
+    Ends e;
+    if (!e.make(dir, "holdthief", &why)) { std::printf("RELAY_HOLD_THIEF_FAIL %s\n", why.c_str()); return 1; }
+    constexpr int kFrames = 5;
+    const Stream sm = make_frames(kFrames, 100u << 10);
+    const int thief = open(e.fifo.c_str(), O_RDONLY | O_NONBLOCK);
+    if (thief < 0) { std::printf("RELAY_HOLD_THIEF_FAIL a second reader could not open the FIFO\n"); return 1; }
+    // The header and frames 0 and 1 wait in the FIFO (600 KB of its 1 MB) before the relay starts.
+    const int fd = open(e.fifo.c_str(), O_WRONLY);
+    std::vector<uint8_t> burst = sm.head;
+    burst.insert(burst.end(), sm.frames[0].begin(), sm.frames[0].end());
+    burst.insert(burst.end(), sm.frames[1].begin(), sm.frames[1].end());
+    if (fd < 0 || !sa2l::write_all(fd, burst.data(), burst.size())) {
+        std::printf("RELAY_HOLD_THIEF_FAIL the first two frames could not be written\n");
+        close(thief);
+        if (fd >= 0) close(fd);
+        return 1;
+    }
+    std::atomic<bool> alive{true};
+    std::atomic<long> stolen{-1};
+    std::atomic<uint64_t> stolen_at{0};
+    std::atomic<int> in_one_hold{0}, second_wakes{0};
+    sa2l::Relay relay(e.relay_in, e.video_w, 1, 64u << 20, e.pace_w);
+    e.video_w = e.pace_w = sa2l::kNoFd;
+    // Reads of 64 KB: the read that ends frame 0 leaves most of frame 1 in the FIFO, so the count
+    // the relay looks at after that read is not 0 (with 1 MB reads the game would have to write
+    // between the read and the look).
+    relay.read_chunk = 64u << 10;
+    relay.on_hold_wait = [&] { second_wakes++; };
+    std::thread relay_thread([&] { relay.run(alive); });
+    std::thread taker([&] {
+        // The relay holds frame 0, frame 1 waiting in the FIFO and the game writing nothing: 4096
+        // bytes, proved inside that one hold by the relay's bytes read and hold on either side.
+        if (!wait_for([&] { const sa2l::RelayStats st = relay.stats(); return st.held_now && st.frames_in == 1; }, 5000)) {
+            stolen = -2;
+            return;
+        }
+        const sa2l::RelayStats a = relay.stats();
+        uint8_t loot[4096];
+        const long k = long(read(thief, loot, sizeof loot));
+        const sa2l::RelayStats b = relay.stats();
+        stolen_at = a.bytes_in;
+        in_one_hold = a.held_now && b.held_now && a.bytes_in == b.bytes_in;
+        stolen = k;
+    });
+    std::thread writer([&] {
+        // The game writes nothing more until the relay has read past the hold (as a game waiting
+        // on its credit for frame 0 does until the hold ends), so the wake's look sees the theft
+        // alone; a game that wrote more than 4096 bytes in the hold would hide it ("Loss").
+        wait_for([&] { return stolen.load() != -1; }, 5000);
+        wait_for([&] { return relay.stats().bytes_in > stolen_at.load(); }, 5000);
+        bool ok = true;
+        for (int f = 2; f < kFrames && ok; f++) ok = sa2l::write_all(fd, sm.frames[f].data(), sm.frames[f].size());
+        close(fd);
+    });
+    const std::vector<uint8_t> got = play_all(e.video_r, 3);
+    taker.join();
+    writer.join();
+    alive = false;
+    relay_thread.join();
+    close(thief);
+    const sa2l::RelayStats st = relay.stats();
+    const std::vector<uint8_t> left = stolen.load() == 4096 ? without(sm.all, size_t(stolen_at.load()), 4096) : sm.all;
+    const uint64_t seen = st.unread_falls + st.short_reads + st.empty_after_ready;
+    if (stolen.load() != 4096 || !in_one_hold.load() || second_wakes.load() != 0 || seen == 0 || got != left ||
+        st.framing_problem.empty()) {
+        std::printf("RELAY_HOLD_THIEF_FAIL the thief took %ld bytes at %llu, inside one hold %d; %d holds lasted past "
+                    "one wait; the FIFO fell %llu times (largest %llu, %llu short reads), %llu reads empty after poll; "
+                    "%zu of the %zu bytes left handed on (in order %d); problem '%s'; 4096 bytes in one hold, no hold "
+                    "past one wait and the theft counted expected\n", stolen.load(),
+                    (unsigned long long)stolen_at.load(), in_one_hold.load(), second_wakes.load(),
+                    (unsigned long long)st.unread_falls, (unsigned long long)st.unread_fall_max,
+                    (unsigned long long)st.short_reads, (unsigned long long)st.empty_after_ready, got.size(),
+                    left.size(), int(got == left), st.framing_problem.c_str());
+        return 1;
+    }
+    std::printf("RELAY_HOLD_THIEF_OK the thief took 4096 bytes at %llu inside a hold that ended within one wait (%llu "
+                "holds, none past one wait); the FIFO fell %llu times (largest %llu bytes), %llu short reads; every "
+                "byte left handed on in order; %s\n", (unsigned long long)stolen_at.load(), (unsigned long long)st.holds,
+                (unsigned long long)st.unread_falls, (unsigned long long)st.unread_fall_max,
+                (unsigned long long)st.short_reads, st.framing_problem.c_str());
+    return 0;
+}
+
+// A thief between the look and the read (the comment at the top). Returns 0 when it holds.
+int short_read_case(const std::string& dir) {
+    std::string why;
+    Ends e;
+    if (!e.make(dir, "shortread", &why)) { std::printf("RELAY_SHORT_READ_FAIL %s\n", why.c_str()); return 1; }
+    constexpr int kFrames = 5;
+    const Stream sm = make_frames(kFrames, 100u << 10);
+    const int thief = open(e.fifo.c_str(), O_RDONLY | O_NONBLOCK);
+    if (thief < 0) { std::printf("RELAY_SHORT_READ_FAIL a second reader could not open the FIFO\n"); return 1; }
+    std::vector<uint8_t> two = sm.frames[1];
+    two.insert(two.end(), sm.frames[2].begin(), sm.frames[2].end());
+    std::atomic<bool> alive{true};
+    std::atomic<long> stolen{-1};
+    std::atomic<uint64_t> stolen_at{0};
+    sa2l::Relay relay(e.relay_in, e.video_w, 1, 64u << 20, e.pace_w);
+    e.video_w = e.pace_w = sa2l::kNoFd;
+    relay.on_read_look = [&](long unread) {
+        // Frames 1 and 2 whole in the FIFO, which is all it holds, and the game writing nothing.
+        if (stolen.load() != -1 || unread != long(two.size())) return;
+        stolen_at = relay.stats().bytes_in;
+        uint8_t loot[4096];
+        stolen = long(read(thief, loot, sizeof loot));
+    };
+    std::thread relay_thread([&] { relay.run(alive); });
+    std::thread writer([&] {
+        const int fd = open(e.fifo.c_str(), O_WRONLY);
+        if (fd < 0) return;
+        bool ok = sa2l::write_all(fd, sm.head.data(), sm.head.size()) &&
+                  sa2l::write_all(fd, sm.frames[0].data(), sm.frames[0].size());
+        // Frame 0 read whole, so the FIFO is empty; then frames 1 and 2 in one write.
+        ok = ok && wait_for([&] { return relay.stats().frames_in >= 1; }, 5000);
+        ok = ok && sa2l::write_all(fd, two.data(), two.size());
+        wait_for([&] { return stolen.load() != -1; }, 5000);
+        for (int f = 3; f < kFrames && ok; f++) ok = sa2l::write_all(fd, sm.frames[f].data(), sm.frames[f].size());
+        close(fd);
+    });
+    const std::vector<uint8_t> got = play_all(e.video_r, 0);
+    writer.join();
+    alive = false;
+    relay_thread.join();
+    close(thief);
+    const sa2l::RelayStats st = relay.stats();
+    const size_t before = sm.head.size() + sm.frames[0].size();
+    const std::vector<uint8_t> left = without(sm.all, before, 4096);
+    if (stolen.load() != 4096 || stolen_at.load() != before || st.short_reads != 1 || st.unread_fall_max != 4096 ||
+        got != left || st.framing_problem.empty()) {
+        std::printf("RELAY_SHORT_READ_FAIL the thief took %ld bytes at %llu (%zu expected); %llu short reads, the FIFO "
+                    "fell %llu times (largest %llu); %zu of the %zu bytes left handed on (in order %d); problem '%s'; "
+                    "1 short read of 4096 expected\n", stolen.load(), (unsigned long long)stolen_at.load(), before,
+                    (unsigned long long)st.short_reads, (unsigned long long)st.unread_falls,
+                    (unsigned long long)st.unread_fall_max, got.size(), left.size(), int(got == left),
+                    st.framing_problem.c_str());
+        return 1;
+    }
+    std::printf("RELAY_SHORT_READ_OK the thief took 4096 bytes between the relay's look and its read; %llu short read, "
+                "the FIFO fell %llu times (largest %llu bytes); every byte left handed on in order; %s\n",
+                (unsigned long long)st.short_reads, (unsigned long long)st.unread_falls,
+                (unsigned long long)st.unread_fall_max, st.framing_problem.c_str());
+    return 0;
+}
+
+// A healthy stream past 2^31 and 2^32 (the comment at the top). Returns 0 when it holds.
+int big_case(const std::string& dir) {
+    std::string why;
+    Ends e;
+    if (!e.make(dir, "big", &why)) { std::printf("RELAY_BIG_FAIL %s\n", why.c_str()); return 1; }
+    constexpr uint32_t kRecord = 1u << 20, kPerFrame = 32;
+    constexpr int kFrames = 132;                      // 132 frames of 32 MB: 4.43 GB
+    std::vector<uint8_t> head = {'S', 'A', '2', 'D', '3', 'D', '9', 'S'};
+    put32(head, 2);
+    put32(head, 32);
+    while (head.size() < 32) head.push_back(' ');
+    std::vector<uint8_t> frame(size_t(kRecord) * kPerFrame + 28);
+    for (size_t i = 0; i < frame.size(); i++) frame[i] = uint8_t(i * 31u + 7u);
+    auto at32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; i++) frame[at + i] = uint8_t(v >> (8 * i)); };
+    std::atomic<bool> alive{true};
+    std::atomic<int> waited{-1};
+    sa2l::Relay relay(e.relay_in, e.video_w, 1, 64u << 20, e.pace_w);
+    e.video_w = e.pace_w = sa2l::kNoFd;
+    std::thread relay_thread([&] { relay.run(alive); });
+    std::thread writer([&] {
+        const int fd = open(e.fifo.c_str(), O_WRONLY);
+        if (fd < 0) return;
+        bool ok = sa2l::write_all(fd, head.data(), head.size());
+        uint32_t seq = 0;
+        for (int f = 0; f < kFrames && ok; f++) {
+            for (uint32_t k = 0; k < kPerFrame; k++) {
+                at32(size_t(k) * kRecord, 1);
+                at32(size_t(k) * kRecord + 4, kRecord);
+                at32(size_t(k) * kRecord + 8, seq++);
+            }
+            at32(size_t(kPerFrame) * kRecord, 3);
+            at32(size_t(kPerFrame) * kRecord + 4, 28);
+            at32(size_t(kPerFrame) * kRecord + 8, seq++);
+            ok = sa2l::write_all(fd, frame.data(), frame.size());
+            const int c = ok ? take_credit_within(e.pace_r, 30000) : 1;
+            if (c == -3 || c == -1) { waited = f; ok = false; }
+        }
+        close(fd);
+    });
+    sa2l::FrameParser seen;
+    std::vector<uint8_t> buf(1u << 20);
+    for (;;) {
+        const long n = sa2l::read_wait(e.video_r, buf.data(), buf.size(), 30000);
+        if (n == -1) continue;
+        if (n <= 0) break;
+        seen.feed(buf.data(), size_t(n));
+    }
+    writer.join();
+    alive = false;
+    relay_thread.join();
+    const sa2l::RelayStats st = relay.stats();
+    const uint64_t total = head.size() + uint64_t(frame.size()) * kFrames;
+    const uint64_t last_end = seen.frame_ends().empty() ? 0 : seen.frame_ends().back();
+    if (waited.load() >= 0 || seen.bytes() != total || st.bytes_in != total || st.bytes_out != total ||
+        !st.framing_problem.empty() || !seen.problem().empty() || st.frames_in != uint64_t(kFrames) ||
+        seen.frame_ends().size() != size_t(kFrames) || last_end <= (uint64_t(1) << 32) || !loss_counters_zero(st) ||
+        !st.unread_seen || !st.ended_by_eof) {
+        std::printf("RELAY_BIG_FAIL %llu of %llu bytes read and handed on (%llu out), the player's parser %llu bytes, "
+                    "%zu frames (the last ends at %llu), the relay's %llu; problems '%s' / '%s'; loss counters %llu "
+                    "%llu %llu %llu (FIONREAD read %d); a credit waited for at frame %d; ended by end of file %d\n",
+                    (unsigned long long)st.bytes_in, (unsigned long long)total, (unsigned long long)st.bytes_out,
+                    (unsigned long long)seen.bytes(), seen.frame_ends().size(), (unsigned long long)last_end,
+                    (unsigned long long)st.frames_in, st.framing_problem.c_str(), seen.problem().c_str(),
+                    (unsigned long long)st.empty_after_ready, (unsigned long long)st.unread_falls,
+                    (unsigned long long)st.unread_fall_max, (unsigned long long)st.short_reads, int(st.unread_seen),
+                    waited.load(), int(st.ended_by_eof));
+        return 1;
+    }
+    const std::vector<std::string> report = sa2l::relay_report(st, dir + "/test_relay_big.no-such.status");
+    std::printf("RELAY_BIG_OK %llu bytes in %d frames, the last ending at %llu; no problem; %llu reads, %llu holds; "
+                "%s\n", (unsigned long long)total, kFrames, (unsigned long long)last_end, (unsigned long long)st.reads,
+                (unsigned long long)st.holds, report[0].c_str());
+    return 0;
+}
+
+// relay_report against a sidecar (sa2_relay.h): one line when the counts agree, a second naming the
+// loss when they do not. Returns 0 when it holds.
+int report_case(const std::string& dir) {
+    const std::string path = dir + "/test_relay_report." + std::to_string(getpid()) + ".status";
+    sa2l::RelayStats st;
+    st.bytes_in = 1000;
+    st.ended_by_eof = true;
+    st.unread_seen = true;
+    auto put = [&](const char* text) { FILE* f = std::fopen(path.c_str(), "w"); std::fputs(text, f); std::fclose(f); };
+    put("closed: 30 records, 1000 bytes, 2 frames\n");
+    const std::vector<std::string> same_n = sa2l::relay_report(st, path);
+    put("closed: 30 records, 5096 bytes, 2 frames\n");
+    const std::vector<std::string> lost = sa2l::relay_report(st, path);
+    unlink(path.c_str());
+    const std::string want = "the game wrote 5096 bytes, the relay read 1000: 4096 lost in the FIFO";
+    if (same_n.size() != 1 || same_n[0].find("the game wrote 1000 bytes") == std::string::npos || lost.size() != 2 ||
+        lost[1] != want) {
+        std::printf("RELAY_REPORT_FAIL '%s' (%zu lines) / '%s'\n", same_n[0].c_str(), same_n.size(),
+                    lost.size() > 1 ? lost[1].c_str() : "(one line)");
+        return 1;
+    }
+    std::printf("RELAY_REPORT_OK %s | %s\n", same_n[0].c_str(), lost[1].c_str());
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -664,10 +1190,14 @@ int main(int argc, char** argv) {
         }
     }
     std::printf("RELAY_PARSER_OK %d cases\n", cases);
+    if (loss_parser_case()) return 1;
 #ifndef _WIN32
     const char* tmp = std::getenv("TMPDIR");
     const std::string dir = argc > 1 ? argv[1] : (tmp && *tmp ? tmp : "/tmp");
     if (pace_case(dir) || no_resize_case(dir) || stall_case(dir) || hold_end_case(dir) || gone_case(dir)) return 1;
+    if (loss_pace_case(dir) || thief_case(dir) || hold_thief_case(dir) || short_read_case(dir) || big_case(dir) ||
+        report_case(dir))
+        return 1;
 #else
     (void)argc;
     (void)argv;

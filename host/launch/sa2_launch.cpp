@@ -1741,6 +1741,14 @@ int launch(int argc, char** argv) {
     game_alive = false;
     relay_thread.join();
     g_said.insert(g_said.end(), relay_notes.begin(), relay_notes.end());
+    // What can name a taker of the game's bytes, beside the game's own count (sa2_relay.h, "Loss"),
+    // once the game has ended and written it. Said as the relay's notes are, not as the launcher's
+    // own last line, which play's error box shows.
+    const sa2l::RelayStats relay_end = relay.stats();
+    for (const std::string& line : sa2l::relay_report(relay_end, game_fifo + ".status")) {
+        std::fprintf(stderr, "sa2recomp: %s\n", line.c_str());
+        said_line(line);
+    }
     // The player reads the stream to its END; cancelled only if it has not finished.
     bool player_cancelled = false;
     if (!wait_or_cancel(player, o.selftest ? kSelftestFeedGrace : kFeedGrace)) {
@@ -1951,6 +1959,18 @@ int launch(int argc, char** argv) {
         r.n("pace_bytes", double(rs.credits));
         r.n("pace_bytes_refused", double(rs.credits_dropped));
         r.n("nudges", double(rs.nudges));
+        r.n("reads", double(rs.reads));
+        r.n("empty_after_ready", double(rs.empty_after_ready));
+        r.n("unread_falls", double(rs.unread_falls));
+        r.n("unread_fall_max", double(rs.unread_fall_max));
+        r.n("short_reads", double(rs.short_reads));
+        r.b("unread_seen", rs.unread_seen);
+        {
+            uint64_t game_bytes = 0;
+            std::string text;
+            if (sa2p::read_file(game_fifo + ".status", text) && sa2l::status_bytes(text, &game_bytes))
+                r.n("game_bytes", double(game_bytes));
+        }
         r.b("ended_by_eof", rs.ended_by_eof);
         r.b("player_gone", rs.player_gone);
         r.s("framing_problem", rs.framing_problem);

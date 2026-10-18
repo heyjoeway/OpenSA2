@@ -1186,11 +1186,24 @@ int play_game(const Args& a) {
     sa2l::close_fd(end_r);
     sa2l::close_fd(keys_fd);
     sa2l::close_fd(relay_in);
-    say("ended: %s; the game stopped by %s (status %d); the player exited %d", ended_by.c_str(), stop_how.c_str(),
-        game.status, rc);
+    // A game killed by a signal (SIGTERM, the stop's own, aside) after its recorder wrote its last line (the
+    // status file's "closed: N records", host/sa2_present_rec.c rec_exit, the last thing its exit does) had
+    // finished everything it writes, so the signal came in the process's teardown: said on the line, for the
+    // crash report. It is still a crash (CrashReport.Outcome.of).
+    std::string closed;
+    if (game.status < 0 && game.status != -15) {
+        std::string st;
+        if (sa2p::read_file(game_fifo + ".status", st, 4096) && st.compare(0, 8, "closed: ") == 0 &&
+            st.find(" records, ") != std::string::npos)
+            closed = "; the game had closed its records";
+    }
+    say("ended: %s; the game stopped by %s (status %d); the player exited %d%s", ended_by.c_str(), stop_how.c_str(),
+        game.status, rc, closed.c_str());
     say("relay: %llu frames in, %llu out, %llu bytes%s", (unsigned long long)rs.frames_in,
         (unsigned long long)rs.frames_out, (unsigned long long)rs.bytes_in,
         rs.framing_problem.empty() ? "" : (", " + rs.framing_problem).c_str());
+    // What can name a taker of the game's bytes, beside the game's own count (sa2_relay.h, "Loss").
+    for (const std::string& line : sa2l::relay_report(rs, game_fifo + ".status")) say("%s", line.c_str());
     if (rs.frames_in == 0)
         say("FAIL the game presented nothing: see %s/game.log", session.c_str());
     else if (rc == 0)

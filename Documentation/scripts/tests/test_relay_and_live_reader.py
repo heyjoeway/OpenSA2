@@ -7,8 +7,12 @@ its pace byte, as the recorder does, and a slow reader: the writer may never ret
 more than two frames ahead of the reader); a writer that takes no pace bytes waiting on its full
 FIFO, whose size must never change meanwhile; the stall watch's one nudge, about a second after a
 writer stops part way through a frame, also after a hold that the writer ends between two of the
-reader's looks; and the pace pipe's end of file once the player goes. host/player/test_stream.cpp is the reader's own test (host/player/stream.cpp), with the
-live reader's reuse of its record's storage and its bodies read in place.
+reader's looks; and the pace pipe's end of file once the player goes. Then loss (sa2_relay.h, "Loss"): a frame's
+records left out, bytes left out inside a record and a record over the writer's limit, each named; the pace pipe
+closed at the first problem, with every byte still handed on; a second reader of the FIFO caught by the relay's
+counters while it holds, in a hold that ends within the relay's first wait, and between its look and its read; a healthy 4.4 GB stream past the offsets 2^31 and 2^32 with no problem and every loss
+counter 0; and the report's loss line. host/player/test_stream.cpp is the reader's own test (host/player/stream.cpp),
+with the live reader's reuse of its record's storage and its bodies read in place.
 
 Each is built with the system compiler into the test's temporary folder and run there; the pass
 is the binary's own verdict line and its exit status.
@@ -51,6 +55,13 @@ def test_the_relay_parses_every_piece_and_paces_the_writer_two_frames_ahead(tmp_
     # with the player.
     for verdict in ("RELAY_NO_RESIZE_OK", "RELAY_STALL_OK", "RELAY_HOLD_END_OK", "RELAY_GONE_OK"):
         assert any(line.startswith(verdict) for line in out.splitlines()), out
+    # Loss is named, the pace pipe closes on it, a second reader is counted, and a healthy stream
+    # past 2^32 bytes reports nothing.
+    for verdict in ("RELAY_LOSS_PARSER_OK", "RELAY_LOSS_PACE_OK", "RELAY_THIEF_OK", "RELAY_HOLD_THIEF_OK",
+                    "RELAY_SHORT_READ_OK", "RELAY_BIG_OK", "RELAY_REPORT_OK"):
+        assert any(line.startswith(verdict) for line in out.splitlines()), out
+    lost = "the record at offset 6088 has seq 12 where seq 8 was due: the game's FIFO lost bytes between the game's write and the relay's read"
+    assert lost in out, out
 
 
 def test_the_live_reader_passes_its_own_checks(tmp_path):

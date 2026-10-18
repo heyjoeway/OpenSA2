@@ -150,6 +150,7 @@ keys = os.open(env["SA2_INPUT_DI_SOURCE"], os.O_RDONLY | os.O_NONBLOCK)
 ticks = open(env["SA2_LAUNCH_TICKS"], "w")
 ticks.write("# sa2 launch observer v1\nT\ttick\tpresents\tgame_mode\tcurrent_menu\n")
 mode, menu, presents, poll, pending, held = 2, 0, 0, 0, b"", False
+seq = 0                     # every record numbered 0, 1, 2, ..., as the recorder numbers them
 title_at = cfg.get("title_at")
 for tick in range(1, 5000):
     if stop:
@@ -183,8 +184,10 @@ for tick in range(1, 5000):
                 held = bool(down)
     presents += 1
     if cfg.get("bad_stream") and presents == 5:
-        os.write(trace, struct.pack("<III", 2, 6, 0) + b"\0" * 4)
-    os.write(trace, struct.pack("<III", 3, 16, presents) + b"\0" * 4)
+        os.write(trace, struct.pack("<III", 2, 6, seq) + b"\0" * 4)
+        seq += 1
+    os.write(trace, struct.pack("<III", 3, 16, seq) + b"\0" * 4)
+    seq += 1
     ticks.write(f"T\t{tick}\t{presents}\t{mode}\t{menu}\n")
     ticks.flush()
     time.sleep(0.004)

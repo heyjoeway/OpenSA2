@@ -116,6 +116,7 @@ final class GameSettings {
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
         new Tweak("no-voices", "Mute character voices", "Silences the characters' spoken lines in stages, Omochao's hints and cutscenes. Music and sound effects still play."),
         new Tweak("pause-unfocused", "Pause when unfocused", "Holds the game and its sound while the app is visible but not in focus, such as under the notification shade."),
+        new Tweak("physics-preset", "Metal Sonic physics", "Sonic and Shadow use Metal Sonic's physics from 2-player mode in every stage and mode, story and boss stages included: a higher jump, much quicker to speed up and slower to brake. Off in replays; nothing is saved."),
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
         new Tweak("radar-all-pieces", "Radar tracks all pieces", "In treasure hunts, every piece still to find shows on the radar how near it is, not only the first. Makes hunts easier."),
         new Tweak("ring-loss-cap", "Lose at most 20 rings", "A hit costs at most 20 rings, the ones that scatter, so you can pick them all back up. Getting back to 100 rings that way gives no second extra life. The higher ring counts, scores and ranks it brings are saved as usual."),

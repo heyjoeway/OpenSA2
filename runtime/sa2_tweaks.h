@@ -193,6 +193,7 @@
     X(SA2_TWEAK_NO_MUSIC, "no-music", "music off", "no background music; jingles, sound effects and voices still play") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
     X(SA2_TWEAK_NO_VOICES, "no-voices", "voices off", "no character voices in stages, from Omochao or in cutscenes") \
+    X(SA2_TWEAK_PHYSICS_PRESET, "physics-preset", "physics preset", "Sonic and Shadow move with Metal Sonic's physics (SA2_PHYSICS_PRESET=<to>=<from>,... picks others)") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
     X(SA2_TWEAK_RADAR_ALL_PIECES, "radar-all-pieces", "radar tracks all pieces", "the treasure-hunt radar shows how near every piece is, not only the first") \
     X(SA2_TWEAK_RING_LOSS_CAP, "ring-loss-cap", "ring loss capped at 20", "a hit costs at most 20 rings, the ones it scatters, not all of them; picking them back up gives no second 100-ring extra life") \

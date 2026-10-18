@@ -216,9 +216,20 @@ def decode_edges(image: bytes, ranges: dict[int, tuple[int, int]],
         kinds = {e["kind"] for e in seen}
         kind = EDGE_JMP if kinds == {EDGE_JMP} else min(k for k in kinds if k != EDGE_JMP)
         pick = next(e for e in seen if e["kind"] == kind)
+        # The runtime row is one per target, but every edge into it takes that row's verdict, so
+        # each distinct (source, kind) is kept for the refused census. Collapsing them to `pick`
+        # hid 0x008294d8's `jne 0082CCC5h` (an MXCSR/x87-mask test) behind 0x008294a7's `je`
+        # into the same target, which the record named. A source is kept once, by the row's own
+        # rule (the strictest non-`jmp` kind it reaches the target by, so a `jcc` to its own
+        # fall-through is one jcc-taken edge), from the first module that records it: an arm
+        # repeats its owner's rows.
+        sources: dict[int, dict] = {}
+        for e in sorted(seen, key=lambda e: (e["kind"] == EDGE_JMP, e["kind"])):
+            sources.setdefault(e["source"], e)
         edges.append({"target": target, "source": pick["source"], "kind": kind,
                       "kind_name": EDGE_NAMES[kind], "insn": pick["insn"],
-                      "module": pick["module"], "reached_by": len(seen)})
+                      "module": pick["module"], "reached_by": len(seen),
+                      "sources": [sources[k] for k in sorted(sources)]})
         if len(kinds) > 1:
             conflicts.append({"target": f"0x{target:08x}",
                               "kinds": sorted(EDGE_NAMES[k] for k in kinds),
@@ -250,6 +261,56 @@ def apply_allow(edges: list[dict], allow: dict[int, str]) -> int:
             e["allow"], e["why"] = 1, why
             n += 1
     return n
+
+
+REVIEWED = C.ROOT / "Documentation" / "dispatch-exceptions.json"
+
+
+def reviewed_allow(path: Path, tag: str) -> dict[int, str]:
+    """The tracked reviewed exceptions for `tag` (an entry with no tag applies to every tag):
+    target -> its recorded reason."""
+    rdoc = json.loads(path.read_text())
+    if rdoc.get("schema") != "sa2-recomp-dispatch-exceptions/v2":
+        raise SystemExit(f"{path} has schema {rdoc.get('schema')!r}, "
+                         "expected 'sa2-recomp-dispatch-exceptions/v2'")
+    out: dict[int, str] = {}
+    for r in rdoc.get("exceptions", []):
+        if r.get("tag") and r["tag"] != tag:
+            continue
+        why = str(r.get("why", "")).strip()
+        if not why:
+            raise SystemExit(f"{path}: {r.get('va')} has no reason, and an exception without a "
+                             "recorded reason is the thing rule 14 forbids")
+        out[int(r["va"], 0)] = why
+    return out
+
+
+def not_in_force(c_path: Path, tag: str, reviewed: Path = REVIEWED) -> list[str]:
+    """Why the edge table at `c_path` must not be linked for `tag`: each reviewed exception
+    `reviewed` tracks that the table does not allow, or a table its JSON does not describe.
+
+    The table is generated and gitignored and the record is tracked, and until this nothing
+    joined them when a game was linked. A tree that adds an exception and links a table
+    generated before it builds, runs, and traps exactly where the exception says it should
+    not: the 2026-09-21 failure the record exists for, the other way round (issue #16's fix
+    is four such entries). A table carrying more exceptions than the tree tracks is not
+    refused here; Documentation/scripts/check_dispatch_exceptions.py names those."""
+    j = c_path.with_suffix(".json")
+    if not j.is_file():
+        return [f"{c_path} has no {j.name} beside it, so which reviewed exceptions it allows "
+                "is not known; regenerate both with tools/s4/mb_edges.py"]
+    doc = json.loads(j.read_text())
+    if doc.get("output_c_sha256") != C.sha256(c_path):
+        return [f"{j} describes another {c_path.name} (its output_c_sha256 is not this "
+                "file's); regenerate both with tools/s4/mb_edges.py"]
+    allowed = {f"0x{int(a, 0):08x}" for a in doc.get("named_exception_targets") or []}
+    want = [f"0x{va:08x}" for va in reviewed_allow(reviewed, tag)]
+    cmd = (f".venv/bin/python tools/s4/mb_edges.py --tag {tag} --lift-tag {doc.get('lift_tag')}"
+           + (f" --arms-tag {doc['arms_tag']}" if doc.get("arms_tag") else "")
+           + (f" --allow-from {doc['allow_from']}" if doc.get("allow_from") else ""))
+    return [f"{va} is a reviewed dispatch exception in {reviewed.name} that {c_path} does "
+            f"not allow: the table predates it. Regenerate it: {cmd}"
+            for va in want if va not in allowed]
 
 
 def emit(edges: list[dict], path: Path, tag: str) -> None:
@@ -286,8 +347,7 @@ def main() -> None:
     ap.add_argument("--allow-from", type=Path, default=None,
                     help="tools/s4/lift_extra.py's state JSON: every block it registered "
                          "becomes a named dispatch exception with its recorded reason")
-    ap.add_argument("--reviewed", type=Path,
-                    default=C.ROOT / "Documentation" / "dispatch-exceptions.json",
+    ap.add_argument("--reviewed", type=Path, default=REVIEWED,
                     help="the tracked reviewed-exception record; pass an empty path to "
                          "skip it, which is how the falsification in "
                          "Documentation/scripts/check_dispatch_exceptions.py works")
@@ -369,20 +429,9 @@ def main() -> None:
     # that lives only in the output is a reason one regeneration away from
     # being gone.
     if args.reviewed and args.reviewed.is_file():
-        rdoc = json.loads(args.reviewed.read_text())
-        if rdoc.get("schema") != "sa2-recomp-dispatch-exceptions/v2":
-            raise SystemExit(f"{args.reviewed} has schema {rdoc.get('schema')!r}, "
-                             "expected 'sa2-recomp-dispatch-exceptions/v2'")
-        for r in rdoc.get("exceptions", []):
-            if r.get("tag") and r["tag"] != args.tag:
-                continue
-            why = str(r.get("why", "")).strip()
-            if not why:
-                raise SystemExit(f"{args.reviewed}: {r.get('va')} has no reason, and an "
-                                 "exception without a recorded reason is the thing rule 14 "
-                                 "forbids")
-            allow[int(r["va"], 0)] = why
-            reviewed[f"0x{int(r['va'], 0):08x}"] = why
+        for va, why in reviewed_allow(args.reviewed, args.tag).items():
+            allow[va] = why
+            reviewed[f"0x{va:08x}"] = why
     elif args.reviewed:
         raise SystemExit(f"{args.reviewed} does not exist. It is a tracked record, not an "
                          "optional one: without it every reviewed dispatch exception is "
@@ -403,6 +452,16 @@ def main() -> None:
     by_kind = {}
     for e in edges:
         by_kind[e["kind_name"]] = by_kind.get(e["kind_name"], 0) + 1
+    # Every edge that traps if taken, one row per (target, source), so the record of why each
+    # one is left that way (Documentation/dispatch-exceptions.json `refused`) can be held to the
+    # table edge by edge. Issue #16 was one of these: a `jne` from FUN_007059a0 into
+    # FUN_007059af, its own body, that no record named and that stopped the game at Pyramid
+    # Cave's title card. A target refused by kind refuses every edge into it, a `jmp` included,
+    # because the runtime looks the row up by target.
+    refused = [{"target": f"0x{e['target']:08x}", "source": f"0x{s['source']:08x}",
+                "kind": s["kind_name"], "insn": s["insn"], "module": s["module"]}
+               for e in edges if e["kind"] != EDGE_JMP and not e.get("allow")
+               for s in e["sources"]]
     doc = {"schema": "sa2-recomp-measurement/v1", "id": "s4-mb-edges",
            "question": "which guest addresses can a lifted module reach with no block, "
                        "and by what kind of edge?",
@@ -414,6 +473,7 @@ def main() -> None:
            "allow_from": str(args.allow_from) if args.allow_from else None,
            "named_exceptions": allowed, "reviewed_exceptions": reviewed,
            "named_exception_targets": [f"0x{e['target']:08x}" for e in edges if e.get("allow")],
+           "refused": refused,
            "exe_sha256": C.sha256(C.EXE),
            "output_c": str(c_path), "output_c_sha256": C.sha256(c_path),
            "wall_seconds": round(time.time() - t0, 2)}
@@ -421,7 +481,8 @@ def main() -> None:
     j_path.write_text(json.dumps(doc, indent=1) + "\n")
     print(f"{len(ranges) - extra_ranges} modules and {extra_ranges} extras -> {len(edges)} edges "
           f"({by_kind.get('jmp', 0)} dispatchable as tail calls), "
-          f"{allowed} named exceptions, "
+          f"{allowed} named exceptions, {len(refused)} refused edges into "
+          f"{len({r['target'] for r in refused})} targets, "
           f"{len(conflicts)} targets reached by more than one kind, "
           f"{doc['wall_seconds']}s")
     print(f"-> {c_path}\n-> {j_path}")

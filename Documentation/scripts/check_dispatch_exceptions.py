@@ -15,7 +15,7 @@ reason was eventually recovered out of a surviving object file's
 `.rodata.str1.1`, which is not a place a record should have to be recovered
 from.
 
-Three things are checked:
+Four things are checked:
 
 1. every entry in `Documentation/dispatch-exceptions.json` has an address, a
    reason and a falsifier, and the reason is not a placeholder;
@@ -23,7 +23,15 @@ Three things are checked:
    entries as its reviewed exceptions -- an entry in the file and not in the
    table means the table is stale, and one in the table and not in the file
    means somebody passed an argument that will not survive;
-3. the falsifications below fail the gate.
+3. every edge the generated table refuses (an edge into a target whose row is
+   a non-`jmp` with no exception, which traps if taken) is named in the file's
+   `refused` groups, by target and source, with the same kind, under a reason
+   -- and every named edge is still one the table refuses. Issue #16 was such
+   an edge that nobody had named: a `jne` from FUN_007059a0 into FUN_007059af,
+   its own body, which stopped the game at Pyramid Cave's title card. The
+   check was per target until its review found 0x008294d8 `jne 0082CCC5h`
+   hidden behind 0x008294a7's named `je` into the same target;
+4. the falsifications below fail the gate.
 
 Usage: .venv/bin/python Documentation/scripts/check_dispatch_exceptions.py
 """
@@ -156,6 +164,41 @@ def problems(decl_path: Path | None = None, gen_dir: Path | None = None) -> list
             out.append(f"{norm}: the reason is {len(why)} characters, which is a "
                        "label rather than a reason")
 
+    # The refused groups: a reason each, and every edge named once, in no exception. An edge is
+    # (target, source): the runtime looks rows up by target, so every edge into a refused target
+    # traps, and a reason for one of them is not a reason for another.
+    refused: dict[str, dict[tuple[str, str], str]] = {}
+    for g in doc.get("refused", []):
+        name = str(g.get("group", "")).strip() or "?"
+        tag = g.get("tag", "")
+        why = str(g.get("why", "")).strip()
+        if not str(g.get("group", "")).strip():
+            out.append("a refused group has no name")
+        if len(why) < MIN_WHY:
+            out.append(f"refused group {name!r}: the reason is {len(why)} characters, which "
+                       "is a label rather than a reason")
+        for phrase in NON_REASONS:
+            if phrase in why.lower():
+                out.append(f"refused group {name!r}: {phrase!r} is not a reason for leaving "
+                           "an edge trapping")
+                break
+        if not g.get("rows"):
+            out.append(f"refused group {name!r} names no rows")
+        for r in g.get("rows", []):
+            try:
+                norm = f"0x{int(str(r.get('va')), 0):08x}"
+                src = f"0x{int(str(r.get('source')), 0):08x}"
+            except ValueError:
+                out.append(f"refused group {name!r}: {r!r} has no address or source")
+                continue
+            if not str(r.get("kind", "")).strip():
+                out.append(f"refused group {name!r}: {norm} has no kind")
+            if (norm, src) in refused.setdefault(tag, {}):
+                out.append(f"{norm} from {src} is refused twice for tag {tag!r}")
+            refused[tag][(norm, src)] = str(r.get("kind", ""))
+            if norm in by_tag.get(tag, set()):
+                out.append(f"{norm} is both a reviewed exception and refused for tag {tag!r}")
+
     # The decoded facts must match the executable, byte for byte.
     for e in doc.get("exceptions", []):
         va = str(e.get("va", "?"))
@@ -185,7 +228,7 @@ def problems(decl_path: Path | None = None, gen_dir: Path | None = None) -> list
     # nothing was compared and a table full of untracked exceptions passed.
     # A check that only looks where the record points cannot see what the
     # record has stopped pointing at.
-    tags = set(by_tag) | {p.name[len("mb_edges."):-len(".json")]
+    tags = set(by_tag) | set(refused) | {p.name[len("mb_edges."):-len(".json")]
                           for p in gen_root.glob("mb_edges.*.json")}
     for tag in sorted(t for t in tags if t):
         addrs = by_tag.get(tag, set())
@@ -211,6 +254,28 @@ def problems(decl_path: Path | None = None, gen_dir: Path | None = None) -> list
                        f"tag {tag} and is not tracked in {DECL.name}; it came from a "
                        "--allow-target argument and will not survive the next "
                        "regeneration")
+        # Every edge that traps if taken is named, by target and source, with its kind.
+        if "refused" not in gdoc:
+            out.append(f"the generated table for tag {tag} lists no `refused` rows: it was "
+                       "written by an mb_edges.py older than the record's refused groups; "
+                       "regenerate it")
+            continue
+        named = refused.get(tag, {})
+        traps = {(f"0x{int(r['target'], 0):08x}", f"0x{int(r['source'], 0):08x}"): r["kind"]
+                 for r in gdoc["refused"]}
+        for va, src in sorted(e for e in set(traps) - set(named) if e[0] not in addrs):
+            out.append(f"{va} traps if reached ({traps[va, src]} from {src}) and {path.name} "
+                       f"names it in no exception and no refused group for tag {tag}: decide "
+                       "which, and record the reason")
+        for va, src in sorted(set(named) - set(traps)):
+            out.append(f"{va} from {src} is refused for tag {tag} in {path.name} but the "
+                       "generated table does not refuse that edge (it dispatches now, or no "
+                       "longer reaches it from there): drop it from `refused`")
+        for va, src in sorted(set(named) & set(traps)):
+            if named[va, src] != traps[va, src]:
+                out.append(f"{va} from {src} is refused as {named[va, src]}, and the generated "
+                           f"table reaches it from there by {traps[va, src]}: the edge changed, "
+                           "so its reason needs a fresh look")
     return out
 
 
@@ -265,6 +330,27 @@ def falsifications() -> list[str]:
                lambda d: d["exceptions"][0]["decoded"].__setitem__(
                    "first_padding_va", "0x00826f5f")),
     ]
+    if doc.get("refused"):
+        cases += [
+            # Issue #16's shape: a row the table refuses that no record names.
+            mutate("a refused row dropped from the record",
+                   lambda d: d["refused"][0]["rows"].pop(0)),
+            # The edge the per-target census hid: a second source into a target another row
+            # names. If dropping it passes, the gate is per target again.
+            mutate("a second source into a refused target dropped from the record",
+                   lambda d: [g["rows"].remove(r) for g in d["refused"] for r in list(g["rows"])
+                              if (r["va"], r["source"]) == ("0x0082ccc5", "0x008294d8")]),
+            mutate("a refused edge named twice",
+                   lambda d: d["refused"][0]["rows"].append(dict(d["refused"][0]["rows"][0]))),
+            mutate("a refused group's reason emptied",
+                   lambda d: d["refused"][0].__setitem__("why", "")),
+            mutate("a refused row's edge kind changed",
+                   lambda d: d["refused"][0]["rows"][0].__setitem__("kind", "call-return")),
+            mutate("an address both allowed and refused",
+                   lambda d: d["refused"][0]["rows"].append(
+                       {"va": d["exceptions"][0]["va"], "source": "0x00401000",
+                        "kind": "jcc-taken"})),
+        ]
     global RAN
     RAN = len(cases)
 
@@ -290,6 +376,26 @@ def falsifications() -> list[str]:
             RAN += 1
             if not problems(None, gd):
                 survived.append("a tracked exception whose generated row is no longer allowed")
+            # And a row the table refuses that the record has never heard of.
+            for g in gens:
+                doc_g = json.loads(g.read_text())
+                doc_g["refused"] = list(doc_g.get("refused") or []) + [
+                    {"target": "0x00401001", "source": "0x00401000", "kind": "jcc-taken"}]
+                (gd / g.name).write_text(json.dumps(doc_g))
+            RAN += 1
+            if not problems(None, gd):
+                survived.append("a trapping row in the generated table that no record names")
+            # And a second source into a target the record already names from another.
+            for g in gens:
+                doc_g = json.loads(g.read_text())
+                rows = list(doc_g.get("refused") or [])
+                if rows:
+                    rows.append(dict(rows[0], source="0x00401000"))
+                doc_g["refused"] = rows
+                (gd / g.name).write_text(json.dumps(doc_g))
+            RAN += 1
+            if not problems(None, gd):
+                survived.append("a second trapping source into a named target")
     return [f"falsification survived: {s} -- the gate accepted a record it "
             "should have rejected" for s in survived]
 
@@ -314,8 +420,10 @@ def main() -> int:
         allowed |= {f"0x{int(a, 0):08x}" for a in
                     (json.loads(g.read_text()).get("named_exception_targets") or [])}
     live = sum(1 for e in doc["exceptions"] if f"0x{int(e['va'], 0):08x}" in allowed)
+    refused = sum(len(g.get("rows", [])) for g in doc.get("refused", []))
     print(f"DISPATCH_EXCEPTIONS_OK tracked={n} in_force={live} retired="
-          f"{len(doc.get('retired', []))} untracked=0 falsifications={RAN}")
+          f"{len(doc.get('retired', []))} untracked=0 refused_named={refused} "
+          f"refused_unnamed=0 falsifications={RAN}")
     return 0
 
 

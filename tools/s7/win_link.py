@@ -216,6 +216,10 @@ def sources(src_root: Path, tag: str, main: str, hooks: list[str],
                       f"pass --src a copy of the tree with the Windows runtime patch applied")
     if missing:
         raise Refused(f"win_link: sources not on disk: {missing}")
+    import mb_edges  # noqa: PLC0415  tools/s4/mb_edges.py: a stale table would ship without an exception
+    stale = mb_edges.not_in_force(extra[0], tag)
+    if stale:
+        raise Refused("win_link: the edge table is stale:\n  " + "\n  ".join(stale))
     return out
 
 

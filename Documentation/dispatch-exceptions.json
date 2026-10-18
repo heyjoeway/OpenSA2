@@ -20,7 +20,18 @@
   "mb_edges' own comment on the same generated row said so while the reason",
   "beside it did not. check_dispatch_exceptions.py now re-decodes both addresses",
   "out of the shipped executable and fails on any field that disagrees, so a",
-  "described byte cannot contradict the byte."
+  "described byte cannot contradict the byte.",
+  "",
+  "**`refused` names every edge left trapping, and why.** Issue #16 (2026-10-18) was",
+  "a `jne` from FUN_007059a0 into FUN_007059af, its own body, which the map had split off: the",
+  "table refused it, no record said so, and Pyramid Cave stopped at its title card on every load.",
+  "An exception says an edge may dispatch; a `refused` group says why each of its rows may not",
+  "yet. check_dispatch_exceptions.py holds the generated table's refused rows (mb_edges.py's",
+  "`refused`) to these groups edge by edge, so a relift that adds or moves a trapping edge fails",
+  "by address until someone decides which list it belongs in. An edge is a target and a",
+  "source: the runtime looks rows up by target, so every edge into a refused target traps,",
+  "and a reason for one source is not a reason for another (the review of #16's fix found",
+  "0x008294d8's `jne` into 0x0082ccc5 behind 0x008294a7's named `je`)."
  ],
  "exceptions": [
   {
@@ -117,6 +128,82 @@
     "first_padding_va": "0x00829009",
     "first_padding_byte": "0x9b"
    }
+  },
+  {
+   "va": "0x007059af",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-18",
+   "why": "0x007059af is FUN_007059af, the body of FUN_007059a0 (a search of the 32-slot object table at [0x01AF00CC] by id, which Pyramid Cave's DOOR actions call), which the function map split off after the head's early-out. The head is `push ecx; mov ecx,[1AF00CCh]; xor eax,eax; test ecx,ecx; jne 007059AFh; pop ecx; ret`, and the body uses all of the head's state: the ECX it loaded (`lea ebx,[ecx+8]`), the EAX it zeroed (`test eax,eax`), and the dword its `push ecx` left, which the body rewrites as its loop counter (`mov dword [esp+0Ch],8`) and pops before its ret, one pop more than the body pushes. So the `jne` at 0x007059ab is a branch inside one routine, not a tail call, and it leaves lifted code only because FUN_007059a0's module ends where the body starts (the next map entry, so --to-next-entry cannot widen it). The body is a function-table entry lifted as a whole module from exactly that address ([0x007059af, 0x00705af0), no missing block, no x87), and remill calls __remill_missing_block in tail position, so dispatching it continues from the same State at the branch target, which is what the processor does when the branch is taken.",
+   "evidence": "Disassembly of the shipped executable (tools/s4/disas.py 0x007059a0 --until 0x00705af0): the body pushes ebx, ebp, esi and edi and ends `pop edi; pop esi; pop ebp; pop ebx; pop ecx; ret` at 0x00705ae7..0x00705aec. The lift log (private/generated/s3/whole_image/lift/next.jsonl) has FUN_007059a0 over [0x007059a0, 0x007059af) and FUN_007059af over [0x007059af, 0x00705af0) with 0 missing-block calls; the function table has {0x007059afu, sub_7059af}; ir_007059AF.o is in the x86-64, f80-double and aarch64 object sets, and the head's folded IR ends `tail call @__remill_missing_block(...); ret`, a jmp in its x86-64 object and a b in its aarch64 one. Nothing else reaches 0x007059af: no rel32 call or jmp, no dword in any section, no direct_calls or data_refs. The head's callers (0x007054b2, 0x007054ea, 0x007055c3, 0x007056a1) are the four DOOR actions in the table at 0x00AACB88, dispatched at 0x00704d96; Pyramid Cave's object list at 0x00AB6080 loads DOOR and SANDGLASS, and SANDGLASS's init calls 0x00708710 (at 0x006fea25), which allocates the table and stores it at 0x01AF00CC (0x00708820 frees it and clears the pointer), so on every load of the stage the pointer is set and the branch is taken. The report that found it: issue #16, Android alpha.3.1, the Pyramid Cave title card and then exit 1, `control left the lifted code at 0x007059af`. Reproduced on the Linux release with SA2_TWEAKS=practice-stage SA2_PRACTICE=28,0: exit 1 two seconds after the title card, `no lifted block at 0x007059af (region .text); reached by jcc-taken at 0x007059ab; policy reached`, the guest stack holding 0x007054b7 and 0x00704da0 (DOOR's action and its dispatch). With SA2_MISSING_BLOCK_DISPATCH=1 the same release dispatched 0x007059af 11,774 times and played to the poll budget. (`decoded.source_*` below is the instruction linearly before the target, the head's early-out `ret`; the edge is the `jne` at 0x007059ab.) With this entry (generated table sha256 8e48a3d8...), the Linux release built from this tree plays the same practice run to its 5,000-poll budget: 0x007059af dispatched 34,174 times standing and 38,281 times running forward, no trap, the stage clock at 1:16 on the last snapshot, while the same build linked with the previous table stops after the title card. On the Android emulator the alpha.4 app's own library stops at the title card with issue #16's message; with the library relinked the same way it played 137 s at 58 fps, 54,684 dispatches and no trap. tools/s8/split_routine_probe.py: 203 calls of FUN_007059a0 with tables in guest memory agree with the routine's model, registers kept and the head's dword popped; linked with the previous table all 203 stop at 0x007059af.",
+   "falsifier": "Remove this entry and regenerate the edge table: the row for 0x007059af returns to allow=0, the Pyramid Cave practice run (SA2_TWEAKS=practice-stage SA2_PRACTICE=28,0) stops after the title card with the note above, and tools/s8/split_routine_probe.py's calls of FUN_007059a0 with a table set stop at 0x007059af. For the reasoning: if FUN_007059af were a function of its own, its stack would balance by itself; it pops the head's ecx, one dword more than it pushes.",
+   "decoded": {
+    "target_mnemonic": "push ebx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "53",
+    "source_va": "0x007059ae",
+    "source_byte": "0xc3",
+    "source_mnemonic": "ret",
+    "source_flow_control": "RETURN",
+    "first_padding_va": "0x007059b0",
+    "first_padding_byte": "0x55"
+   }
+  },
+  {
+   "va": "0x006b165f",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-18",
+   "why": "0x006b165f is FUN_006b165f, the body of FUN_006b1650 (Death Chamber's copy of the same search, on the table at [0x01AEFD34]; its bytes equal 0x007059a0..0x00705aed but for the table's address), which the function map split off after the head's early-out. The head is `push ecx; mov ecx,[1AEFD34h]; xor eax,eax; test ecx,ecx; jne 006B165Fh; pop ecx; ret`, and the body uses all of the head's state: the ECX it loaded (`lea ebx,[ecx+8]`), the EAX it zeroed (`test eax,eax`), and the dword its `push ecx` left, which the body rewrites as its loop counter (`mov dword [esp+0Ch],8`) and pops before its ret, one pop more than the body pushes. So the `jne` at 0x006b165b is a branch inside one routine, not a tail call, and it leaves lifted code only because FUN_006b1650's module ends where the body starts (the next map entry, so --to-next-entry cannot widen it). The body is a function-table entry lifted as a whole module from exactly that address ([0x006b165f, 0x006b17a0), no missing block, no x87), and remill calls __remill_missing_block in tail position, so dispatching it continues from the same State at the branch target, which is what the processor does when the branch is taken.",
+   "evidence": "Disassembly of the shipped executable (tools/s4/disas.py 0x006b1650): byte for byte the 0x007059af entry's routine except the three bytes of the table address. The lift log has FUN_006b1650 over [0x006b1650, 0x006b165f) and FUN_006b165f over [0x006b165f, 0x006b17a0) with 0 missing-block calls; the function table has {0x006b165fu, sub_6b165f}; ir_006B165F.o is in all three object sets. The head's callers are 0x006ac851 (FUN_006ac830), 0x006b1182, 0x006b11b3 and 0x006b1283 (FUN_006b1170 and the code after it) and 0x006b134f (FUN_006b1330); FUN_006ad1e0, FUN_006ad2f0 and FUN_006ad360 are the table's other users. Reproduced on the Linux release with SA2_TWEAKS=practice-stage SA2_PRACTICE=25,4 (Death Chamber, Knuckles): exit 1 two seconds after the title card, `no lifted block at 0x006b165f ... reached by jcc-taken at 0x006b165b; policy reached`. With SA2_MISSING_BLOCK_DISPATCH=1 it dispatched 0x006b165f 10,092 times and played to the poll budget. Death Chamber is the Hero story stage after Pyramid Cave, so the player of issue #16 would have stopped here next. (`decoded.source_*` is the head's `ret`; the edge is the `jne` at 0x006b165b.) With this entry, the Linux release plays the Death Chamber practice run to its 5,000-poll budget: 0x006b165f dispatched 29,292 times standing and 33,594 times running forward, no trap, the stage clock at 1:15; with the previous table the same build stops after the title card. On the Android emulator with the relinked library: 67 s of play, 12,132 dispatches, no trap. tools/s8/split_routine_probe.py: 203 calls of FUN_006b1650 agree with the model; with the previous table all 203 stop at 0x006b165f.",
+   "falsifier": "Remove this entry and regenerate the edge table: the row for 0x006b165f returns to allow=0, the Death Chamber practice run (SA2_PRACTICE=25,4) stops after the title card, and tools/s8/split_routine_probe.py's calls of FUN_006b1650 with a table set stop at 0x006b165f. For the reasoning: FUN_006b165f pops the head's ecx, one dword more than it pushes.",
+   "decoded": {
+    "target_mnemonic": "push ebx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "53",
+    "source_va": "0x006b165e",
+    "source_byte": "0xc3",
+    "source_mnemonic": "ret",
+    "source_flow_control": "RETURN",
+    "first_padding_va": "0x006b1660",
+    "first_padding_byte": "0x55"
+   }
+  },
+  {
+   "va": "0x00674257",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-18",
+   "why": "0x00674257 is FUN_00674257, the body of FUN_00674230 (Menu_Tutorial's page advance), which the function map split at the head's `jl`. The head is `mov edx,[1A4A934h]; push edi; mov edi,[0C77F40h]; mov eax,[edi+48h]; inc edx; cmp edx,[eax*8+0C7660Ch]; mov [1A4A934h],edx; jl 00674257h; mov eax,1; pop edi; ret`: past the last page it returns 1, otherwise it branches to the body, which uses the EDX and EDI the head loaded (`mov esi,[edi+34h]`, `lea ecx,[edx+edx*2]`) and ends `pop esi; pop ebp; pop ebx; ...; pop edi; ret`, popping the head's edi, one dword more than it pushes. So the `jl` at 0x0067424e is a branch inside one routine, and it leaves lifted code only because the head's module ends where the body starts. The body is a function-table entry lifted as a whole module from exactly that address ([0x00674257, 0x00674470)), and remill calls __remill_missing_block in tail position, so dispatching it continues from the same State at the branch target, which is what the processor does when the branch is taken.",
+   "evidence": "Disassembly of the shipped executable (tools/s4/disas.py 0x00674230 --until 0x00674463). The lift log has FUN_00674230 over [0x00674230, 0x00674257) and FUN_00674257 over [0x00674257, 0x00674470); the edge table has no row leaving the body's module; the function table has {0x00674257u, sub_674257}; ir_00674257.o is in all three object sets. The head's one caller is 0x0067415f in Menu_Tutorial (0x00673e70), after `test al,0Ch`, a button that turns the page; the `jl` is taken whenever another page remains. This is the same shape as 0x007059af and 0x006b165f (a head that loads state, branches into the next map entry and leaves a register pushed for the body to pop), found by the 2026-10-18 census of every refused edge. (`decoded.source_*` is the head's `ret`; the edge is the `jl` at 0x0067424e.) No run has reached Menu_Tutorial: the manual under HELP & OPTIONS, HOW TO PLAY, is another screen, and turning four of its pages on the pre-fix build never reached FUN_00674230. The routine's body creates a message task, so the probe that drives the two searches cannot run it without the game's task system.",
+   "falsifier": "Remove this entry and regenerate the edge table: the row for 0x00674257 returns to allow=0, and turning to a tutorial's second page stops the game with `no lifted block at 0x00674257 ... reached by jcc-taken at 0x0067424e`. For the reasoning: FUN_00674257 pops the head's edi, one dword more than it pushes.",
+   "decoded": {
+    "target_mnemonic": "push ebx",
+    "target_flow_control": "NEXT",
+    "target_bytes": "53",
+    "source_va": "0x00674256",
+    "source_byte": "0xc3",
+    "source_mnemonic": "ret",
+    "source_flow_control": "RETURN",
+    "first_padding_va": "0x00674258",
+    "first_padding_byte": "0x55"
+   }
+  },
+  {
+   "va": "0x0082c189",
+   "tag": "next+allarms",
+   "reviewed": "2026-10-18",
+   "why": "0x0082c189 is FUN_0082c189, the last three instructions of the C runtime's x87 domain-error handler FUN_0082c176 (`fstp st0; fstp st0; fld tword [922EE0h]; cmp byte [ebp-90h],0; jg 0082C190h`, then `mov byte [ebp-90h],1; or cl,cl; ret` at 0x0082c189), which the function map made its own 10-byte function. The handler's module ends at 0x0082c189, so the `jg`'s fall-through leaves lifted code, while its taken side (0x0082c190) is a lifted extra that already dispatches by its generated exception: the same branch dispatched one way and trapped the other. __trandisp2 clears byte [ebp-90h] and jumps to the handler through a function's class table, so every arrival through a table falls through. The handler loads the x87 indefinite (0x00922EE0, a negative quiet NaN) and marks the domain error, which is what the CRT returns for atan2 of two infinities and fmod's domain cases. The target is a function-table entry lifted as a whole module from exactly that address, its three instructions read no x87 status, and remill calls __remill_missing_block in tail position, so dispatching it executes on from the same State, which is what the processor does after the `jg` is not taken.",
+   "evidence": "Disassembly of the shipped executable (tools/s4/disas.py 0x0082c176). The lift log has FUN_0082c176 over [0x0082c176, 0x0082c189) and FUN_0082c189 over [0x0082c189, 0x0082c193) with 0 missing-block calls; the function table has {0x0082c189u, sub_82c189}; ir_0082C189.o is in all three object sets. The generated edge table carries {0x0082c190, 0x0082c187, jcc-taken, allow 1} (the extra) beside {0x0082c189, 0x0082c187, fall-through, allow 0}. The class tables that name the handler: atan2's at 0x00938b70 (slot 15, both operands infinite) and fmod's at 0x00938b10 (slots 1, 3, 5, 7, 12, 13 and 15); _CIatan2 (0x00859b6a) is called by PGetRotation, WriteAnalogs and many player-physics routines through FUN_00859b6a, and fmod's only caller is CRI's FUN_00838950. The same tables' NaN tail 0x0082c10f stopped an Android Dry Lagoon session (2026-10-14, now a lifted extra), so the game does reach them with special operands in play. No run has stopped at 0x0082c189 yet; tools/s8/split_routine_probe.py calls _CIatan2 and _CIfmod with the operands that select the handler. tools/s8/split_routine_probe.py, linked as the Linux game is: _CIatan2 with both operands infinite (all four sign pairs) and _CIfmod with seven zero or infinite operand pairs cross the edge and return the handler's NaN (the CRT's answer; the host libm's atan2 of two infinities is a multiple of pi/4), with no trap; the finite cases equal the host libm; linked with the previous table all eleven stop at 0x0082c189. The probe holds each crossing call to errno EDOM as well as a NaN, because the head loads the NaN before the `jg` and the body's only effect is the domain-error flag; with 0x0082c189 pointed at 0x0082c190 instead (`--misdispatch`) all 11 crossing calls fail.",
+   "falsifier": "Remove this entry and regenerate the edge table: the row for 0x0082c189 returns to allow=0, and tools/s8/split_routine_probe.py's atan2(inf, inf) and fmod(1.5, 0) stop at 0x0082c189 with `no lifted block at 0x0082c189 ... reached by fall-through at 0x0082c187`. For the reasoning: if the handler ended at 0x0082c189, the `jg` would have a ret or jmp before its fall-through; the next instruction is the store the error flag needs.",
+   "decoded": {
+    "target_mnemonic": "mov byte [ebp-90h],1",
+    "target_flow_control": "NEXT",
+    "target_bytes": "c6 85 70 ff ff ff 01",
+    "source_va": "0x0082c187",
+    "source_byte": "0x7f",
+    "source_mnemonic": "jg short 0082C190h",
+    "source_flow_control": "CONDITIONAL_BRANCH",
+    "first_padding_va": "0x0082c190",
+    "first_padding_byte": "0x0a"
+   }
   }
  ],
  "retired": [
@@ -142,6 +229,242 @@
    },
    "retired": "2026-09-23",
    "retired_why": "tools/s4/mb_edges.py now records edges only from code reachable within its range from a lifted entry (fixed-point liveness), so the fall-through invented by decoding the data before this thunk is no longer recorded and the row is the real `jmp` from 0x0080E645, which dispatches without an exception. Kept here as history; mb_edges applies only `exceptions`."
+  }
+ ],
+ "refused": [
+  {
+   "tag": "next+allarms",
+   "group": "SEH handler stubs",
+   "why": "Each source is a one- or two-instruction stub (`mov esi,[ebp+0Ch]`, `mov edi,[ebp-1Ch]`, `xor ebx,ebx; inc ebx` and the like) that an MSVC SEH scope table in .rdata names as a __finally or __except handler, falling into the handler body that the function map made its own function (the normal path calls the same body directly, as 0x007a6748 `call 007A6759h` does). Each stub's address is a dword in a scope table (.rdata 0x0090ff58..0x00910a80, checked row by row), and a stub runs only when the SEH machinery unwinds its scope: __except_handler4 for an exception, or __local_unwind4 for a return out of a __try. RaiseException traps in this runtime (runtime/sa2_imports.c, all but SetThreadName), the function map's direct callers of __local_unwind4 are _fsopen, __wfsopen, _EH4_LocalUnwind and FUN_007b2ce2, and none of 381 recorded run censuses (2026-10-18) hit one of these rows. The doexit row's stub (`xor ebx,ebx; inc ebx` at 0x007acb42) also follows the call to __crtExitProcess, which does not return. Every target is a function-table entry lifted from that address, so if the runtime ever unwinds SEH frames, each is a candidate for a reviewed exception like 0x007059af's.",
+   "rows": [
+    {
+     "va": "0x007a6759",
+     "source": "0x007a6756",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007a7432",
+     "source": "0x007a742f",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007a9b36",
+     "source": "0x007a9b33",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007a9b42",
+     "source": "0x007a9b3f",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007aa726",
+     "source": "0x007aa723",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007aa757",
+     "source": "0x007aa754",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007aa91a",
+     "source": "0x007aa917",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007aabf5",
+     "source": "0x007aabf2",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007ac448",
+     "source": "0x007ac445",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007ac607",
+     "source": "0x007ac604",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007ac613",
+     "source": "0x007ac610",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007ac8b1",
+     "source": "0x007ac8ae",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007acb45",
+     "source": "0x007acb44",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007ad250",
+     "source": "0x007ad24d",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007b2c00",
+     "source": "0x007b2bfd",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007bba33",
+     "source": "0x007bba30",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x007bc198",
+     "source": "0x007bc195",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x00828671",
+     "source": "0x0082866e",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x0082ee54",
+     "source": "0x0082ee51",
+     "kind": "fall-through"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "The SSE2 or x87 fork",
+   "why": "Routines the CRT splits on a CPU-feature global: `je` to the x87 (or default) body when the global says there is no SSE2. 0x008287c7 `je 008287F6h` tests [0x01D19BA4] (the G2 map defect, S3_INPUTS) and 0x008294a7 `je 0082CCC5h` (__modf_default) tests [0x01D18A5C]. The runtime's virtual CPU reports SSE2 (CPUID leaf 1 EDX bit 26) and the runs show the SSE2 paths in use (0x0085a0d0 dispatched 33.7 million times and 0x0082b260 12.3 million in the 381-run census), so neither branch is taken. Both targets are function-table entries; clearing SA2_CPUID_EDX1's SSE2 bit would make both reachable and each would need a reviewed exception first.",
+   "rows": [
+    {
+     "va": "0x008287f6",
+     "source": "0x008287c7",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x0082ccc5",
+     "source": "0x008294a7",
+     "kind": "jcc-taken"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "The FP-exception-mask test",
+   "why": "The CRT's SSE2 modf (0x008294a0) leaves for __modf_default (0x0082ccc5) a second way: 0x008294d8 `jne 0082CCC5h`, after `stmxcsr; and eax,1F80h; cmp eax,1F80h` and, when MXCSR passes, `fnstcw; and ax,7Fh; cmp ax,7Fh` (the `lea esp,[esp+8]` between leaves the flags alone). It is taken only when an FP exception is unmasked, whatever the SSE2 global says. No state the runtime gives the guest unmasks one: cpu_state_reset sets CW 0x007F and MXCSR 0x1F80, a new thread starts at CW 0x027F, Direct3D's device creation computes (cw & ~0xF3F) | 0x3F, and the emulated fnsave's FNINIT sets 0x037F; bit 6 of the CW is reserved and reads 1, so each passes the 0x7F test. And no lifted instruction loads a word that clears a mask bit: tools/s4/fp_mask_census.py decodes every lifted module and finds 1,450 CW/MXCSR loads and control-routine calls, of which 1,391 restore or OR a word stored by fnstcw/stmxcsr (the float-to-int `or ah,0Ch` sequence), 8 load constants with every mask set, 4 restore a saved environment, 7 force the masks on, and 40 are read by hand (the CRT's __ctrlfp, __control87 and ___set_fpsr_sse2 and their callers, which load the CRT's working words 0x1B3F, 0x173F and 0x1F3F or restore a saved word, and FUN_00833580's _control87(0x20300, 0x30300), which touches precision and rounding only). The target is a function-table entry, so the falsifier is any guest _controlfp, fldcw or ldmxcsr that unmasks an exception: the census fails on it by address, and 0x0082ccc5 would need a reviewed exception before that build ships.",
+   "rows": [
+    {
+     "va": "0x0082ccc5",
+     "source": "0x008294d8",
+     "kind": "jcc-taken"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "A dispatcher nothing references",
+   "why": "FUN_00859f13 (`and byte [ebp-2C8h],0FEh`, 7 bytes) runs into 0x00859f1a, its own body. It is called only from __ctrandisp2 (0x00859f0b) and __ctrandisp1 (0x0085a08c); no rel32 branch and no dword in any section names __ctrandisp1, and __ctrandisp2 is jumped to only by the stubs at 0x00859b60 and 0x008599f0, which nothing names either (the game's atan2 and fmod enter at 0x00859b6a and 0x008599fa, which jump to __cintrindisp2 at 0x00859e50). The target is a function-table entry, a candidate for a reviewed exception should any of these become reachable.",
+   "rows": [
+    {
+     "va": "0x00859f1a",
+     "source": "0x00859f13",
+     "kind": "fall-through"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "Extras from a pointer sweep with no relocation",
+   "why": "Loop back-edges inside extras that tools/s4/lift_extra.py lifted from a run of aligned code-pointer-like dwords (0x0090fbf4 and 0x0090fc28 for PResetAccelerationAir's 0x0046e688 and 0x0046e8be, the import-table slots 0x00873050..0x0087305c for 0x00515e6c, 0x0089e758 for 0x006b6170). No base relocation covers any of those dwords, so none is a pointer the loader fixes, and no branch, edge or relocation enters these extras: they never run. The loops themselves run inside their map modules (PResetAccelerationAir, FUN_00515a10, FUN_006b6130), whose ranges contain both ends, so no missing block is raised there. The targets are mid-function addresses with no lifted module; reaching one would need a lift change, not an exception.",
+   "rows": [
+    {
+     "va": "0x0046e670",
+     "source": "0x0046e76a",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x0046e88c",
+     "source": "0x0046e923",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x00515da0",
+     "source": "0x005161d8",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x006b6143",
+     "source": "0x006b617e",
+     "kind": "jcc-taken"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "Rows no lifted trace produces",
+   "why": "tools/s4/mb_edges.py seeds liveness from every extra's entry inside a map module's range, so it records these edges from the map module (named in the table's comment). The map module's own trace from its entry never reaches the source; the source runs only inside an extra (0x007a5911, 0x0082f6e0, 0x008305a0, 0x00869154, 0x00869070) whose lifted range contains both the source and the target, so the branch stays inside that extra and no missing block is raised. Nothing to dispatch; the rows are an over-approximation of the decode.",
+   "rows": [
+    {
+     "va": "0x007a592e",
+     "source": "0x007a5920",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x0082f706",
+     "source": "0x0082f6f1",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x008305cc",
+     "source": "0x008305b2",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x00869166",
+     "source": "0x00869163",
+     "kind": "fall-through"
+    },
+    {
+     "va": "0x00869245",
+     "source": "0x008690be",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x00869246",
+     "source": "0x008690a3",
+     "kind": "jcc-taken"
+    }
+   ]
+  },
+  {
+   "tag": "next+allarms",
+   "group": "Reachable, with no lifted block at the target",
+   "why": "Targets that are not the entry of any lifted module, so no exception can dispatch them: each needs a block lifted at the target (tools/s4/lift_extra.py), after which its row is allowed by the extra's own generated reason. Each is reachable only in a rare state. 0x0082bf13 `jne 0082BEC4h` is in the x87 special-operand handler extra 0x0082bf11 (named by the class-table slot at 0x00922ed6), taken when CL is set (a negative special operand); 0x0082bec4 is a five-byte `jmp 0082C0D6h` and the likeliest of the four. 0x007a8770 `jne 007A8648h` is _malloc's retry after _callnewh succeeds, after a failed allocation with a new-handler installed. 0x007a87de `jbe 007A87ADh` is _malloc's system-heap path, taken only when __active_heap ([0x01D18A54]) is not 3. 0x007bc2a8 `jne 007BC290h` is the CRT's handle-table initialisation, taken only when a critical section fails to initialise; its extra 0x007bc2a4 was entered 163,444 times in the 381-run census without taking it. Follow-up: lift 0x0082bec4.",
+   "rows": [
+    {
+     "va": "0x0082bec4",
+     "source": "0x0082bf13",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x007a8648",
+     "source": "0x007a8770",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x007a87ad",
+     "source": "0x007a87de",
+     "kind": "jcc-taken"
+    },
+    {
+     "va": "0x007bc290",
+     "source": "0x007bc2a8",
+     "kind": "jcc-taken"
+    }
+   ]
   }
  ]
 }

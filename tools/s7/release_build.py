@@ -510,13 +510,20 @@ def step_tables(src: Path, work: Path) -> None:
         work / "logs" / "text_readset.log")
 
 
-def link_inputs() -> tuple[list[Path], list[Path]]:
+def link_inputs(edges: Path | None = None, check: bool = True) -> tuple[list[Path], list[Path]]:
     """The reach build's generated inputs, as tools/s4/loop_run.py's link_args gives them: the
-    edge table, and the lifted extras' C file and objects when there are any."""
+    edge table (`edges`, by default the generated one), and the lifted extras' C file and objects
+    when there are any. The table is refused when a reviewed exception the tree tracks is not in
+    it (tools/s4/mb_edges.py not_in_force): a table generated before an exception was added would
+    link and ship without it. `check=False` is for a probe that links an old table on purpose."""
     linkdir = GEN / "s4" / "link"
-    extra = [linkdir / f"mb_edges.{TAG}.c"]
+    extra = [edges or linkdir / f"mb_edges.{TAG}.c"]
     if not extra[0].is_file():
         raise SystemExit(f"no generated edge table {rel(extra[0])}; run tools/s4/mb_edges.py")
+    if check:
+        stale = load(ROOT, "tools/s4/mb_edges.py", "release_mb_edges").not_in_force(extra[0], TAG)
+        if stale:
+            raise SystemExit("release_build: the edge table is stale:\n  " + "\n  ".join(stale))
     state = linkdir / f"extra_functions.{TAG}.json"
     objects: list[Path] = []
     if state.is_file():

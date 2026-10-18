@@ -1,10 +1,12 @@
 """The fast-stage-load tweak (runtime/tweaks/fast-stage-load.c) on GameStateHandler (0x0043A780).
 
 The tweak's file is built beside runtime/sa2_tweaks.c with the pinned zig, as test_tweaks.py
-builds no-event-bars, and linked with a driver that stands in for the lifted GameStateHandler and
-the runtime's guest memory. Guest memory holds two words, GameState (0x01934BE0) and CurrentLevel
-(0x01934B70); `sa2_peek` and `sa2_poke` read and write them and refuse any other address, and a
-frame can make either refuse.
+builds no-event-bars, and with runtime/tweaks/pause-no-confirm.c, which acts in its wrap, and
+linked with a driver that stands in for the lifted GameStateHandler and the runtime's guest
+memory. Guest memory holds two words, GameState (0x01934BE0) and CurrentLevel (0x01934B70), and
+pause-no-confirm's three box dwords (0x01A558B8, 0x01A558BC, 0x01A558C0), always 0 here;
+`sa2_peek` and `sa2_poke` read and write them and refuse any other address, and a frame can make
+GameState refuse. test_tweak_pause_no_confirm.py holds the two tweaks on together through a pause.
 
 Two drivers' modes:
 
@@ -52,22 +54,26 @@ static int no_read, no_write;           /* this frame, GameState refuses a read 
 static uint16_t left;                   /* frames mode: what the stand-in body stores */
 static int model, load_frames, wait_count;
 
-static uint16_t *word(uint32_t a, uint32_t n) {
+static uint32_t boxes[3];              /* pause-no-confirm's box words, 0x01A558B8 on */
+
+static void *word(uint32_t a, uint32_t n) {
+    if (n == 4 && a >= 0x01A558B8u && a <= 0x01A558C0u && (a & 3) == 0)
+        return &boxes[(a - 0x01A558B8u) / 4];
     if (n != 2) return NULL;
     if (a == GAME_STATE) return &game_state;
     if (a == CURRENT_LEVEL) return &current_level;
     return NULL;
 }
 int sa2_peek(uint32_t a, uint32_t n, void *out) {
-    uint16_t *w = word(a, n);
+    void *w = word(a, n);
     if (!w || (a == GAME_STATE && no_read)) return 1;
-    memcpy(out, w, 2);
+    memcpy(out, w, n);
     return SA2_OK;
 }
 int sa2_poke(uint32_t a, uint32_t n, const void *in) {
-    uint16_t *w = word(a, n);
+    void *w = word(a, n);
     if (!w || (a == GAME_STATE && no_write)) return 1;
-    memcpy(w, in, 2);
+    memcpy(w, in, n);
     return SA2_OK;
 }
 uint32_t sa2_rt_get_gpr(const void *state, int idx) { (void)state; (void)idx; return 0; }
@@ -126,7 +132,8 @@ def exe(tmp_path_factory) -> Path:
     (d / "driver.c").write_text(f"#define LOAD {LOAD}\n#define WAIT {WAIT}\n" + DRIVER)
     out = d / "fsl"
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(TWEAK), "-o", str(out)], capture_output=True, text=True, env=zig_env(d))
+                           str(TWEAK), str(RUNTIME / "tweaks" / "pause-no-confirm.c"), "-o", str(out)],
+                          capture_output=True, text=True, env=zig_env(d))
     assert done.returncode == 0, done.stderr
     return out
 
@@ -177,6 +184,20 @@ def test_on_turns_only_the_finished_load_into_load_items(exe):
     assert err == [REPORT,
                    "sa2 tweaks: fast stage load: level 5's Loading state skipped (load 1)",
                    "sa2 tweaks: fast stage load: level 10's Loading state skipped (load 2)"]
+
+
+def test_with_pause_no_confirm_on_too_the_loads_are_the_same(exe):
+    """pause-no-confirm acts in this wrap on frames that begin in the pause (17) with a box opened;
+    no frame here does, so the frames and the skips are this tweak's alone."""
+    out, err = run(exe, *FRAMES, SA2_TWEAKS="fast-stage-load,pause-no-confirm")
+    assert out == ["0", "2", "1", "2", "2", "3", "33", "16", "1", "2"]
+    assert err == ["sa2 tweaks: fast stage load, pause without confirm "
+                   "(SA2_TWEAKS=fast-stage-load,pause-no-confirm)",
+                   "sa2 tweaks: fast stage load: level 5's Loading state skipped (load 1)",
+                   "sa2 tweaks: fast stage load: level 10's Loading state skipped (load 2)"]
+    out, err = run(exe, *FRAMES, SA2_TWEAKS="pause-no-confirm")
+    assert out == LIFTED
+    assert err == ["sa2 tweaks: pause without confirm (SA2_TWEAKS=pause-no-confirm)"]
 
 
 def test_chao_world_keeps_its_loading_state_and_says_so_once(exe):

@@ -47,6 +47,15 @@
  *
  * Each skip is said, for the first 32: "sa2 tweaks: fast stage load: level 5's Loading state
  * skipped (load 1)".
+ *
+ * One wrap of GameStateHandler. pause-no-confirm also acts on 0x0043A780, and a function has one
+ * wrap (the tools refuse a second by name), so this tweak's work is a function of its own,
+ * fast_stage_load, which tests its bit first and otherwise only calls __real_sub_43a780.
+ * pause-no-confirm's file acts in this wrap (its TWEAK_WRAPS line names it): the wrap hands the
+ * call to sa2_pause_no_confirm first when that tweak is on, passing fast_stage_load as the way to
+ * the lifted body, so with both on each acts on its own frames (this tweak on those that begin in
+ * state 0, that one on those that begin in 17, the pause) around the same single call. With only
+ * one of the two on, each acts as it does alone.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -68,9 +77,13 @@ static unsigned g_fast_load_skips;
 static int g_fast_load_chao_said, g_fast_load_read_said, g_fast_load_write_said;
 
 void *__real_sub_43a780(void *state, uint32_t pc, void *memory);
+/* runtime/tweaks/pause-no-confirm.c, which acts in this file's wrap of sub_43a780. */
+void *sa2_pause_no_confirm(void *state, uint32_t pc, void *memory,
+                           void *(*real)(void *, uint32_t, void *));
 
-__attribute__((used, retain))
-void *__wrap_sub_43a780(void *state, uint32_t pc, void *memory) {
+/* The Loading state skipped: the lifted body, and 2 for the 1 the state 0 arm stored. Called by
+ * the wrap below, and by pause-no-confirm's function as its `real`. */
+static void *fast_stage_load(void *state, uint32_t pc, void *memory) {
     if (!sa2_tweak_on(SA2_TWEAK_FAST_STAGE_LOAD)) return __real_sub_43a780(state, pc, memory);
     uint16_t before = 0;
     if (sa2_peek(FAST_LOAD_GAME_STATE, 2, &before) != SA2_OK) {
@@ -107,4 +120,11 @@ void *__wrap_sub_43a780(void *state, uint32_t pc, void *memory) {
                 level, g_fast_load_skips,
                 g_fast_load_skips == FAST_LOAD_SAID ? "; later skips are not said" : "");
     return ret;
+}
+
+__attribute__((used, retain))
+void *__wrap_sub_43a780(void *state, uint32_t pc, void *memory) {
+    if (sa2_tweak_on(SA2_TWEAK_PAUSE_NO_CONFIRM)) return sa2_pause_no_confirm(state, pc, memory, fast_stage_load);
+    if (!sa2_tweak_on(SA2_TWEAK_FAST_STAGE_LOAD)) return __real_sub_43a780(state, pc, memory);
+    return fast_stage_load(state, pc, memory);
 }

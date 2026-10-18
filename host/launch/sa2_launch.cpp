@@ -99,7 +99,7 @@
 // default, named in one setting, SA2_TWEAKS, a comma-separated list. On the desktop it is a line
 // in share/game.env, which reaches the game as written (the launcher passes none of its own
 // environment's SA2_ variables): SA2_TWEAKS=no-event-bars removes the black bars at the sides of
-// most in-engine cutscenes on a screen wider than 4:3. The player is given the same value, for the
+// in-engine cutscenes on a screen wider than 4:3. The player is given the same value, for the
 // host's own tweaks (host/player/tweaks.h; runtime/sa2_tweaks.h lists the game's and the host's
 // alike), and so is the launcher's reader, for those made here (host/launch/tweaks/<name>.cpp),
 // whose line the launcher prints whenever the value is set ("sa2 host tweaks (launcher): ...").

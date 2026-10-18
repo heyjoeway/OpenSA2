@@ -2,9 +2,9 @@
  * wider than 4:3, as the game draws them for the 14 events it lists, so each scene shows in the
  * 4:3 column alone, as on a 4:3 screen; movies are left as they are (runtime/sa2_tweaks.h: the
  * tweaks and their rules). It is the third way of the same answer: the game's own list (no tweak),
- * no bars on most events (no-event-bars), and bars on every event (this tweak). The two tweaks
- * cannot both be on (SA2_TWEAK_EXCLUSIVE in runtime/sa2_tweaks.h): named together, neither is on,
- * and the report line says so.
+ * no bars on any in-engine event (no-event-bars), and bars on every event (this tweak). The two
+ * tweaks cannot both be on (SA2_TWEAK_EXCLUSIVE in runtime/sa2_tweaks.h): named together, neither
+ * is on, and the report line says so.
  *
  * TWEAK_WRAPS: none (it acts in no-event-bars.c's wrap of sub_5f8ec0)
  *

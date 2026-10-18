@@ -100,7 +100,7 @@
 //
 // Tweaks (runtime/sa2_tweaks.h): changes to the game's own behaviour, or the host's, each off by
 // default. The settings screen's Tweaks card sends the ones turned on as one setting,
-// SA2_TWEAKS=<names> ("no-event-bars": no black bars at the sides of most in-engine cutscenes),
+// SA2_TWEAKS=<names> ("no-event-bars": no black bars at the sides of in-engine cutscenes),
 // which reaches the game as every other setting does (a game.env.extra line replaces it), and the
 // player too, with the same value, after game.env.extra's (host/player/tweaks.h: the host tweaks
 // whose home is the player), with the game's SA2_REPLAY_TICKS or SA2_REPLAY_WORDS if game.env.extra

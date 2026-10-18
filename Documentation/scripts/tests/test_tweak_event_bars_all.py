@@ -132,7 +132,7 @@ def test_an_unreadable_stack_leaves_the_event_to_the_game_and_says_so_once(exe):
 def test_no_event_bars_is_unchanged_beside_it(exe):
     """With this file linked, no-event-bars alone answers as test_tweaks.py holds it to."""
     out, _ = run(exe, *CALLS, SA2_TWEAKS="no-event-bars")
-    assert out == ["361 1 4", "50 0 4", "100 0 4", "409 1 4", "50 0 4", "50 0 4"]
+    assert out == ["361 0 4", "50 0 4", "100 0 4", "409 1 4", "50 0 4", "50 0 4"]
 
 
 def test_the_two_files_declare_the_hook_alike():

@@ -44,7 +44,7 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 - **HUD at 4:3 positions** keeps the score, time, and rings near the middle of a wide picture. It is on by default.
 - **Touch controls** sets the size and opacity of the on-screen controls. At 0% opacity the controls are hidden but still work. **Move the controls** lets you drag each control to a new place, and **Change what the touch buttons do** changes the game button each one sends.
 - **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
-- **Tweaks** are optional changes to the game, each off by default. Turn on **Remove cutscene black bars** to remove the black bars that most in-engine cutscenes draw at the sides of a wide picture. See [Tweaks](#tweaks) for the cutscenes that keep their bars. **Turn every tweak off** turns all of them off at once.
+- **Tweaks** are optional changes to the game, each off by default. Turn on **Remove cutscene black bars** to remove the black bars that in-engine cutscenes draw at the sides of a wide picture. Movies keep their bars. See [Tweaks](#tweaks) for what to expect. **Turn every tweak off** turns all of them off at once.
 
 **Reset all settings** restores the defaults.
 
@@ -101,7 +101,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |
 | `mono-audio` | Both speakers play the left and right channels mixed together, for one earbud or for hearing in one ear. |
 | `no-2p-specials` | In 2-player battles, neither player earns special attacks, from collecting rings or after losing a life. 1-player games and save data are unchanged. |
-| `no-event-bars` | Removes the black bars that most in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. |
+| `no-event-bars` | Removes the black bars that in-engine cutscenes draw at the sides of a screen wider than 4:3, so you see what the game draws behind them. The scenes are not changed. Movies keep their bars. |
 | `no-lives-bonus` | Collecting 100 rings (or 200, 300, and so on) no longer gives an extra life or plays the 1-up jingle. 1-up boxes and other extra lives still count, and your save keeps the lives you earned. |
 | `no-loading-tips` | Hides Omochao's tips and the animated Now Loading ring while the game loads. Most loads show a black screen instead. A load over a picture already on screen, such as a stage's title card, keeps that picture. |
 | `no-music` | Linux and Android only. Turns off the stage, menu, and cutscene music. Sound effects, voices, and the short music cues (1-up, speed shoes, invincibility, goal ring, and boss cues) still play. Useful when you stream, record, or play your own music. From the SA2 Mod Loader code "Disable Music" by MainMemory. |
@@ -128,7 +128,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `vsync` | Each frame waits for the display's refresh. This stops tearing on Windows and on Linux under X11, and adds up to one frame of delay. On Wayland and Android the picture does not tear without it, so there it only adds delay. The game's speed is unchanged. |
 | `walker-cannon-fix` | Fixes a crash when a Chao Walker that has the Mech's cannon upgrade fires its cannon. Only a cheat gives a Chao Walker that upgrade, so without one this tweak changes nothing. |
 
-With `no-event-bars` on, five in-engine cutscenes keep their bars: the opening one (event 361) and events 21, 205, 206, and 360. These scenes are framed for 4:3. The opening draws its title cards, flashes, backdrops, and logo glow over the middle 4:3 part of the picture only, so without the bars those effects would stop at a hard edge. SA2 Render Fix keeps the bars for the same five cutscenes for this reason. Movies also keep their bars, because the video itself is 4:3.
+With `no-event-bars` on, every in-engine cutscene loses its bars, and the scenes stay as the game made them. Four cutscenes were made for 4:3: the opening one (event 361, which the game also plays when it asks for event 360) and events 21, 205, and 206. These can show an effect or picture that stops short of the sides of the screen, with black beyond it. The opening draws its title cards, flashes, backdrops, and logo glow over the middle 4:3 part of the picture only, so on a wide screen those effects end at a hard edge where a bar was. In event 21, the map of the space colony does not reach the sides of the screen, so black strips stay at the far left and right. Movies keep their bars, because the video itself is 4:3.
 
 On Android, use the **Tweaks** card in **Game settings**. On Windows and Linux, add a line to the release's `share/game.env` file:
 

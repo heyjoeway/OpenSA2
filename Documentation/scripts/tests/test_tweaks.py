@@ -65,7 +65,6 @@ CC = ["-target", "x86_64-linux-musl", "-O2", "-Wall", "-Wextra", "-Werror", "-I"
 VARS = ("SA2_TWEAKS", "SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS")
 EXECUTOR, MOVIE = "0x005FB508", "0x00601948"     # the two callers' return addresses
 TABLE = [21, 24, 25, 100, 101, 126, 128, 129, 203, 205, 206, 360, 361, 409]
-FRAMED_43 = [21, 205, 206, 360, 361]             # the events that keep their bars
 IN_ENGINE = [e for e in TABLE if e != 409]       # 409, the one movie, is the movie player's
 
 # The guest stack at 0x20000. argv: pairs of (return address, event ID); each prints
@@ -176,8 +175,8 @@ def the_tweaks(game: list[str], hosts: list[str]) -> str:
 # ------------------------------------------------------------------ the reader and the report
 
 # The intro (361) and a stage's (21) in-engine events, both framed for 4:3, a Dark story event
-# (100) that is not, an event outside the table (50), and the one movie in the table (409, at the
-# movie player's call).
+# (100), an event outside the table (50), and the one movie in the table (409, at the movie
+# player's call).
 CALLS = (EXECUTOR, "361", EXECUTOR, "21", EXECUTOR, "100", EXECUTOR, "50", MOVIE, "409",
          EXECUTOR, "361", EXECUTOR, "100")
 GAME = ["361 1 4", "21 1 4", "100 1 4", "50 0 4", "409 1 4", "361 1 4", "100 1 4"]
@@ -216,22 +215,26 @@ def test_ignored_in_a_replay(exe, replay):
 
 # ------------------------------------------------------------------ no-event-bars
 
-def test_no_event_bars_answers_0_to_the_executor_but_for_the_events_framed_for_4_3(exe):
+def test_no_event_bars_answers_0_to_the_executor_for_every_event(exe):
+    """The intro and event 21, framed for 4:3, lose their bars as event 100 does; each is named once."""
     out, err = run(exe, *CALLS, SA2_TWEAKS="no-event-bars")
-    assert out == ["361 1 4", "21 1 4", "100 0 4", "50 0 4", "409 1 4", "361 1 4", "100 0 4"]
+    assert out == ["361 0 4", "21 0 4", "100 0 4", "50 0 4", "409 1 4", "361 0 4", "100 0 4"]
     assert err.splitlines() == [
         "sa2 tweaks: event-bars off (SA2_TWEAKS=no-event-bars)",
-        "sa2 tweaks: event-bars off: event 361 keeps its side bars (its scene is framed for 4:3)",
-        "sa2 tweaks: event-bars off: event 21 keeps its side bars (its scene is framed for 4:3)",
+        "sa2 tweaks: event-bars off: event 361's side bars not drawn",
+        "sa2 tweaks: event-bars off: event 21's side bars not drawn",
         "sa2 tweaks: event-bars off: event 100's side bars not drawn"]
+    assert "keeps" not in err
 
 
 def test_each_in_engine_event_in_the_table(exe):
-    """The five framed for 4:3 keep their bars (the answer stays 1); the other eight lose them."""
+    """All 13 in-engine events in the table lose their bars (the answer 1 becomes 0)."""
+    assert IN_ENGINE == [21, 24, 25, 100, 101, 126, 128, 129, 203, 205, 206, 360, 361]
     calls = [x for e in IN_ENGINE for x in (EXECUTOR, str(e))]
-    out, _ = run(exe, *calls, SA2_TWEAKS="no-event-bars")
-    assert out == [f"{e} {int(e in FRAMED_43)} 4" for e in IN_ENGINE]
-    assert [e for e in IN_ENGINE if e not in FRAMED_43] == [24, 25, 100, 101, 126, 128, 129, 203]
+    out, err = run(exe, *calls, SA2_TWEAKS="no-event-bars")
+    assert out == [f"{e} 0 4" for e in IN_ENGINE]
+    assert err.splitlines()[1:] == [f"sa2 tweaks: event-bars off: event {e}'s side bars not drawn"
+                                    for e in IN_ENGINE]
     assert run(exe, *calls)[0] == [f"{e} 1 4" for e in IN_ENGINE]
 
 

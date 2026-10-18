@@ -91,13 +91,14 @@
 // --no-widescreen sets SA2_PLAY_RES=off and --play-res WxH that size, over game.env and the
 // display both. The launcher says which, and the record keeps it (`widescreen`).
 //
-// Tweaks (play only; runtime/sa2_tweaks.c): changes to the game's own behaviour, each off by
+// Tweaks (play only; runtime/sa2_tweaks.h): changes to the game's own behaviour, each off by
 // default, named in one setting, SA2_TWEAKS, a comma-separated list. On the desktop it is a line
 // in share/game.env, which reaches the game as written (the launcher passes none of its own
 // environment's SA2_ variables): SA2_TWEAKS=no-event-bars removes the black bars at the sides of
-// in-engine cutscenes on a screen wider than 4:3. The selftest runs the game as it is and drops
-// the line. The launcher says what the game is given, the record keeps it (`tweaks`), and the
-// game's own line saying which tweaks are on starts the session's game.log ("sa2 tweaks: ...").
+// most in-engine cutscenes on a screen wider than 4:3. The selftest runs the game as it is and
+// drops the line. The launcher says what the game is given, the record keeps it (`tweaks`), and
+// the game's own line saying which tweaks are on starts the session's game.log ("sa2 tweaks:
+// ...").
 //
 // --player-arg ARG (play only, repeatable) appends ARG to the player's command line: a
 // diagnostic, as the player's own --synthetic-keys with its logs and --max-frames, which drives a

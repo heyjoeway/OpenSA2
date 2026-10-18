@@ -221,7 +221,7 @@ WINE_ROOT_DRIVE = "Z:"
 LAUNCHER = "runinprefix"
 # Play's own resolution answer (runtime/sa2_widescreen.c: the config's Width and Height rewritten
 # for the device's aspect), its HUD at the 4:3 positions (SA2_PLAY_HUD43) and its tweaks
-# (SA2_TWEAKS, runtime/sa2_tweaks.c), which the launcher and the Android session set and no replay
+# (SA2_TWEAKS, runtime/sa2_tweaks.h), which the launcher and the Android session set and no replay
 # may: a registered run keeps the default resolution, the port's HUD and the game's own behaviour,
 # so one left in a shell is stripped with the rest.
 PLAY_ENV = ("SA2_PLAY_RES", "SA2_PLAY_ASPECT", "SA2_PLAY_HUD43", "SA2_TWEAKS")

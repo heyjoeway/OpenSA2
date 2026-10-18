@@ -239,7 +239,7 @@ TOOLS = ["tools/s4/reach_receipt.py", "tools/s4/loop_run.py", "tools/s4/link_s4.
 # runtime change that moved the reach left this receipt reading current, and
 # M4 -- read from an import table a probe dumped on 2026-09-20 -- went on
 # reporting 122 implemented imports while the runtime implemented at least 151.
-RUNTIME_GLOBS = ("runtime/*.c", "runtime/*.cpp", "runtime/*.h")
+RUNTIME_GLOBS = ("runtime/*.c", "runtime/*.cpp", "runtime/*.h", "runtime/tweaks/*.c")
 
 
 def runtime_digest(root: Path = C.ROOT) -> str:

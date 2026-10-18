@@ -89,12 +89,12 @@
 // upright window (host/player/player.cpp "The picture's place"); the session says the player's
 // line for it ("player: picture: ...").
 //
-// Tweaks (runtime/sa2_tweaks.c): changes to the game's own behaviour, each off by default. The
+// Tweaks (runtime/sa2_tweaks.h): changes to the game's own behaviour, each off by default. The
 // settings screen's Tweaks card sends the ones turned on as one setting, SA2_TWEAKS=<names>
-// ("no-event-bars": no black bars at the sides of in-engine cutscenes), which reaches the game as
-// every other setting does (a game.env.extra line replaces it). The report names the setting
-// ("settings: SA2_TWEAKS=...") and then the game's own line saying which tweaks are on ("game: sa2
-// tweaks: event-bars off ...", from its game.log).
+// ("no-event-bars": no black bars at the sides of most in-engine cutscenes), which reaches the
+// game as every other setting does (a game.env.extra line replaces it). The report names the
+// setting ("settings: SA2_TWEAKS=...") and then the game's own line saying which tweaks are on
+// ("game: sa2 tweaks: event-bars off ...", from its game.log).
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>

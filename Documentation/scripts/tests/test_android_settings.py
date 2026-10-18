@@ -4,10 +4,12 @@ GameSettings (host/android/java/com/sa2recomp/app/GameSettings.java) turns the s
 choices into the session's --setting values (sessionSettings); the session puts them in the game's
 environment before game.env.extra's lines (host/android/native/sa2_android_session.cpp). The
 tweaks go as one value, SA2_TWEAKS, which runtime/sa2_tweaks.c reads: absent at the defaults, so a
-session with every setting at its default runs as before there were tweaks, and "no-event-bars"
-when the cutscene bars switch is off. A small Java driver runs GameSettings here against
-android.jar; the settings screen (Sa2SettingsActivity, with Ui and the layout editor it opens) is
-compiled beside it, so a card that no longer builds fails here, not in the APK's build.
+session with every setting at its default runs as before there were tweaks, and the names of the
+tweaks turned on, in GameSettings.TWEAKS's order, otherwise. TWEAKS is the one place a tweak is
+named on Android: the Tweaks card makes a switch of each line (test_tweaks.py holds the lines to
+runtime/sa2_tweaks.h's list). A small Java driver runs GameSettings here against android.jar; the
+settings screen (Sa2SettingsActivity, with Ui and the layout editor it opens) is compiled beside
+it, so a card that no longer builds fails here, not in the APK's build.
 
 Needs the pinned JDK (tools/pins.json java) and the Android SDK's android.jar; it is skipped
 without them.
@@ -26,13 +28,18 @@ JDK = ROOT / json.loads((ROOT / "tools/pins.json").read_text())["tools"]["java"]
 ANDROID_JAR = ROOT / "private/android-sdk/platforms/android-36/android.jar"
 APP = ROOT / "host/android/java/com/sa2recomp/app"
 
-# argv: lng shrt [eventBars] -> each --setting on a line, then the SA2_TWEAKS value in brackets.
+# argv: lng shrt [tweak names to turn on...] -> each --setting on a line, then the SA2_TWEAKS value
+# in brackets; argv "list" -> each TWEAKS line as name|label|description.
 DRIVER = r"""
 package com.sa2recomp.app;
 public class SettingsDriver {
     public static void main(String[] a) {
+        if (a[0].equals("list")) {
+            for (GameSettings.Tweak t : GameSettings.TWEAKS) System.out.println(t.name + "|" + t.label + "|" + t.description);
+            return;
+        }
         GameSettings s = new GameSettings();
-        if (a.length > 2) s.eventBars = Boolean.parseBoolean(a[2]);
+        for (int i = 2; i < a.length; i++) s.tweaksOn.add(a[i]);
         for (String e : s.sessionSettings(Integer.parseInt(a[0]), Integer.parseInt(a[1]))) System.out.println(e);
         System.out.println("[" + s.tweaks() + "]");
     }
@@ -64,19 +71,35 @@ def java(tmp_path_factory):
 
 def test_the_defaults_send_no_tweak(java):
     assert java(2340, 1080) == ["[]"]
-    assert java(2340, 1080, "true") == ["[]"]
 
 
-def test_the_cutscene_bars_off_sends_no_event_bars(java):
-    assert java(2340, 1080, "false") == ["SA2_TWEAKS=no-event-bars", "[no-event-bars]"]
+def test_the_remove_cutscene_bars_switch_sends_no_event_bars(java):
+    assert java(2340, 1080, "no-event-bars") == ["SA2_TWEAKS=no-event-bars", "[no-event-bars]"]
 
 
-def test_the_tweaks_card_is_on_the_settings_screen():
-    """One Tweaks card with the cutscene bars switch, kept in the preferences like every other
-    setting."""
+def test_the_tweaks_turned_on_go_in_the_lists_order(java):
+    """Every line turned on, given in reverse: SA2_TWEAKS names them all once, in TWEAKS's order;
+    a name that is no line's is not sent."""
+    names = [line.split("|")[0] for line in java("list")]
+    assert java(2340, 1080, *reversed(names), "not-a-tweak") == [
+        "SA2_TWEAKS=" + ",".join(names), "[" + ",".join(names) + "]"]
+
+
+def test_each_tweak_line_has_a_label_and_a_note(java):
+    lines = [line.split("|") for line in java("list")]
+    assert ["no-event-bars", "Remove cutscene black bars"] in [line[:2] for line in lines]
+    assert all(len(line) == 3 and all(line) for line in lines)
+
+
+def test_the_tweaks_card_is_made_from_the_list():
+    """One Tweaks card, a switch and its note for each TWEAKS line, and the switches kept in the
+    preferences like every other setting: no tweak is named on the screen itself."""
     screen = (APP / "Sa2SettingsActivity.java").read_text()
     settings = (APP / "GameSettings.java").read_text()
     assert screen.count('card(col, "Tweaks")') == 1
-    assert 'toggle(tw, "Cutscene black bars"' in screen and "mEventBars.setChecked(mS.eventBars);" in screen
-    assert 'p.getBoolean("event_bars", s.eventBars)' in settings
-    assert '.putBoolean("event_bars", eventBars)' in settings
+    assert "mTweaks = new Switch[GameSettings.TWEAKS.length];" in screen
+    assert "mTweaks[i] = toggle(tw, tweak.label," in screen and "note(tw, tweak.description);" in screen
+    assert "mTweaks[i].setChecked(mS.tweaksOn.contains(GameSettings.TWEAKS[i].name));" in screen
+    assert "no-event-bars" not in screen and "eventBars" not in screen + settings
+    assert 'p.getBoolean("tweak_" + t.name, false)' in settings
+    assert 'e.putBoolean("tweak_" + t.name, tweaksOn.contains(t.name));' in settings

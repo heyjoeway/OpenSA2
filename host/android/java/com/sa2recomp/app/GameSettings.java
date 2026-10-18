@@ -10,8 +10,10 @@ import android.os.Build;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * The game settings the settings screen (Sa2SettingsActivity) keeps in the app's own preferences
@@ -33,9 +35,10 @@ import java.util.Locale;
  * the rest of the screen.
  *
  * The tweaks. Each is a change to the game's own behaviour, off by default, sent as one name in
- * SA2_TWEAKS (runtime/sa2_tweaks.c, which ignores it in a replay): the cutscene bars switch off
- * sends "no-event-bars", and the in-engine cutscenes then draw no black bars at the sides of a
- * wide picture.
+ * SA2_TWEAKS (runtime/sa2_tweaks.h, which lists them; the game ignores the setting in a replay).
+ * TWEAKS holds one line for each: the settings screen's Tweaks card makes a switch of every line,
+ * kept in the preferences as "tweak_<name>", and sessionSettings sends the names of those turned
+ * on, in TWEAKS's order. A new tweak is one line there (runtime/sa2_tweaks.h, "Add a tweak").
  */
 final class GameSettings {
     static final String PREFS = "game_settings";
@@ -57,6 +60,23 @@ final class GameSettings {
      * Config/UserConfig.cfg: host/install/sa2_config.cpp). */
     static final int CONFIG_W = 1280, CONFIG_H = 720;
 
+    /** One tweak the settings screen offers: its SA2_TWEAKS name (runtime/sa2_tweaks.h
+     * SA2_TWEAK_LIST), the switch's label, and the note under the switch. */
+    static final class Tweak {
+        final String name, label, description;
+
+        Tweak(String name, String label, String description) {
+            this.name = name;
+            this.label = label;
+            this.description = description;
+        }
+    }
+
+    /** Every tweak, one line each, in runtime/sa2_tweaks.h's order (name order). */
+    static final Tweak[] TWEAKS = {
+        new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
+    };
+
     String orientation = LANDSCAPE;
     boolean widescreen = true, hud43 = true;
     int resolution = 0;                  // lines, 0 the screen's
@@ -65,7 +85,7 @@ final class GameSettings {
     int pictureY = 25;                         // upright, the picture's centre, percent of the height down (0 to 50)
     String layoutLandscape = "", layoutPortrait = "";  // SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_PORTRAIT; "" its own
     String touchMap = "", padMap = "";         // SA2_TOUCH_MAP and SA2_PAD_MAP, only what differs
-    boolean eventBars = true;                  // the cutscenes' own side bars; false: SA2_TWEAKS no-event-bars
+    final Set<String> tweaksOn = new HashSet<>();  // the TWEAKS names turned on; none by default
 
     static GameSettings load(Context c) {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -82,14 +102,14 @@ final class GameSettings {
         s.layoutPortrait = p.getString("touch_layout_portrait", s.layoutPortrait);
         s.touchMap = p.getString("touch_map", s.touchMap);
         s.padMap = p.getString("pad_map", s.padMap);
-        s.eventBars = p.getBoolean("event_bars", s.eventBars);
+        for (Tweak t : TWEAKS) if (p.getBoolean("tweak_" + t.name, false)) s.tweaksOn.add(t.name);
         return s;
     }
 
     /** Written at once (commit, not apply): the play screen runs in its own process and reads the
      * file when the session starts. */
     void save(Context c) {
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        SharedPreferences.Editor e = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString("orientation", orientation)
                 .putBoolean("widescreen", widescreen)
                 .putBoolean("hud43", hud43)
@@ -101,9 +121,9 @@ final class GameSettings {
                 .putString("touch_layout", layoutLandscape)
                 .putString("touch_layout_portrait", layoutPortrait)
                 .putString("touch_map", touchMap)
-                .putString("pad_map", padMap)
-                .putBoolean("event_bars", eventBars)
-                .commit();
+                .putString("pad_map", padMap);
+        for (Tweak t : TWEAKS) e.putBoolean("tweak_" + t.name, tweaksOn.contains(t.name));
+        e.commit();
     }
 
     // ------------------------------------------------------------ the screen and the picture
@@ -245,11 +265,12 @@ final class GameSettings {
         return e;
     }
 
-    /** SA2_TWEAKS's value: the names of the tweaks turned on, comma-separated; "" for none. */
+    /** SA2_TWEAKS's value: the names of the tweaks turned on, comma-separated in TWEAKS's order;
+     * "" for none. */
     String tweaks() {
-        List<String> t = new ArrayList<>();
-        if (!eventBars) t.add("no-event-bars");
-        return String.join(",", t);
+        List<String> on = new ArrayList<>();
+        for (Tweak t : TWEAKS) if (tweaksOn.contains(t.name)) on.add(t.name);
+        return String.join(",", on);
     }
 
     private static String fraction(int percent) {

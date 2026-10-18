@@ -218,14 +218,14 @@ SCHEMA = "sa2-s7-release/v1"
 # both players; and the tools that generate the tables and the observer.
 SOURCE_GLOBS = ("host/launch/*.cpp", "host/launch/*.h", "host/launch/build.sh",
                 "host/install/*.cpp", "host/install/*.h", "host/install/build.sh",
-                "runtime/*.c", "runtime/*.cpp", "runtime/*.h", "runtime/*.inc",
+                "runtime/*.c", "runtime/*.cpp", "runtime/*.h", "runtime/*.inc", "runtime/tweaks/*.c",
                 "harness/crt_probe.c", "harness/replay/wrap_tick_probe.c", "harness/replay/*.h",
                 "host/sa2_present_rec.c", "host/*.h",
                 "host/player/*.cpp", "host/player/*.c", "host/player/*.h", "host/player/build.sh",
                 "host/player/dxvk.conf",
                 "host/d3d9gpu/*.cpp", "host/d3d9gpu/*.c", "host/d3d9gpu/*.h", "host/d3d9gpu/*.hlsl",
                 "host/d3d9gpu/*.glsl", "host/d3d9gpu/shader/*", "host/d3d9gpu/build.sh",
-                "tools/s4/link_s4.py",
+                "tools/s4/link_s4.py", "tools/s4/tweak_sources.py",
                 "tools/s7/install_table.py", "tools/s7/text_readset.py", "tools/s7/release_build.py")
 # Each bundled library's notice: (the release's name, where the build machine holds it).
 LICENSES = (("SDL3.txt", S5_INSTALL / "share/licenses/SDL3/LICENSE.txt"),
@@ -781,11 +781,16 @@ README_BUILD = {
 }
 
 
-def player_readme(target: str, f80_mode: str = NATIVE_MODE) -> str:
+def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT) -> str:
     """The player's README.txt at the release's top: how to start, what the first start does,
-    controllers, saves and where the logs are, and which build of the game it is (`f80_mode`,
+    controllers, saves and where the logs are, the tweaks (each one's summary in `src`'s
+    runtime/sa2_tweaks.h SA2_TWEAK_LIST), and which build of the game it is (`f80_mode`,
     game_f80_mode's). Written by the assemble step, so it is in the manifest."""
     win = target == "x86_64-windows"
+    tweaks = load(src, "tools/s4/tweak_sources.py", "release_tweak_sources").rows(src / "runtime")
+    if not tweaks:
+        raise SystemExit(f"release_build: {src / 'runtime' / 'sa2_tweaks.h'} lists no tweak")
+    pad = max(len(t["name"]) for t in tweaks)
     build = README_BUILD.get(f80_mode, [f"  The game here is the {f80_mode} f80 build (tools/s8/perf_f80.py)."])
     run = "bin\\sa2recomp.exe (double-click it)" if win else "bin/sa2recomp"
     data = "%LOCALAPPDATA%\\sa2recomp" if win else "~/.local/share/sa2recomp (and ~/.config/sa2recomp)"
@@ -814,7 +819,7 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE) -> str:
         "Tweaks",
         "  Optional changes to the game, each off unless named. To turn one on, add a line to",
         f"  {env}:",
-        "    SA2_TWEAKS=no-event-bars    no black bars at the sides of some cutscenes on a wide screen",
+        *[f"    SA2_TWEAKS={t['name']:<{pad}}    {t['summary']}" for t in tweaks],
         "  Name several with commas. Each session's game.log begins by saying which are on.",
         "",
         "This build",
@@ -828,7 +833,7 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE) -> str:
 
 def step_assemble(src: Path, work: Path, out: Path, notes: dict) -> None:
     print("== assemble", flush=True)
-    (out / README).write_text(player_readme("x86_64-linux", game_f80_mode(notes)))
+    (out / README).write_text(player_readme("x86_64-linux", game_f80_mode(notes), src))
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != MANIFEST)
     missing = [n for n in [f"bin/{GAME}", f"bin/{LAUNCHER}", f"bin/{INSTALLER}", ENV_FILE,
                            "share/dxvk.conf"] + [f"bin/{n}" for n in PLAYERS.values()]
@@ -994,7 +999,7 @@ def step_launch_windows(src: Path, work: Path, out: Path) -> None:
 
 def step_assemble_windows(src: Path, work: Path, out: Path, notes: dict) -> None:
     print("== assemble (x86_64-windows)", flush=True)
-    (out / README).write_text(player_readme("x86_64-windows", game_f80_mode(notes)), newline="\r\n")
+    (out / README).write_text(player_readme("x86_64-windows", game_f80_mode(notes), src), newline="\r\n")
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != MANIFEST)
     missing = [n for n in [f"bin/{GAME}.exe", f"bin/{LAUNCHER}.exe", f"bin/{INSTALLER}.exe",
                            "bin/sa2_player_gpu.exe", "bin/SDL3.dll", ENV_FILE]

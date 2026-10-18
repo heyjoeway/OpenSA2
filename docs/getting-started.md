@@ -60,6 +60,17 @@ Use the [architecture guide](architecture.md) to choose a starting point. The ma
 | Guest memory, Windows services, and guest devices | `runtime/` |
 | Translation and compilation tools | `tools/s2/`, `tools/s3/`, and `tools/spike/` |
 
+## Add a tweak
+
+A tweak is an optional change to the game's behavior that a player turns on with the `SA2_TWEAKS` setting. A tweak adds its own file and lines and changes no existing line, so several tweaks can be written at the same time in separate branches:
+
+1. Add one line for the tweak to `SA2_TWEAK_LIST` in `runtime/sa2_tweaks.h`.
+2. Put its wraps in `runtime/tweaks/<name>.c`. A `TWEAK_WRAPS:` line in the file's header comment names the translated functions that the file wraps. The link tools find the file and its wraps without further changes.
+3. Add one line for its switch to `TWEAKS` in `host/android/java/com/sa2recomp/app/GameSettings.java`.
+4. Add a row to the [Tweaks](downloads.md#tweaks) table.
+
+`Documentation/scripts/tests/test_tweaks.py` checks that the list, the files, and the Android lines agree. The header comment in `runtime/sa2_tweaks.h` gives the rules that every tweak follows.
+
 ## Understand the full build prerequisites
 
 The game build is a developer workflow, with a Linux build host used for desktop and Android targets. The existing scripts expect a local toolchain and generated files under the ignored `private/` directory.

@@ -358,7 +358,7 @@ LIFTED_WORDS = "lifted-words.bin"      # SA2_REPLAY_WORDS, kept compressed besid
 # A quoted #include, and any other: a probe that includes a file by macro or by
 # a path this cannot resolve cannot say which headers it was built from.
 INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(.*?)[ \t]*$', re.M)
-RUNTIME_GLOBS = ("runtime/*.c", "runtime/*.cpp", "runtime/*.h")
+RUNTIME_GLOBS = ("runtime/*.c", "runtime/*.cpp", "runtime/*.h", "runtime/tweaks/*.c")
 
 # A stage entry's native side is built from two probes beside the tick probe:
 # the stage trace it is compared on, and the input probe its goal tick and

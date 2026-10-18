@@ -269,9 +269,11 @@ def test_no_config_read_is_left(exe):
 def test_every_link_wraps_read_config_and_the_hud_sites(exe):
     assert "sa2_widescreen.c" in LS.RUNTIME_C and "sub_405310" in LS.PRODUCTION_WRAPS
     assert LS.PRODUCTION_WRAPS[0] == "sub_427ee0"
-    # After ReadConfig, the file's HUD43_SITES in its order, and nothing else.
+    # After ReadConfig, the file's HUD43_SITES in its order, then only the play tweaks' wraps
+    # (runtime/tweaks/*.c, tools/s4/tweak_sources.py).
+    import tweak_sources as TS
     after = LS.PRODUCTION_WRAPS[LS.PRODUCTION_WRAPS.index("sub_405310") + 1:]
-    assert after == [f"sub_{va}" for va, _ in SITES]
+    assert after == [f"sub_{va}" for va, _ in SITES] + TS.wraps(ROOT / "runtime", [])
     assert "44e9c0" in LAYOUT and {"420210", "420390", "4200f0", "77e980", "42b230", "41b0c0"} <= set(GUARD)
     # Every reader of the HUD's x origin that also reads the width: the trick score, the kart
     # race's HUD and time extension, the boss rush results and the countdown at 0x006F41B0.

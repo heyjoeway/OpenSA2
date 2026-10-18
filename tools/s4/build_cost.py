@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "s3" / "whole_image
 import common as C  # noqa: E402
 
 import spikelib as S  # noqa: E402
+import tweak_sources as TS  # tools/s4/tweak_sources.py  # noqa: E402
 
 RUNTIME = C.ROOT / "runtime"
 OUT = C.GEN / "s4" / "build_cost"
@@ -58,7 +59,9 @@ def s4_added_c() -> list[str]:
     whole addition -- a number true of a build nobody makes, which is the same
     defect the build-time kill criterion itself had. It is now derived from
     `link_s4.py`'s own `RUNTIME_C`, so a file added there cannot be missing
-    here, and a parse that finds nothing refuses instead of reporting zero."""
+    here, and a parse that finds nothing refuses instead of reporting zero. The play tweaks'
+    files (runtime/tweaks/*.c), which link_s4.py adds to RUNTIME_C after its literal, are
+    added here the same way (tools/s4/tweak_sources.py)."""
     src = (C.ROOT / "tools" / "s4" / "link_s4.py").read_text()
     m = re.search(r"RUNTIME_C = \[(.*?)\]", src, re.S)
     if not m:
@@ -67,7 +70,7 @@ def s4_added_c() -> list[str]:
     added = [n for n in names if n not in S3_RUNTIME_C]
     if not added:
         raise SystemExit("link_s4.py's RUNTIME_C adds nothing to S3's list; that cannot be right")
-    return added
+    return added + TS.sources(RUNTIME)
 
 
 S4_ADDED_C = s4_added_c()
@@ -90,12 +93,14 @@ def production_wraps() -> list[str]:
     """The lifted functions the runtime wraps in every build, from link_s4.py's
     PRODUCTION_WRAPS, read for the reason s4_added_c reads RUNTIME_C: the link
     with S4's sources compiles runtime/sa2_poll_handoff.c, whose strong
-    `__real_sub_427ee0` reference fails a link that omits the flag."""
+    `__real_sub_427ee0` reference fails a link that omits the flag. The play tweaks' wraps
+    follow, as link_s4.py adds them after its literal (tools/s4/tweak_sources.py)."""
     src = (C.ROOT / "tools" / "s4" / "link_s4.py").read_text()
     m = re.search(r"PRODUCTION_WRAPS = \[(.*?)\]", src, re.S)
     if not m:
         raise SystemExit("tools/s4/link_s4.py has no PRODUCTION_WRAPS list to read")
-    return re.findall(r'"(sub_[0-9a-f]+)"', m.group(1))
+    listed = re.findall(r'"(sub_[0-9a-f]+)"', m.group(1))
+    return listed + TS.wraps(RUNTIME, listed)
 
 
 PRODUCTION_WRAPS = production_wraps()

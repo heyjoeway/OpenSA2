@@ -10,7 +10,9 @@ legalised objects call.
 What each replay links is read from the tools that link it on x86-64, never typed here:
 
   runtime   link_s4.py's RUNTIME_C and RUNTIME_CXX, its -O2 and its PRODUCTION_WRAPS, read
-            from the source tree's own link_s4.py (so a snapshot links what it holds);
+            from the source tree's own link_s4.py (so a snapshot links what it holds), and
+            the play tweaks' files and wraps in the source tree's runtime/tweaks/, which
+            link_s4.py adds to those lists on import (tools/s4/tweak_sources.py);
   hooks     a replay's hooks and wraps: tick_replay.HOOK and WRAP for the boot entry,
             stage_run.HOOKS and WRAPS for a stage entry; the main is reach_receipt.MAIN;
   generated loop_run.link_args's --extra-c inputs, in its order: the edge table, the extras'
@@ -114,7 +116,10 @@ def x86(triple: str) -> bool:
 
 
 def link_s4_lists(src: Path) -> dict:
-    """RUNTIME_C, RUNTIME_CXX, OPT and PRODUCTION_WRAPS as the source tree's link_s4.py says."""
+    """RUNTIME_C, RUNTIME_CXX, OPT and PRODUCTION_WRAPS as the source tree's link_s4.py says:
+    its literals, then the play tweaks' files and wraps in the tree's runtime/tweaks/, which
+    link_s4.py adds after its literals when imported (tools/s4/tweak_sources.py)."""
+    import tweak_sources as TS  # noqa: PLC0415  tools/s4/tweak_sources.py
     tree = ast.parse((src / "tools" / "s4" / "link_s4.py").read_text())
     want = ("RUNTIME_C", "RUNTIME_CXX", "OPT", "PRODUCTION_WRAPS")
     found = {}
@@ -125,6 +130,9 @@ def link_s4_lists(src: Path) -> dict:
     missing = [w for w in want if w not in found]
     if missing:
         raise SystemExit(f"{src}/tools/s4/link_s4.py does not define {missing} as literals")
+    found["RUNTIME_C"] = found["RUNTIME_C"] + TS.sources(src / "runtime")
+    found["PRODUCTION_WRAPS"] = found["PRODUCTION_WRAPS"] + TS.wraps(src / "runtime",
+                                                                     found["PRODUCTION_WRAPS"])
     return found
 
 

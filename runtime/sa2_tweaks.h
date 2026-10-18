@@ -210,6 +210,7 @@ enum {
  * host's, host/player/tweaks.h's. */
 #define SA2_TWEAK_HOST_LIST(X) \
     X(SA2_TWEAK_CAMERA_INVERT, "camera-invert", "camera turn inverted", "the camera turns the other way on the right stick and the triggers", "player") \
+    X(SA2_TWEAK_DEADZONE, "deadzone", "round stick deadzone", "a round deadzone for a gamepad's left stick, and full tilt before its edge", "player") \
     /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */

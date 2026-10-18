@@ -339,6 +339,7 @@
 #include "touch_overlay.h"
 #include "tweaks.h"
 #include "tweaks/camera-invert.h"
+#include "tweaks/deadzone.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -4674,6 +4675,7 @@ void Player::send_pads() {
     sa2_input::PadSet set;
     for (size_t i = 0; i < sa2_input::kPadSlots; ++i)
         if (pad_slots_[i].pad) set.slot[i] = pad_slots_[i].state;
+    sa2tw::deadzone(&set);                          // host tweak "deadzone": the pads' left sticks
     if (touch_) {
         sa2_input::PadState t;
         sa2_touch::pad(touch_, &t);

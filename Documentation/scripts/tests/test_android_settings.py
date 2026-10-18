@@ -91,6 +91,16 @@ def test_each_tweak_line_has_a_label_and_a_note(java):
     assert all(len(line) == 3 and all(line) for line in lines)
 
 
+def test_the_vsync_note_says_android_does_not_tear_either_way(java):
+    """Android's swapchain offers no IMMEDIATE, so with vsync off host 2 already presents through
+    MAILBOX, tear-free; the switch's note names the trade it makes there, FIFO for up to a frame of
+    delay, and does not promise to stop tearing."""
+    assert [line for line in java("list") if line.startswith("vsync|")] == [
+        "vsync|Vsync|Each frame waits for the screen's refresh (FIFO) instead of mailbox presentation. Android "
+        "does not tear either way, so on a phone this only adds up to a frame of delay. Leave it off unless "
+        "you are testing it."]
+
+
 def test_the_tweaks_card_is_made_from_the_list():
     """One Tweaks card, a switch and its note for each TWEAKS line, and the switches kept in the
     preferences like every other setting: no tweak is named on the screen itself."""

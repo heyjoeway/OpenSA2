@@ -220,6 +220,7 @@ enum {
     X(SA2_TWEAK_SWAP_AUDIO, "swap-audio", "swap audio", "left and right speakers swapped", "player") \
     X(SA2_TWEAK_TEX_FILTER, "tex-filter", "texture filter 16x", "16x anisotropic filtering (where the device has samplerAnisotropy) and a -0.25 mip bias on mip-mapped, mip-filtered textures (the sdl3-gpu player)", "player") \
     X(SA2_TWEAK_VANILLA_PROFILE, "vanilla-profile", "vanilla: every other tweak off", "every other tweak named with it off, for a vanilla run that keeps the list", "launcher") \
+    X(SA2_TWEAK_VSYNC, "vsync", "vsync on", "presents each frame on the display's refresh (vsync); stops tearing only where off would use IMMEDIATE (X11, Windows), about a frame more delay", "player") \
     /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */

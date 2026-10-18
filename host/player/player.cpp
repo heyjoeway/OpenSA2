@@ -347,6 +347,7 @@
 #include "tweaks/slow-mode.h"
 #include "tweaks/swap-audio.h"
 #include "tweaks/tex-filter.h"
+#include "tweaks/vsync.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -6120,6 +6121,7 @@ int main(int argc, char** argv) {
     sa2tw::g_on = tweaks.on;
     if (!tweaks.line.empty()) std::fprintf(stderr, "%s\n", tweaks.line.c_str());
     sa2tw::tex_filter::start();
+    o.vsync = sa2tw::vsync(o.vsync);   // the vsync tweak: --vsync in play (tweaks/vsync.cpp)
 #ifndef _WIN32
     if (o.end_fd >= 0) std::signal(SIGUSR1, on_end_signal);   // the caller's end request
 #else

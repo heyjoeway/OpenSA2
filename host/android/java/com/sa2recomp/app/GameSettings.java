@@ -114,6 +114,7 @@ final class GameSettings {
         new Tweak("slow-mode", "Slow mode", "Plays the game at three quarters of its speed. The sound slows with it and plays lower in pitch."),
         new Tweak("swap-audio", "Swap left/right audio", "Plays the left channel from the right speaker and the right channel from the left, for headphones worn the other way round. With mono audio on there is nothing to swap."),
         new Tweak("tex-filter", "Sharper textures", "Sharpens textures that have mipmaps, most of the 3D world, so floors and walls stay sharp into the distance: 16x anisotropic filtering where the GPU supports it, and a slight mip bias. Most of the HUD and menus look the same. A small GPU cost."),
+        new Tweak("vsync", "Vsync", "Each frame waits for the screen's refresh (FIFO) instead of mailbox presentation. Android does not tear either way, so on a phone this only adds up to a frame of delay. Leave it off unless you are testing it."),
         new Tweak("walker-cannon-fix", "Fix the Chao Walker cannon crash", "Stops the crash when a Chao Walker has the cannon upgrade, which only a cheat can give it. Changes nothing else."),
     };
 

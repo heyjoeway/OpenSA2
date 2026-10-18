@@ -411,6 +411,7 @@ DRIVER = r'''
 namespace sa2tw {
 void hold_while_unfocused(SDL_Window*,SDL_AudioStream*,bool,const std::function<const char*()>&,const std::function<void()>&){}  // pause-unfocused
 namespace tex_filter { void start(){} }  // tex-filter
+bool vsync(bool asked){return asked;}  // vsync
 }
 namespace fs=std::filesystem;
 #define SA2_PLAYER_GPU 0

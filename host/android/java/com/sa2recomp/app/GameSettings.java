@@ -10,9 +10,13 @@ import android.os.Build;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -40,9 +44,11 @@ import java.util.Set;
  * holds one line for each, a game tweak or a host tweak whose home is the player or this app, and
  * a switch is a switch either way: the settings screen's Tweaks card makes one of every line, kept
  * in the preferences as "tweak_<name>", and sessionSettings sends the names of those turned on, in
- * TWEAKS's order, to the game and the player alike. A host tweak whose home is this app has its
- * helper, Tweak<Name>.java, which asks tweaksOn. A new tweak is one line there
- * (runtime/sa2_tweaks.h, "Add a tweak", "Add a host tweak").
+ * TWEAKS's order, to the game and the player alike. The card shows them under TWEAK_GROUPS's
+ * headings, each group sorted by label (tweakGroups), not in TWEAKS's order. A host tweak whose home
+ * is this app has its helper, Tweak<Name>.java, which asks tweaksOn. A new tweak is one line in
+ * TWEAKS and its name in one group of TWEAK_GROUPS (runtime/sa2_tweaks.h, "Add a tweak", "Add a host
+ * tweak").
  */
 final class GameSettings {
     static final String PREFS = "game_settings";
@@ -80,7 +86,8 @@ final class GameSettings {
     }
 
     /** Every tweak, one line each, game and host alike (but a host tweak of the desktop launcher's), in
-     * name order, the order of runtime/sa2_tweaks.h's two lists together. */
+     * name order, the order of runtime/sa2_tweaks.h's two lists together. SA2_TWEAKS names them in
+     * this order; the Tweaks card shows them by TWEAK_GROUPS instead. */
     static final Tweak[] TWEAKS = {
         new Tweak("2p-layout-in-1p", "Two-player stage layouts", "13 one-player stages use their leftover two-player object layout: other rings, items and enemies. Hard Mode, Pumpkin Hill and Iron Gate keep their own. These layouts leave out most upgrades and Chao key boxes, and some switches and animals, so a mission may not be finishable. Clears, ranks and emblems still save; an upgrade the layout leaves out cannot be collected or saved."),
         new Tweak("all-events-skippable", "Skip any cutscene", "Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch."),
@@ -134,6 +141,130 @@ final class GameSettings {
         new Tweak("vsync", "Vsync", "Each frame waits for the screen's refresh (FIFO) instead of mailbox presentation. Android does not tear either way, so on a phone this only adds up to a frame of delay. Leave it off unless you are testing it."),
         new Tweak("walker-cannon-fix", "Fix the Chao Walker cannon crash", "Stops the crash when a Chao Walker has the cannon upgrade, which only a cheat can give it. Changes nothing else."),
     };
+
+    /** The Tweaks card's groups, in the card's order: each a heading, then the names of its tweaks,
+     * one a line in name order; the card sorts each group by label (tweakGroups). Every TWEAKS name
+     * is in exactly one group (test_tweaks.py): a new Android tweak adds its line to TWEAKS and its
+     * name's line to one group (runtime/sa2_tweaks.h, "Add a tweak"). The headings follow the
+     * release notes; pause-unfocused, which they list under Windows and Linux, is under Other. */
+    static final String[][] TWEAK_GROUPS = {
+        {"Story and presentation",
+            "all-events-skippable",
+            "always-recap",
+            "draw-distance",
+            "event-bars-all",
+            "fast-stage-load",
+            "fov",
+            "frametime-overlay",
+            "hide-hud",
+            "hide-upgrade-models",
+            "no-event-bars",
+            "no-loading-tips",
+            "reduce-shake",
+            "skip-intro",
+            "tex-filter",
+            "vsync",
+        },
+        {"Gameplay and assists",
+            "2p-layout-in-1p",
+            "force-hard-layout",
+            "forgiving-restarts",
+            "gold-beetle-stays",
+            "hide-radar",
+            "infinite-lives",
+            "m4-time-rank",
+            "no-2p-specials",
+            "no-lives-bonus",
+            "physics-preset",
+            "practice-stage",
+            "quiet-omochao",
+            "radar-all-pieces",
+            "ring-loss-cap",
+            "rival-upgrades",
+            "slow-mode",
+            "spin-dash-fast",
+            "stage-select-all",
+            "start-assists",
+            "victory-powerups",
+        },
+        {"Controls",
+            "analog-fix",
+            "camera-invert",
+            "deadzone",
+            "hold-toggle",
+        },
+        {"Audio",
+            "mono-audio",
+            "no-music",
+            "no-powerup-music",
+            "no-voices",
+            "swap-audio",
+        },
+        {"Chao",
+            "chao-key-always",
+            "chao-stat-x5",
+            "drives-to-minimals",
+            "garden-ring-trickle",
+        },
+        {"Fixes",
+            "metal-bounce-fix",
+            "walker-cannon-fix",
+        },
+        {"Other",
+            "pause-unfocused",
+        },
+    };
+    /** The heading a tweak in no group is shown under, at the end of the card. */
+    static final String OTHER = "Other";
+
+    /** One heading of the Tweaks card and its tweaks, in the card's order. */
+    static final class TweakGroup {
+        final String heading;
+        final List<Tweak> tweaks = new ArrayList<>();
+
+        TweakGroup(String heading) {
+            this.heading = heading;
+        }
+    }
+
+    /** The Tweaks card's order: `groups` in their order, each group's tweaks sorted by label (case
+     * ignored, Locale.ROOT), every line of `tweaks` once. A mistake in `groups` is added to
+     * `problems` by name and never hides a switch: a name in no group is shown under OTHER (the
+     * last group, or a new one at the end); a name in two groups is shown in the first only; a
+     * name that is no tweak's is left out; a group left with no tweak is not shown. */
+    static List<TweakGroup> tweakGroups(String[][] groups, Tweak[] tweaks, List<String> problems) {
+        Map<String, Tweak> byName = new LinkedHashMap<>();
+        for (Tweak t : tweaks) byName.put(t.name, t);
+        Map<String, String> placed = new HashMap<>();   // tweak name -> its group's heading
+        List<TweakGroup> out = new ArrayList<>();
+        TweakGroup other = null;
+        for (String[] g : groups) {
+            TweakGroup group = new TweakGroup(g[0]);
+            for (int i = 1; i < g.length; i++) {
+                Tweak t = byName.get(g[i]);
+                if (t == null) problems.add("\"" + g[i] + "\" under " + g[0] + " is no tweak");
+                else if (placed.containsKey(t.name))
+                    problems.add("\"" + t.name + "\" is under " + placed.get(t.name) + " and " + g[0]);
+                else {
+                    placed.put(t.name, g[0]);
+                    group.tweaks.add(t);
+                }
+            }
+            if (OTHER.equals(g[0])) other = group;
+            out.add(group);
+        }
+        for (Tweak t : tweaks) {
+            if (placed.containsKey(t.name)) continue;
+            problems.add("\"" + t.name + "\" is in no group; shown under " + OTHER);
+            if (other == null) out.add(other = new TweakGroup(OTHER));
+            other.tweaks.add(t);
+        }
+        Comparator<Tweak> byLabel = Comparator.comparing((Tweak t) -> t.label.toLowerCase(Locale.ROOT))
+                                              .thenComparing(t -> t.name);
+        out.removeIf(g -> g.tweaks.isEmpty());
+        for (TweakGroup g : out) g.tweaks.sort(byLabel);
+        return out;
+    }
 
     String orientation = LANDSCAPE;
     boolean widescreen = true, hud43 = true;

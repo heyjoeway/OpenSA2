@@ -27,7 +27,8 @@ tools/s8/variants/variants.py generates; test_variants.py links the generated fi
 The host side (runtime/sa2_tweaks.h, "Add a host tweak"): the host list (SA2_TWEAK_HOST_LIST) is
 held with the game's to one name order and one spelling, each host tweak to its own file in its
 home and each file in the homes to its tweak, to the Android switches (but a launcher's) and to the
-release's README (but an app's). The game's reader and the host's (host/player/tweaks.cpp, built
+release's README (but an app's). Each Android switch is in exactly one of the Tweaks card's groups
+(GameSettings.TWEAK_GROUPS), whose headings are in the card's order. The game's reader and the host's (host/player/tweaks.cpp, built
 with the system g++ as host/player/build.sh builds it) are compiled from a copy of the header with
 one host tweak of each home registered (none is yet): the game names each as the host's and turns
 nothing on; the host's reader turns on its home's alone, names the others' by home, says nothing of
@@ -381,6 +382,36 @@ def test_every_tweak_has_its_android_switch_and_every_switch_its_tweak():
     """One switch for each tweak, the game's and the host's, in name order, but a host tweak of the
     desktop launcher's, which does nothing on Android."""
     assert android_tweaks() == [r["name"] for r in TS.every_row(RUNTIME) if r.get("home") != "launcher"]
+
+
+# The Tweaks card's headings, in its order: the release notes' groups, and Other.
+CARD_HEADINGS = ["Story and presentation", "Gameplay and assists", "Controls", "Audio", "Chao", "Fixes", "Other"]
+
+
+def android_tweak_groups() -> list[tuple[str, list[str]]]:
+    """GameSettings.TWEAK_GROUPS: each group's heading and its names, in its order."""
+    text = GAME_SETTINGS.read_text()
+    m = re.search(r"static final String\[\]\[\] TWEAK_GROUPS = \{(.*?)\n    \};", text, re.S)
+    assert m, f"{GAME_SETTINGS.name} has no TWEAK_GROUPS array"
+    groups = [re.findall(r'"([^"]+)"', g) for g in re.findall(r"\{(.*?)\}", m.group(1), re.S)]
+    return [(g[0], g[1:]) for g in groups]
+
+
+def test_every_android_tweak_is_in_one_group_of_the_tweaks_card():
+    """The card shows TWEAK_GROUPS: the headings in their order, none empty, each group's names one a
+    line in name order (so tweaks added at once merge as added lines), and each TWEAKS name in exactly
+    one group, so a new tweak whose name is in no group (or two) fails here by name."""
+    groups = android_tweak_groups()
+    assert [heading for heading, _ in groups] == CARD_HEADINGS
+    assert all(names for _, names in groups), [heading for heading, names in groups if not names]
+    assert all(names == sorted(names) for _, names in groups), "each group's names go in name order"
+    grouped = [n for _, names in groups for n in names]
+    twice = sorted({n for n in grouped if grouped.count(n) > 1})
+    assert not twice, f"in two groups of TWEAK_GROUPS: {twice}"
+    assert not set(android_tweaks()) - set(grouped), \
+        f"in no group of TWEAK_GROUPS: {sorted(set(android_tweaks()) - set(grouped))}"
+    assert not set(grouped) - set(android_tweaks()), \
+        f"in TWEAK_GROUPS but no TWEAKS line: {sorted(set(grouped) - set(android_tweaks()))}"
 
 
 def test_every_tweak_is_in_the_release_readme():

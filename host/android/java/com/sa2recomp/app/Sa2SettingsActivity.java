@@ -24,16 +24,18 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * The game settings screen, opened from the setup screen: the orientation (landscape, portrait or
  * auto-rotate), the full-width picture, the HUD at 4:3, the picture's aspect and resolution, the
  * touch controls' size, opacity and places (Sa2LayoutActivity), what each touch or controller
  * button sends, and the tweaks (changes to the game's own behaviour, none made by default: a
- * switch for each line of GameSettings.TWEAKS). Each change is saved at once (GameSettings) and
- * applies from the next session.
+ * switch for each line of GameSettings.TWEAKS, under GameSettings.TWEAK_GROUPS's headings). Each
+ * change is saved at once (GameSettings) and applies from the next session.
  * Every setting starts at today's behaviour, and "Reset all" puts them back.
  */
 public class Sa2SettingsActivity extends Activity {
@@ -43,7 +45,7 @@ public class Sa2SettingsActivity extends Activity {
     private int mLong, mShort;
     private Button[] mOrientation, mAspect;
     private Switch mWidescreen, mHud;
-    private Switch[] mTweaks;                  // one for each GameSettings.TWEAKS line, in its order
+    private final Map<String, Switch> mTweaks = new HashMap<>();   // each GameSettings.TWEAKS name's switch
     private Button mTweaksOff;                 // every tweak off at once (GameSettings.tweaksOff)
     private Button mResolution, mLayoutLandscape, mLayoutPortrait;
     private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel, mPlaceLabel, mPlaceNote;
@@ -92,12 +94,18 @@ public class Sa2SettingsActivity extends Activity {
         return t;
     }
 
-    /** A rounded card holding one section's rows. */
-    private LinearLayout card(LinearLayout col, String title) {
+    /** A section's title: a card's, or a group's inside a card. TalkBack can move from one to the next. */
+    private TextView heading(String title) {
         TextView head = text(title, 13, Color.rgb(0x8C, 0xB6, 0xFF), true);
         head.setAllCaps(true);
         head.setLetterSpacing(0.08f);
-        col.addView(head, Ui.full(dp(24)));
+        if (Build.VERSION.SDK_INT >= 28) head.setAccessibilityHeading(true);
+        return head;
+    }
+
+    /** A rounded card holding one section's rows. */
+    private LinearLayout card(LinearLayout col, String title) {
+        col.addView(heading(title), Ui.full(dp(24)));
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
@@ -292,18 +300,25 @@ public class Sa2SettingsActivity extends Activity {
         note(p, "Buttons are named by where they are: the bottom face button is A, as on an Xbox controller.");
 
         // Tweaks: changes to the game's own behaviour, none made by default, a switch and its note for
-        // each line of GameSettings.TWEAKS (GameSettings, "The tweaks").
+        // each line of GameSettings.TWEAKS, under GameSettings.TWEAK_GROUPS's headings, each group
+        // sorted by label (GameSettings, "The tweaks"). A switch is its tweak's by name.
         LinearLayout tw = card(col, "Tweaks");
-        mTweaks = new Switch[GameSettings.TWEAKS.length];
-        for (int i = 0; i < mTweaks.length; i++) {
-            GameSettings.Tweak tweak = GameSettings.TWEAKS[i];
-            mTweaks[i] = toggle(tw, tweak.label, (b, on) -> {
-                if (on) mS.tweaksOn.add(tweak.name);
-                else mS.tweaksOn.remove(tweak.name);
-                save();
-            });
-            if (i == 0) ((LinearLayout.LayoutParams) mTweaks[i].getLayoutParams()).topMargin = 0;
-            note(tw, tweak.description);
+        List<String> problems = new ArrayList<>();
+        List<GameSettings.TweakGroup> groups =
+                GameSettings.tweakGroups(GameSettings.TWEAK_GROUPS, GameSettings.TWEAKS, problems);
+        for (String problem : problems) Log.w("sa2recomp", "sa2 tweaks card: " + problem);
+        for (GameSettings.TweakGroup group : groups) {
+            tw.addView(heading(group.heading), Ui.full(mTweaks.isEmpty() ? 0 : dp(24)));
+            for (GameSettings.Tweak tweak : group.tweaks) {
+                Switch w = toggle(tw, tweak.label, (b, on) -> {
+                    if (on) mS.tweaksOn.add(tweak.name);
+                    else mS.tweaksOn.remove(tweak.name);
+                    save();
+                });
+                if (tweak == group.tweaks.get(0)) ((LinearLayout.LayoutParams) w.getLayoutParams()).topMargin = dp(8);
+                mTweaks.put(tweak.name, w);
+                note(tw, tweak.description);
+            }
         }
         // Vanilla: every tweak off at once (the desktop's is vanilla-profile, runtime/sa2_tweaks.h).
         mTweaksOff = action(tw, "Turn every tweak off", v -> new AlertDialog.Builder(this)
@@ -399,7 +414,7 @@ public class Sa2SettingsActivity extends Activity {
         mResolution.setText(resolutionName(shownResolution()));
         mResolution.setEnabled(fixed || wide);
         mHud.setChecked(mS.hud43);
-        for (int i = 0; i < mTweaks.length; i++) mTweaks[i].setChecked(mS.tweaksOn.contains(GameSettings.TWEAKS[i].name));
+        for (Map.Entry<String, Switch> e : mTweaks.entrySet()) e.getValue().setChecked(mS.tweaksOn.contains(e.getKey()));
         mTweaksOff.setEnabled(!mS.tweaksOn.isEmpty());
         int[] pic = mS.picture(mLong, mShort);
         mPictureNote.setText(pic == null

@@ -78,12 +78,16 @@
  *      list: `TWEAK_WRAPS: none (it acts in no-event-bars.c's wrap of sub_5f8ec0)`.
  *   3. One line in host/android GameSettings.TWEAKS: new Tweak("<name>", the switch's label, the
  *      note under it). The settings screen's Tweaks card makes a switch of each line, and
- *      sessionSettings sends the ones turned on.
+ *      sessionSettings sends the ones turned on. And one line, "<name>", in one group of
+ *      GameSettings.TWEAK_GROUPS, in name order: the heading the card shows the switch under (the
+ *      card sorts each group by label). A name in no group shows under Other, and test_tweaks.py
+ *      fails until it is in one.
  *   4. Its tests. Documentation/scripts/tests/test_tweaks.py holds the list, the files and the
- *      Android lines to one another, and each file's TWEAK_WRAPS line to the wraps it defines, so a
- *      step left out fails there by name. What the tweak does goes in a test file of its own, which
- *      compiles the tweak's file beside sa2_tweaks.c with a driver that stands in for the lifted
- *      functions and the runtime's accessors, as test_tweaks.py does for no-event-bars.
+ *      Android lines and groups to one another, and each file's TWEAK_WRAPS line to the wraps it
+ *      defines, so a step left out fails there by name. What the tweak does goes in a test file
+ *      of its own, which compiles the tweak's file beside sa2_tweaks.c with a driver that stands
+ *      in for the lifted functions and the runtime's accessors, as test_tweaks.py does for
+ *      no-event-bars.
  *   5. A row in the player's guide (OpenSA2's docs/downloads.md, "Tweaks").
  *
  * Add a code-patch tweak (tools/s8/variants/README.md has the tool's checks and limits). Steps 1, 3
@@ -129,8 +133,9 @@
  *                  switch (game.env.extra, which the session reads after the app is up, does not
  *                  reach it), and says in logcat (tag sa2recomp) what it did.
  *      Off is the host as it was: each change tests its tweak first and otherwise does nothing.
- *   3. One line in host/android GameSettings.TWEAKS, as a tweak's, when its home is "player" or
- *      "app"; a launcher tweak has none, since it does nothing on Android.
+ *   3. One line in host/android GameSettings.TWEAKS, and its name in a TWEAK_GROUPS group, as a
+ *      tweak's, when its home is "player" or "app"; a launcher tweak has neither, since it does
+ *      nothing on Android.
  *   4. Its tests. test_tweaks.py holds the host list to the home files and the Android lines, and
  *      the reader to its cases; what the tweak does goes in a test file of its own.
  *   5. A row in the player's guide (OpenSA2's docs/downloads.md, "Tweaks"). The release's

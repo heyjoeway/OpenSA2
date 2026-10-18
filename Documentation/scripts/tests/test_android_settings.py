@@ -7,7 +7,8 @@ tweaks go as one value, SA2_TWEAKS, which runtime/sa2_tweaks.c reads: absent at 
 session with every setting at its default runs as before there were tweaks, and the names of the
 tweaks turned on, in GameSettings.TWEAKS's order, otherwise. TWEAKS is the one place a tweak is
 named on Android: the Tweaks card makes a switch of each line (test_tweaks.py holds the lines to
-runtime/sa2_tweaks.h's list). A small Java driver runs GameSettings here against android.jar; the
+runtime/sa2_tweaks.h's list), shown under GameSettings.TWEAK_GROUPS's headings with each group
+sorted by label (GameSettings.tweakGroups), while SA2_TWEAKS and the preferences keep the names. A small Java driver runs GameSettings here against android.jar; the
 settings screen (Sa2SettingsActivity, with Ui and the layout editor it opens) is compiled beside
 it, so a card that no longer builds fails here, not in the APK's build.
 
@@ -29,13 +30,35 @@ ANDROID_JAR = ROOT / "private/android-sdk/platforms/android-36/android.jar"
 APP = ROOT / "host/android/java/com/sa2recomp/app"
 
 # argv: lng shrt [tweak names to turn on...] -> each --setting on a line, then the SA2_TWEAKS value
-# in brackets; argv "list" -> each TWEAKS line as name|label|description.
+# in brackets; argv "list" -> each TWEAKS line as name|label|description; argv "groups" [heading=name,
+# name...]... -> the Tweaks card's order for TWEAK_GROUPS (or for the groups given), "# heading" and
+# then "name|label" for each tweak, and "! problem" for each problem tweakGroups found.
 DRIVER = r"""
 package com.sa2recomp.app;
 public class SettingsDriver {
     public static void main(String[] a) {
         if (a[0].equals("list")) {
             for (GameSettings.Tweak t : GameSettings.TWEAKS) System.out.println(t.name + "|" + t.label + "|" + t.description);
+            return;
+        }
+        if (a[0].equals("groups")) {
+            String[][] groups = GameSettings.TWEAK_GROUPS;
+            if (a.length > 1) {
+                groups = new String[a.length - 1][];
+                for (int i = 1; i < a.length; i++) {
+                    String[] hn = a[i].split("=", 2);
+                    String[] names = hn[1].isEmpty() ? new String[0] : hn[1].split(",");
+                    groups[i - 1] = new String[names.length + 1];
+                    groups[i - 1][0] = hn[0];
+                    System.arraycopy(names, 0, groups[i - 1], 1, names.length);
+                }
+            }
+            java.util.List<String> problems = new java.util.ArrayList<>();
+            for (GameSettings.TweakGroup g : GameSettings.tweakGroups(groups, GameSettings.TWEAKS, problems)) {
+                System.out.println("# " + g.heading);
+                for (GameSettings.Tweak t : g.tweaks) System.out.println(t.name + "|" + t.label);
+            }
+            for (String p : problems) System.out.println("! " + p);
             return;
         }
         GameSettings s = new GameSettings();
@@ -101,15 +124,72 @@ def test_the_vsync_note_says_android_does_not_tear_either_way(java):
         "you are testing it."]
 
 
+def card(java, *groups) -> tuple[list[tuple[str, list[tuple[str, str]]]], list[str]]:
+    """The Tweaks card's order, [(heading, [(name, label)...])...], and tweakGroups' problems."""
+    order, problems = [], []
+    for line in java("groups", *groups):
+        if line.startswith("# "):
+            order.append((line[2:], []))
+        elif line.startswith("! "):
+            problems.append(line[2:])
+        else:
+            order[-1][1].append(tuple(line.split("|", 1)))
+    return order, problems
+
+
+def test_the_tweaks_card_shows_the_groups_in_order_each_sorted_by_label(java):
+    """The card's headings in TWEAK_GROUPS's order, each group's switches sorted by label with case
+    ignored, every TWEAKS line once, and no problem. Remove cutscene black bars, which players
+    could not find among switches in name order, is under Story and presentation."""
+    order, problems = card(java)
+    assert problems == []
+    assert [heading for heading, _ in order] == [
+        "Story and presentation", "Gameplay and assists", "Controls", "Audio", "Chao", "Fixes", "Other"]
+    for heading, tweaks in order:
+        labels = [label for _, label in tweaks]
+        assert labels and labels == sorted(labels, key=str.lower), heading
+    names = [name for _, tweaks in order for name, _ in tweaks]
+    assert sorted(names) == sorted(line.split("|")[0] for line in java("list"))
+    assert dict(order)["Story and presentation"][:3] == [
+        ("event-bars-all", "Black bars on every cutscene"), ("draw-distance", "Double draw distance"),
+        ("fast-stage-load", "Faster stage loading")]
+    assert ("no-event-bars", "Remove cutscene black bars") in dict(order)["Story and presentation"]
+    assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"), ("camera-invert", "Invert camera"),
+                                       ("deadzone", "Round stick deadzone"), ("hold-toggle", "Tap to hold B")]
+    assert dict(order)["Other"] == [("pause-unfocused", "Pause when unfocused")]
+
+
+def test_a_tweak_in_no_group_is_named_and_shown_under_other(java):
+    """A grouping mistake never hides a switch: a tweak in no group goes under Other at the end, one
+    in two groups shows in the first, a name that is no tweak's and a group left empty are dropped,
+    and each is named."""
+    every = [line.split("|")[0] for line in java("list")]
+    rest = [n for n in every if n not in ("vsync", "fov", "mono-audio")]
+    order, problems = card(java, "Look=vsync,not-a-tweak", "Sound=mono-audio,vsync", "Empty=", "All=" + ",".join(rest))
+    assert [heading for heading, _ in order] == ["Look", "Sound", "All", "Other"]
+    assert dict(order)["Look"] == [("vsync", "Vsync")]
+    assert dict(order)["Sound"] == [("mono-audio", "Mono audio")]
+    assert dict(order)["Other"] == [("fov", "Wider field of view")]
+    assert problems == ['"not-a-tweak" under Look is no tweak', '"vsync" is under Look and Sound',
+                        '"fov" is in no group; shown under Other']
+
+
 def test_the_tweaks_card_is_made_from_the_list():
-    """One Tweaks card, a switch and its note for each TWEAKS line, and the switches kept in the
+    """One Tweaks card, made from tweakGroups' order: a heading for each group and a switch and its
+    note for each tweak, each switch found by its tweak's name, and the switches kept in the
     preferences like every other setting: no tweak is named on the screen itself."""
     screen = (APP / "Sa2SettingsActivity.java").read_text()
     settings = (APP / "GameSettings.java").read_text()
     assert screen.count('card(col, "Tweaks")') == 1
-    assert "mTweaks = new Switch[GameSettings.TWEAKS.length];" in screen
-    assert "mTweaks[i] = toggle(tw, tweak.label," in screen and "note(tw, tweak.description);" in screen
-    assert "mTweaks[i].setChecked(mS.tweaksOn.contains(GameSettings.TWEAKS[i].name));" in screen
+    assert "GameSettings.tweakGroups(GameSettings.TWEAK_GROUPS, GameSettings.TWEAKS, problems)" in screen
+    assert "for (GameSettings.TweakGroup group : groups) {" in screen
+    assert "tw.addView(heading(group.heading)," in screen
+    assert "for (GameSettings.Tweak tweak : group.tweaks) {" in screen
+    assert "Switch w = toggle(tw, tweak.label," in screen and "note(tw, tweak.description);" in screen
+    assert "mTweaks.put(tweak.name, w);" in screen
+    assert "e.getValue().setChecked(mS.tweaksOn.contains(e.getKey()));" in screen
+    assert "GameSettings.TWEAKS[" not in screen and "TWEAKS.length" not in screen
+    assert "if (Build.VERSION.SDK_INT >= 28) head.setAccessibilityHeading(true);" in screen
     assert "no-event-bars" not in screen and "eventBars" not in screen + settings
     assert 'p.getBoolean("tweak_" + t.name, false)' in settings
     assert 'e.putBoolean("tweak_" + t.name, tweaksOn.contains(t.name));' in settings

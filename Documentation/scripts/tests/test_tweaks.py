@@ -15,6 +15,10 @@ in the Android settings (GameSettings.TWEAKS) and its line in the release's READ
 reverse; each tweak file's TWEAK_WRAPS line to the wraps the compiled file defines; the variant
 tool's fixtures to no tweak's name; and every link tool's lists to the files
 (tools/s4/tweak_sources.py), so a tweak added in one place and not the others fails here by name.
+A function the runtime wraps (a tweak's included) is in no runner's wrap list and has no `__wrap_`
+in any hook file, and a hook a runtime wrap calls (`sa2_harness_*`) is defined weak and called
+there, so a tweak that takes over a runner's wrap and moves the runner's rule into such a hook fails
+here, not at link time, when one half is taken without the other.
 
 The reader's code-patch side is compiled from a copy of runtime/sa2_tweaks.h with one code-patch
 tweak registered (none is yet), linked with and without a stand-in for the file
@@ -35,8 +39,10 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "s4"))
 sys.path.insert(0, str(ROOT / "tools" / "s3" / "whole_image"))
 sys.path.insert(0, str(ROOT / "tools" / "spike"))
+sys.path.insert(0, str(ROOT / "tools" / "s7"))
 import link_s4 as LS  # noqa: E402
 import tweak_sources as TS  # noqa: E402
+import win_link as WL  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "tools" / "s8" / "variants"))
 import variants as V  # noqa: E402
@@ -390,7 +396,6 @@ def test_every_link_compiles_the_tweaks_and_wraps_their_functions():
 def test_the_tools_that_read_link_s4s_literals_add_the_same_tweaks():
     """arm64_link.py reads link_s4.py's literals with ast.literal_eval, build_cost.py with a
     regular expression; each then adds the tweaks as link_s4.py's import does."""
-    sys.path.insert(0, str(ROOT / "tools" / "s7"))
     import arm64_link as AL
     import build_cost as BC
     lists = AL.link_s4_lists(ROOT)
@@ -445,3 +450,96 @@ def test_a_tweak_file_the_links_cannot_take_is_refused_by_name(tmp_path, files, 
     rt = tree(tmp_path, files)
     with pytest.raises(SystemExit, match=refusal):
         TS.wraps(rt, ["sub_427ee0"])
+
+
+# ------------------------------------------------------------------ the runners' hooks
+
+WRAP_DEF = re.compile(r"\b__wrap_(sub_[0-9a-f]+)\s*\([^;{]*\)\s*\{")
+HOOK_DEF = re.compile(r"\b(sa2_harness_\w+)\s*\([^;{]*\)\s*\{")
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def code(path: Path) -> str:
+    return COMMENT.sub(" ", path.read_text())
+
+
+def runtime_wrap_clashes(root: Path, production: list[str], runners: dict) -> list[str]:
+    """What a runner's link would refuse or fail on, or silently lose, given the runtime's wraps:
+    a runner wrap list (WL.RUNNERS' shape) naming one; a hook file (harness/, host/) defining
+    `__wrap_` for one (a second definition, a duplicate symbol); and a hook file defining an
+    `sa2_harness_*` function the runtime does not define weak and call (its rule would not run)."""
+    out = []
+    for runner, (path, _, name) in sorted(runners.items()):
+        w = WL.literal(path, name)
+        twice = [x for x in ([w] if isinstance(w, str) else w) if x in production]
+        if twice:
+            out.append(f"{path.relative_to(root)} {name} (the {runner} runner's) passes -wrap {twice}, "
+                       f"which the runtime wraps in every build")
+    rt = "\n".join(code(p) for p in sorted((root / "runtime").rglob("*.c")))
+    for src in sorted(p for d in ("harness", "host") for p in (root / d).rglob("*.c")):
+        text, rel = code(src), src.relative_to(root)
+        twice = sorted(set(WRAP_DEF.findall(text)) & set(production))
+        if twice:
+            out.append(f"{rel} defines __wrap_ for {twice}, which the runtime defines in every build; "
+                       f"its rule belongs in a hook the runtime's wrap calls")
+        for hook in sorted(set(HOOK_DEF.findall(text))):
+            weak = re.search(r"__attribute__\(\(weak\)\)[^;{]*\b" + hook + r"\s*\(", rt)
+            if not weak or len(re.findall(r"\b" + hook + r"\s*\(", rt)) < 2:
+                out.append(f"{rel} defines {hook}, which no runtime source defines weak and calls; "
+                           f"the rule it holds would not run")
+    return out
+
+
+def test_no_runner_or_hook_wraps_what_the_runtime_wraps():
+    assert set(WL.RUNNERS) == {"tick", "stage"}
+    assert runtime_wrap_clashes(ROOT, LS.PRODUCTION_WRAPS, WL.RUNNERS) == []
+
+
+def test_the_skip_intro_hook_is_defined_by_the_test_spawn_and_called_by_the_tweak():
+    """The test spawn's 13-to-0x15-becomes-4 rule is sa2_harness_gamemode_after, which
+    runtime/tweaks/skip-intro.c's wrap of sub_434160 calls; the stage runner wraps sub_434160 no
+    longer. The two halves are one change: harness/replay/wrap_test_spawn.c, tools/s4/stage_run.py
+    and the runtime's tweak file go in together."""
+    assert "sub_434160" in dict(TS.files(RUNTIME))["tweaks/skip-intro.c"]
+    assert "sub_434160" not in WL.runner_links("stage")[1]
+    spawn = code(ROOT / "harness" / "replay" / "wrap_test_spawn.c")
+    assert HOOK_DEF.findall(spawn) == ["sa2_harness_gamemode_after"]
+    assert "sub_434160" not in WRAP_DEF.findall(spawn)
+
+
+def hooks_tree(tmp_path: Path, stage_wraps: list[str], spawn: str, tweak: str) -> tuple[Path, dict]:
+    (tmp_path / "runtime" / "tweaks").mkdir(parents=True)
+    (tmp_path / "harness" / "replay").mkdir(parents=True)
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "runtime" / "tweaks" / "skip-intro.c").write_text(tweak)
+    (tmp_path / "harness" / "replay" / "wrap_test_spawn.c").write_text(spawn)
+    (tmp_path / "tools" / "stage_run.py").write_text(f"HOOKS = []\nWRAPS = {stage_wraps!r}\n")
+    return tmp_path, {"stage": (tmp_path / "tools" / "stage_run.py", "HOOKS", "WRAPS")}
+
+
+OLD_SPAWN = "/* sub_434160 */\nvoid *__wrap_sub_434160(void *s, uint32_t pc,\n    void *m) {\n    return m;\n}\n"
+NEW_SPAWN = ("/* sa2_harness_gamemode_after(before, after) */\n"
+             "void sa2_harness_gamemode_after(uint32_t before, uint32_t after) {\n}\n")
+TWEAK = ("__attribute__((weak)) void sa2_harness_gamemode_after(uint32_t b, uint32_t a) { }\n"
+         "void *__wrap_sub_434160(void *s, uint32_t pc, void *m) {\n"
+         "    sa2_harness_gamemode_after(1, 2);\n    return m;\n}\n")
+NO_TWEAK = "/* sa2_harness_gamemode_after( is said here only */\n"
+
+
+@pytest.mark.parametrize("stage_wraps, spawn, tweak, production, refusals", [
+    # The whole change: nothing to say.
+    (["sub_433ee0"], NEW_SPAWN, TWEAK, ["sub_434160"], []),
+    # The tweak taken without the harness move: the runner's list and the hook file both repeat it.
+    (["sub_433ee0", "sub_434160"], OLD_SPAWN, TWEAK, ["sub_434160"],
+     ["tools/stage_run.py WRAPS (the stage runner's) passes -wrap ['sub_434160'], which the runtime "
+      "wraps in every build",
+      "harness/replay/wrap_test_spawn.c defines __wrap_ for ['sub_434160'], which the runtime defines "
+      "in every build; its rule belongs in a hook the runtime's wrap calls"]),
+    # The harness move taken without the tweak: the hook would never be called.
+    (["sub_433ee0"], NEW_SPAWN, NO_TWEAK, [],
+     ["harness/replay/wrap_test_spawn.c defines sa2_harness_gamemode_after, which no runtime source "
+      "defines weak and calls; the rule it holds would not run"]),
+])
+def test_half_of_a_wrap_move_is_named(tmp_path, stage_wraps, spawn, tweak, production, refusals):
+    root, runners = hooks_tree(tmp_path, stage_wraps, spawn, tweak)
+    assert runtime_wrap_clashes(root, production, runners) == refusals

@@ -18,7 +18,11 @@
  *   sub_434160  the imm32 at 0x0043459A, `mov [GameMode],15h` in case 13, made 4:
  *               when GameMode was 13 on entry and is 0x15 on exit, 4 is written.
  *               Only 0x00434594 (case 13) and 0x004353EC store 0x15 to GameMode,
- *               and nothing between the store and the return reads it.
+ *               and nothing between the store and the return reads it. The runtime
+ *               wraps sub_434160 in every build (runtime/tweaks/skip-intro.c, the
+ *               skip-intro tweak), so this rule is sa2_harness_gamemode_after, which
+ *               that wrap calls after the lifted body with GameMode before and after
+ *               it; the runtime's own definition is a weak no-op.
  *   sub_4436a0  `ret` at the entry (the loader's "prevent the game to save").
  *   sub_426760  the same.
  *
@@ -43,7 +47,6 @@
 typedef void *(*lifted_fn)(void *state, uint32_t pc, void *memory);
 
 void *__real_sub_77dd10(void *s, uint32_t pc, void *m);
-void *__real_sub_434160(void *s, uint32_t pc, void *m);
 void *__real_sub_4436a0(void *s, uint32_t pc, void *m);
 void *__real_sub_426760(void *s, uint32_t pc, void *m);
 void *sub_427ef0(void *s, uint32_t pc, void *m);
@@ -140,14 +143,13 @@ void *__wrap_sub_77dd10(void *s, uint32_t pc, void *m) {
     return m;
 }
 
-void *__wrap_sub_434160(void *s, uint32_t pc, void *m) {
-    const uint32_t before = peek32(GAME_MODE);
-    m = __real_sub_434160(s, pc, m);
-    if (level() >= 0 && before == 13u && peek32(GAME_MODE) == 0x15u) {
+/* GameModeHandler (sub_434160) has run: GameMode was `before` and is `after`. Called by the
+ * runtime's wrap of it (runtime/tweaks/skip-intro.c) in every build that links this file. */
+void sa2_harness_gamemode_after(uint32_t before, uint32_t after) {
+    if (level() >= 0 && before == 13u && after == 0x15u) {
         const uint32_t start_level = 4u;
         sa2_poke(GAME_MODE, 4, &start_level);
     }
-    return m;
 }
 
 /* `ret` at the entry: the return address popped into EIP, nothing else. */

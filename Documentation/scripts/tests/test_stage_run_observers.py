@@ -110,6 +110,6 @@ def test_the_stage_boot_configuration_is_what_it_was_apart_from_the_goal_probe(s
                                     "harness/replay/wrap_test_spawn.c",
                                     "harness/replay/wrap_input_replay.c",
                                     "harness/stage_goal_probe.c"]
-    assert flags(cmd, "--wrap") == ["sub_433ee0", "sub_77dd10", "sub_434160", "sub_4436a0",
-                                    "sub_426760", "sub_77e780", "sub_7a8948"]
+    assert flags(cmd, "--wrap") == ["sub_433ee0", "sub_77dd10", "sub_4436a0", "sub_426760",
+                                    "sub_77e780", "sub_7a8948"]
     assert flags(cmd, "--name") == ["stage-metalharbor"]

@@ -103,6 +103,7 @@
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
     X(SA2_TWEAK_RADAR_ALL_PIECES, "radar-all-pieces", "radar tracks all pieces", "the treasure-hunt radar shows how near every piece is, not only the first") \
     X(SA2_TWEAK_RING_LOSS_CAP, "ring-loss-cap", "ring loss capped at 20", "a hit costs at most 20 rings, the ones it scatters, not all of them; picking them back up gives no second 100-ring extra life") \
+    X(SA2_TWEAK_SKIP_INTRO, "skip-intro", "intro skipped", "the game starts at the title screen, without the logos and the opening cutscene") \
     /* the end of the list */
 
 enum {

@@ -199,8 +199,7 @@ def test_the_metalharbor_session_is_the_test_spawn_without_the_recordings_contro
     assert argv[argv.index("--name") + 1] == f"present-play-mh.{TAG}"
     assert hooks == ["harness/replay/wrap_tick_probe.c", "harness/replay/wrap_test_spawn.c",
                      "harness/stage_goal_probe.c", "host/sa2_present_rec.c"]
-    assert wraps == ["sub_433ee0", "sub_77dd10", "sub_434160", "sub_4436a0", "sub_426760",
-                     "sub_7a8948"] + RECORDER_WRAPS
+    assert wraps == ["sub_433ee0", "sub_77dd10", "sub_4436a0", "sub_426760", "sub_7a8948"] + RECORDER_WRAPS
     d = "private/generated/s5/input/metalharbor/dry-run"
     assert {k: env[k] for k in ("SA2_TEST_SPAWN_LEVEL", "SA2_TEST_SPAWN_CHARACTER",
                                 "SA2_GUEST_CMDLINE", "SA2_IMPORT_BUDGET", "SA2_PUMP_POLLS",

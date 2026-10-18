@@ -988,6 +988,31 @@ def test_play_passes_game_envs_tweaks_and_the_selftest_drops_them(release, tmp_p
         game_env.write_text(text)
 
 
+def test_a_launcher_tweaks_lines_are_kept_in_launcher_log(release, tmp_path):
+    """A launcher tweak (host/launch/tweaks) says its lines in play's launcher.log too, for a launch
+    with no terminal (a Windows double-click): speedrun-timer on, the synthetic game holds no guest
+    image, so its watch fails by name, and that name is in the log."""
+    home, _ = installed(release, tmp_path)
+    env = env_for(home, FAKE_GAME=json.dumps({"title_at": 30}), FAKE_PLAYER=json.dumps({"end_after": 1.0}))
+    game_env = release["rel"] / "share" / "game.env"
+    text = game_env.read_text()
+    session = tmp_path / "session"
+    try:
+        game_env.write_text(text + "SA2_TWEAKS=speedrun-timer\n")
+        p = subprocess.run([str(release["rel"] / "bin" / "sa2recomp"), "--no-pace", "--out", str(session)],
+                           capture_output=True, text=True, env=env, timeout=300)
+    finally:
+        game_env.write_text(text)
+    assert p.returncode == 0, p.stdout + p.stderr
+    head = "sa2recomp: sa2 host tweaks: speedrun timer published: "
+    said = [x for x in p.stderr.splitlines() if x.startswith(head)]
+    log = (session / "launcher.log").read_text().splitlines()
+    assert [x for x in log if x.startswith(head)] == said and len(said) >= 4
+    assert said[0].startswith(head + "UDP datagrams to 127.0.0.1:16838")
+    assert said[-1].startswith(head + "the game's guest memory was never found")
+    assert log[-1] == said[-1]           # the watch's end comes before the log is written
+
+
 def test_sdl_disk_sound_is_refused_in_play(release, tmp_path):
     home, _ = installed(release, tmp_path)
     p = subprocess.run([str(release["rel"] / "bin" / "sa2recomp")], capture_output=True, text=True,

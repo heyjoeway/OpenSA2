@@ -189,6 +189,7 @@
 #include "sa2_relay.h"
 #include "sha256.h"
 #include "tweaks.h"
+#include "tweaks/speedrun-timer.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -265,9 +266,13 @@ std::string parent_dir(const std::string& p) {
 // A release executable's file name on this host (".exe" on Windows).
 std::string exe_name(const char* base) { return std::string(base) + sa2l::kExeSuffix; }
 
-// Everything the launcher said, in order: play's error box shows the last, and play's session keeps
-// them all (launcher.log), for a launch with no terminal to read.
+// Everything the launcher said, in order, and a launcher tweak's lines among them (said_line, from
+// the tweak's own thread, hence the lock): play's session keeps them all (launcher.log), for a
+// launch with no terminal to read. Play's error box shows g_told, the launcher's own last line: a
+// tweak's end summary comes after it (its Watch ends with launch()), and is not why play failed.
+std::mutex g_said_lock;
 std::vector<std::string> g_said;
+std::string g_told;
 bool g_play = false;              // play, not the selftest: a person may be at the desktop
 bool g_shown = false;             // the person has been shown (or answered) what ended the launch
 std::string g_launcher_log;       // play's <session>/launcher.log, once the session is known
@@ -277,7 +282,15 @@ void say(const char* fmt, const std::string& a = "", const std::string& b = "") 
     std::vector<char> buf(size_t(n > 0 ? n : 0) + 1, '\0');
     if (n > 0) std::snprintf(buf.data(), buf.size(), fmt, a.c_str(), b.c_str());
     std::fprintf(stderr, "sa2recomp: %s\n", buf.data());
+    const std::lock_guard<std::mutex> hold(g_said_lock);
     g_said.emplace_back(buf.data());
+    g_told = buf.data();
+}
+
+// A launcher tweak's line (host/launch/tweaks), already on stderr by the tweak: kept for launcher.log.
+void said_line(const std::string& line) {
+    const std::lock_guard<std::mutex> hold(g_said_lock);
+    g_said.push_back(line);
 }
 
 // The release's SDL3 dialogs, loaded at their first use (play alone).
@@ -1555,6 +1568,10 @@ int launch(int argc, char** argv) {
         return 5;
     }
     sa2l::close_fd(pace_r);
+    // The speedrun-timer tweak: reads the game, never writes it. Its lines reach launcher.log by
+    // said_line; it lives to launch()'s end, so its end summary is said, and its thread joined,
+    // before main() writes launcher.log.
+    const sa2st::Watch speedrun_timer(game.id, &said_line);
 
     // 5. The player.
     Env penv;
@@ -2006,12 +2023,13 @@ int main(int argc, char** argv) {
     // Play's end, for a person who may have no terminal: what ended it, in a box (not a usage
     // error, which only a command line makes, nor an interrupt, nor when a program reads the
     // launcher's error stream: a runner has no person to close a box), and all that was said, kept.
-    if (g_play && rc != 0 && rc != 2 && rc != 130 && !g_shown && !g_said.empty() && !sa2l::error_output_captured()) {
+    if (g_play && rc != 0 && rc != 2 && rc != 130 && !g_shown && !g_told.empty() && !sa2l::error_output_captured()) {
         std::string why;
-        dialogs().tell(sa2d::Kind::Error, kBoxTitle, "Sonic Adventure 2 could not start.\n\n" + g_said.back(), &why);
+        dialogs().tell(sa2d::Kind::Error, kBoxTitle, "Sonic Adventure 2 could not start.\n\n" + g_told, &why);
     }
     if (!g_launcher_log.empty()) {
         std::string text;
+        const std::lock_guard<std::mutex> hold(g_said_lock);
         for (const std::string& line : g_said) text += "sa2recomp: " + line + "\n";
         sa2p::write_file_atomic(g_launcher_log, text);
     }

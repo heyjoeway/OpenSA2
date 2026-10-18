@@ -209,6 +209,7 @@
     X(SA2_TWEAK_PRACTICE_STAGE, "practice-stage", "practice stage", "the game starts straight in one stage, City Escape or the one a line SA2_PRACTICE=level[,character[,mission]] names, and saves nothing in that run; upgrades from the save are not loaded, and mission 1 of Green Forest, White Jungle and Security Hall keeps its story time limit") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
     X(SA2_TWEAK_RADAR_ALL_PIECES, "radar-all-pieces", "radar tracks all pieces", "the treasure-hunt radar shows how near every piece is, not only the first, and its beep and the '!' over the player follow the nearest") \
+    X(SA2_TWEAK_RAIL_FORGIVING, "rail-forgiving", "rails forgiving", "a character who loses balance on a grind rail wobbles and stays on instead of falling off; jumping off still works") \
     X(SA2_TWEAK_REDUCE_SHAKE, "reduce-shake", "camera shake reduced", "camera shake from explosions, bosses and impacts moves the view a quarter as far") \
     X(SA2_TWEAK_RING_LOSS_CAP, "ring-loss-cap", "ring loss capped at 20", "a hit costs at most 20 rings, the ones it scatters, not all of them; picking them back up gives no second 100-ring extra life") \
     X(SA2_TWEAK_RIVAL_UPGRADES, "rival-upgrades", "rival upgrades shared", "Shadow, Rouge and Mech Tails share the upgrades Sonic, Knuckles and Eggman have found") \

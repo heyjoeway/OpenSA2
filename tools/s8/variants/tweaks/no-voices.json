@@ -1,0 +1,16 @@
+{
+ "name": "no-voices",
+ "report": "voices off",
+ "functions": [
+  "0x00443130"
+ ],
+ "patches": [
+  {
+   "va": "0x00443130",
+   "old": "803de5af",
+   "new": "83c8ffc3"
+  }
+ ],
+ "source": "SA2 Mod Loader's code list, Codes.lst: Patch \"Disable Voices\" (write8 00443130 0xC3), author MainMemory, category Audio: \"Forces the character voices to be disabled.\" This spec writes the voice player's own voices-off return there instead of the bare 0xC3: 83 C8 FF C3 (`or eax,-1; ret`) over the first four bytes, for the reason in why.",
+ "why": "0x00443130 is the voice player (the Mod Loader's SA2Functions.h calls it PlayVoice). It is called from more than 200 sites (0x0046e0cb..0x0046e562 among them), through 0x004431a0, and by the tail jump at 0x00799dd2, with the voice number as its stack argument and a mode in EDX. It begins `cmp byte [0x0174AFE5],0; jne 0x0044313D; or eax,-1; ret`: while that byte is 0 it returns -1 and plays nothing; otherwise it takes the next of the three voice slots from [0x01A5599C], starts the voice (0x004430B0), records it in the slot table at [0x01A55998] and returns the slot, or -1 when no slot starts it. The patch writes `or eax,-1; ret` (83 C8 FF C3) over the first four bytes of the `cmp`, so every call takes that voices-off path: no voice plays, so the stage lines, Omochao's hints and the cutscenes' voices are silent, while music and sound effects take other paths, and the call returns -1 with the stack, ECX and EDX as the caller left them. Codes.lst writes a bare `ret` (0xC3) at the first byte, which returns with EAX as the caller left it, and callers keep that EAX. A forward walk of EAX from every call's return over the lifted traces finds six callers that read it: 0x005d468a (0x005d4650 stores it at +0x10 of its object), the message windows 0x006b70f5 (EfMsgWnd0Exec_New, 0x006b6e20), 0x006b7397 (EfMsgWnd0Exec_LevelUpDai, 0x006b7170), 0x006b7893 (0x006b7580) and 0x006b7bf6 (EfMsgWnd0Exec, 0x006b79d0), which store it at +0x84 of the window's work, and 0x006f4424 (0x006f4260), which stores it at +0x14. With the bare `ret` a window stores the voice number on one page; on the next page (0x006b7bd8..0x006b7c01) that value is not -1, so the window passes it to the voice stop 0x00443200, then loads EAX with its work pointer before the next call to 0x00443130 and stores that. On the page after, 0x00443200 reads the slot table's word at value*28+table+0x34; with a guest heap pointer as the value that address falls outside the 512 MB guest space most of the time, and the bounds-checked read traps. With `or eax,-1; ret` every caller stores -1, as with voices off in the original, and never calls the voice stop. The other callers write EAX before they read it, or return it to callers that do; the walk does not follow a return from a function only a table calls (0x0046e000 and 0x00799ce0 among them)."
+}

@@ -5,9 +5,10 @@
  * faint values for the rest of the pose. EnvMapFix (Exant): a Chao World model
  * drawn through chDrawCnk sets the environment map's matrix first, where the game left it as the
  * last model to set it had. The loader's other default patches are not here: CECarFix and
- * ParticlesFix answer driver faults OpenSA2's renderer does not have, SyncLoad is the loader's own
- * threading, ExtendVertexBuffer is for modded models, and FramerateLimiter and DisableExitPrompt
- * are the player's and the host's (DisableExitPrompt: "Asked for, and already so" in sa2_tweaks.h).
+ * ParticlesFix answer driver faults OpenSA2's renderer does not have, SyncLoad is its own tweak,
+ * sync-load (runtime/tweaks/sync-load.c), ExtendVertexBuffer is for modded models, and
+ * FramerateLimiter and DisableExitPrompt are the player's and the host's (DisableExitPrompt:
+ * "Asked for, and already so" in sa2_tweaks.h).
  *
  * TWEAK_WRAPS: sub_478730, sub_56ddd0
  *

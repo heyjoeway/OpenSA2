@@ -165,6 +165,8 @@ def test_the_tweaks_card_shows_the_groups_and_their_tweaks_in_the_tables_order(j
     assert dict(order)["Story and presentation"][:3] == [
         ("skip-intro", "Skip intro"), ("all-events-skippable", "Skip any cutscene"),
         ("no-event-bars", "Remove cutscene black bars")]
+    story = [name for name, _ in dict(order)["Story and presentation"]]
+    assert story[story.index("fast-stage-load") + 1] == "sync-load"
     assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"),
                                        ("action-buttons", "Light dash on Y, spin dash on X"),
                                        ("deadzone", "Round stick deadzone"),

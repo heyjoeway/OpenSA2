@@ -56,6 +56,9 @@
  *      `if (!sa2_tweak_on(SA2_TWEAK_<NAME>)) return __real_<sub>(state, pc, memory);`. A function
  *      the runtime or another tweak already wraps cannot be wrapped twice, and the tools refuse it
  *      by name: the tweak then goes into the wrap that exists, behind its own sa2_tweak_on test.
+ *      When that wrap is another tweak's, the tweak's own file still holds what it does, in a
+ *      function the wrap calls when the tweak is on, and its line names the wrap in place of a
+ *      list: `TWEAK_WRAPS: none (it acts in no-event-bars.c's wrap of sub_5f8ec0)`.
  *   3. One line in host/android GameSettings.TWEAKS: new Tweak("<name>", the switch's label, the
  *      note under it). The settings screen's Tweaks card makes a switch of each line, and
  *      sessionSettings sends the ones turned on.
@@ -98,6 +101,7 @@
     X(SA2_TWEAK_CHAO_KEY_ALWAYS, "chao-key-always", "chao key always", "a Chao World visit after every stage cleared in one-player play, as with the Chao Key found") \
     X(SA2_TWEAK_CHAO_STAT_X5, "chao-stat-x5", "chao stats x5", "Chao gain up to five times the stat points from Chaos Drives, small animals and fruit, at most 100 a stat for each animal or drive so no stat loses points (kept in the Chao save)") \
     X(SA2_TWEAK_DRIVES_TO_MINIMALS, "drives-to-minimals", "drives become minimals", "destroyed enemies leave a small animal instead of a Chaos Drive") \
+    X(SA2_TWEAK_EVENT_BARS_ALL, "event-bars-all", "event-bars always", "black bars at the sides of every cutscene on a wide screen, as on a 4:3 one") \
     X(SA2_TWEAK_FAST_STAGE_LOAD, "fast-stage-load", "fast stage load", "a stage starts as soon as its files are loaded, without the loading screen's wait") \
     X(SA2_TWEAK_HIDE_HUD, "hide-hud", "hud hidden", "no score, time, rings and lives counters, and no kart race HUD; button prompts and the radar stay") \
     X(SA2_TWEAK_INFINITE_LIVES, "infinite-lives", "lives held", "dying costs no life, so the lives never run out and there is no game over") \
@@ -110,6 +114,12 @@
     X(SA2_TWEAK_RING_LOSS_CAP, "ring-loss-cap", "ring loss capped at 20", "a hit costs at most 20 rings, the ones it scatters, not all of them; picking them back up gives no second 100-ring extra life") \
     X(SA2_TWEAK_SKIP_INTRO, "skip-intro", "intro skipped", "the game starts at the title screen, without the logos and the opening cutscene") \
     X(SA2_TWEAK_WALKER_CANNON_FIX, "walker-cannon-fix", "walker-cannon fix", "a Chao Walker given the Mech's cannon upgrade by a cheat no longer crashes the game") \
+    /* the end of the list */
+
+/* X(bit, bit): two tweaks that cannot both be on, one line per pair. When SA2_TWEAKS names both,
+ * neither is on, and the report line names the pair (runtime/sa2_tweaks.c). */
+#define SA2_TWEAK_EXCLUSIVE(X) \
+    X(SA2_TWEAK_EVENT_BARS_ALL, SA2_TWEAK_NO_EVENT_BARS) \
     /* the end of the list */
 
 enum {

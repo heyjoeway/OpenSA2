@@ -80,6 +80,7 @@ final class GameSettings {
         new Tweak("chao-key-always", "Chao Key always held", "After every stage you clear in one-player play, you go to Chao World as if you had found the Chao Key. Your save may record the key as found."),
         new Tweak("chao-stat-x5", "Chao stats x5", "Chao gain up to five times the stat points from Chaos Drives, small animals and fruit. An animal or drive gives at most 100 points to a stat, so a stat never loses points. The extra points are saved with your Chao and stay when you turn this off."),
         new Tweak("drives-to-minimals", "Chaos Drives become animals", "Destroyed enemies leave a small animal instead of a Chaos Drive. Changes what you can collect for your Chao."),
+        new Tweak("event-bars-all", "Black bars on every cutscene", "Draws black bars at the sides of every cutscene on a wide picture, so each one looks as it does on a 4:3 screen. Movies are unchanged. Not together with Remove cutscene black bars: with both on, neither applies."),
         new Tweak("fast-stage-load", "Faster stage loading", "Starts a stage as soon as it has loaded, without waiting for the loading screen to finish. Chao World loads as usual."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),
         new Tweak("infinite-lives", "Infinite lives", "Dying doesn't cost a life, so you never get a game over. 1-ups still add lives, and your save keeps the count you have."),

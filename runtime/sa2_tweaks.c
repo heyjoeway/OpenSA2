@@ -14,8 +14,9 @@
  * The value is split at commas, each name trimmed of spaces and tabs and matched exactly (case
  * counts); a name given twice is one, an empty one is skipped, and one that is no tweak is named in
  * the report line and ignored, with the list of the tweaks there are, and so is a code-patch tweak
- * the game was built without. In a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS set) the whole
- * value is ignored, and the line says so.
+ * the game was built without. Two tweaks that cannot both be on (SA2_TWEAK_EXCLUSIVE) are both
+ * left off when the value names both, and the line names them. In a replay (SA2_REPLAY_TICKS or
+ * SA2_REPLAY_WORDS set) the whole value is ignored, and the line says so.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -67,6 +68,14 @@ static void known_read(void) {
     }
 }
 
+/* SA2_TWEAK_EXCLUSIVE's pairs, by bit and by row, then an empty row that ends the table. */
+static const struct { uint32_t a, b; unsigned ia, ib; } g_tweak_clashes[] = {
+#define TWEAK_PAIR(a, b) {a, b, a##_INDEX, b##_INDEX},
+    SA2_TWEAK_EXCLUSIVE(TWEAK_PAIR)
+#undef TWEAK_PAIR
+    {0, 0, 0, 0},
+};
+
 /* `s` (n bytes, between `quote`s) appended to the comma-separated list in buf[0, len); the new
  * length, cap once the list is cut short. */
 static size_t list_add(char *buf, size_t cap, size_t len, const char *quote, const char *s, size_t n) {
@@ -104,15 +113,28 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
         } else if (i == g_nknown && a < b) ul = list_add(unknown, sizeof unknown, ul, "\"", a, (size_t)(b - a));
         p = *end ? end + 1 : end;
     }
+    char clash[256] = "";
+    size_t cl = 0;
+    for (size_t k = 0; k + 1 < sizeof g_tweak_clashes / sizeof g_tweak_clashes[0]; k++) {
+        const uint32_t pair = g_tweak_clashes[k].a | g_tweak_clashes[k].b;
+        if ((on & pair) != pair) continue;
+        on &= ~pair;
+        if (cl < sizeof clash) {
+            const int w = snprintf(clash + cl, sizeof clash - cl, "; %s and %s cannot both be on, so neither is",
+                                   g_tweak_rows[g_tweak_clashes[k].ia].name, g_tweak_rows[g_tweak_clashes[k].ib].name);
+            cl = w < 0 ? sizeof clash : cl + (size_t)w;
+        }
+    }
     for (unsigned i = 0; i < g_nknown; i++) {
         if (on & (1u << i))
             al = list_add(active, sizeof active, al, "", g_known[i].report, strlen(g_known[i].report));
         if (g_known[i].has) kl = list_add(known, sizeof known, kl, "", g_known[i].name, strlen(g_known[i].name));
     }
     char why[2048] = "";
+    snprintf(why, sizeof why, "%s", clash);
     if (absent[0])
-        snprintf(why, sizeof why, "; this game was built without the code-patch tweak%s %s, so %s ignored",
-                 strchr(absent, ',') ? "s" : "", absent, strchr(absent, ',') ? "they are" : "it is");
+        snprintf(why + strlen(why), sizeof why - strlen(why),
+                 "; this game was built without the code-patch tweak%s %s, so %s ignored", strchr(absent, ',') ? "s" : "", absent, strchr(absent, ',') ? "they are" : "it is");
     if (unknown[0])
         snprintf(why + strlen(why), sizeof why - strlen(why), "; no tweak is named %s, so it is ignored; "
                  "the tweaks: %s", unknown, known);

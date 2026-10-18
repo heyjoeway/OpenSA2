@@ -41,6 +41,10 @@
  * The movie's bars stay (the movie player's call is left alone): the movie is 4:3 footage, and
  * without its bars the sides would show only what is behind it.
  *
+ * The tweak event-bars-all, the other way (bars on every event), acts in this wrap: when it is on,
+ * the wrap hands the call to sa2_event_bars_all (runtime/tweaks/event-bars-all.c) before its own
+ * test. The two cannot both be on (SA2_TWEAK_EXCLUSIVE in runtime/sa2_tweaks.h).
+ *
  * The first time the tweak meets an event at the executor's call, the run says what it did, once
  * per event (the first 16 events, at most): "sa2 tweaks: event-bars off: event 24's side bars not
  * drawn", or "sa2 tweaks: event-bars off: event 361 keeps its side bars (its scene is framed for
@@ -71,9 +75,12 @@ static int framed_43(uint32_t event) {
 }
 
 void *__real_sub_5f8ec0(void *state, uint32_t pc, void *memory);
+/* runtime/tweaks/event-bars-all.c, which acts in this wrap. */
+void *sa2_event_bars_all(void *state, uint32_t pc, void *memory, void *(*real)(void *, uint32_t, void *));
 
 __attribute__((used, retain))
 void *__wrap_sub_5f8ec0(void *state, uint32_t pc, void *memory) {
+    if (sa2_tweak_on(SA2_TWEAK_EVENT_BARS_ALL)) return sa2_event_bars_all(state, pc, memory, __real_sub_5f8ec0);
     if (!sa2_tweak_on(SA2_TWEAK_NO_EVENT_BARS)) return __real_sub_5f8ec0(state, pc, memory);
     const uint32_t esp = sa2_rt_get_gpr(state, SA2_ESP);
     uint32_t site = 0;

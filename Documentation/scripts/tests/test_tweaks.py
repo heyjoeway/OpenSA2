@@ -124,8 +124,9 @@ def exe(zig, tmp_path_factory) -> Path:
     d = tmp_path_factory.mktemp("tweaks")
     (d / "driver.c").write_text(DRIVER)
     out = d / "tw"
+    acting = [str(RUNTIME / rel) for rel, owner, _ in TS.shares(RUNTIME) if owner == "tweaks/no-event-bars.c"]
     done = subprocess.run([str(zig), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(RUNTIME / "tweaks" / "no-event-bars.c"), "-o", str(out)],
+                           str(RUNTIME / "tweaks" / "no-event-bars.c"), *acting, "-o", str(out)],
                           capture_output=True, text=True, env=zig_env(d))
     assert done.returncode == 0, done.stderr
     return out
@@ -379,6 +380,25 @@ def test_each_tweak_file_defines_the_wraps_its_line_names(zig, tmp_path, source)
     assert re.search(r"^ +U sa2_tweak_on$", symbols, re.M)
 
 
+def symbols(zig, tmp_path: Path, source: str) -> str:
+    obj = tmp_path / (Path(source).stem + ".o")
+    done = subprocess.run([str(zig), "cc", *CC, "-c", str(RUNTIME / source), "-o", str(obj)],
+                          capture_output=True, text=True, env=zig_env(tmp_path))
+    assert done.returncode == 0, done.stderr
+    return subprocess.run(["nm", str(obj)], capture_output=True, text=True, check=True).stdout
+
+
+@pytest.mark.parametrize("source, owner, sub", TS.shares(RUNTIME))
+def test_a_tweak_that_acts_in_another_tweaks_wrap_is_called_from_it(zig, tmp_path, source, owner, sub):
+    """A file whose TWEAK_WRAPS line names another file's wrap defines no wrap, and the wrap's file
+    calls a function it defines."""
+    mine, theirs = symbols(zig, tmp_path, source), symbols(zig, tmp_path, owner)
+    assert not re.findall(r"^\S+ [Tt] __wrap_", mine, re.M)
+    assert re.search(rf"^\S+ T __wrap_{sub}$", theirs, re.M)
+    defined = set(re.findall(r"^\S+ T (\w+)$", mine, re.M))
+    assert defined & set(re.findall(r"^ +U (\w+)$", theirs, re.M)), (source, owner)
+
+
 # ------------------------------------------------------------------ the links
 
 def test_every_link_compiles_the_tweaks_and_wraps_their_functions():
@@ -445,11 +465,25 @@ def test_tweak_files_are_read_in_name_order(tmp_path):
      r"tweaks/b\.c and tweaks/a\.c both wrap sub_401000"),
     ({"tweaks/sa2_call.c": "/* TWEAK_WRAPS: sub_401000 */\n"}, r"its object would be sa2_call\.o"),
     ({"tweaks/a.c": "/* TWEAK_WRAPS: sub_427ee0 */\n"}, r"tweaks/a\.c wraps \['sub_427ee0'\], which the runtime"),
+    ({"tweaks/a.c": "/* TWEAK_WRAPS: none (it acts in b.c's wrap of sub_401000) */\n"},
+     r"tweaks/a\.c: TWEAK_WRAPS says it acts in tweaks/b\.c's wrap of sub_401000, but no tweak file wraps it"),
+    ({"tweaks/a.c": "/* TWEAK_WRAPS: none (it acts in b.c's wrap of sub_401000) */\n",
+      "tweaks/b.c": "/* TWEAK_WRAPS: sub_402000 */\n", "tweaks/c.c": "/* TWEAK_WRAPS: sub_401000 */\n"},
+     r"tweaks/a\.c: TWEAK_WRAPS says it acts in tweaks/b\.c's wrap of sub_401000, but tweaks/c\.c wraps it"),
+    ({"tweaks/a.c": "/* TWEAK_WRAPS: none */\n"}, r"tweaks/a\.c: TWEAK_WRAPS names \['none'\]"),
 ])
 def test_a_tweak_file_the_links_cannot_take_is_refused_by_name(tmp_path, files, refusal):
     rt = tree(tmp_path, files)
     with pytest.raises(SystemExit, match=refusal):
         TS.wraps(rt, ["sub_427ee0"])
+
+
+def test_a_tweak_file_may_act_in_another_tweak_files_wrap(tmp_path):
+    rt = tree(tmp_path, {"tweaks/a.c": "/*\n * TWEAK_WRAPS: none (it acts in b.c's wrap of sub_401000)\n */\n",
+                         "tweaks/b.c": "/* TWEAK_WRAPS: sub_401000 */\n"})
+    assert TS.files(rt) == [("tweaks/a.c", []), ("tweaks/b.c", ["sub_401000"])]
+    assert TS.shares(rt) == [("tweaks/a.c", "tweaks/b.c", "sub_401000")]
+    assert TS.wraps(rt, []) == ["sub_401000"]
 
 
 # ------------------------------------------------------------------ the runners' hooks

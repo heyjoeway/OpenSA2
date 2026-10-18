@@ -77,6 +77,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `fast-stage-load` | Starts a stage as soon as its files are loaded. The game no longer waits at the end of the loading screen, so the loading screen and its tip can end sooner. Chao World loads as usual. |
 | `hide-hud` | Hides the score, time, rings, and lives counters during play, and the whole kart race display, for a clean picture. Button prompts and the radar stay, and the game plays the same. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |
+| `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |
 | `no-event-bars` | Removes the black bars that most in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. |
 
 With `no-event-bars` on, five in-engine cutscenes keep their bars: the opening one (event 361) and events 21, 205, 206, and 360. These scenes are framed for 4:3. The opening draws its title cards, flashes, backdrops, and logo glow over the middle 4:3 part of the picture only, so without the bars those effects would stop at a hard edge. SA2 Render Fix keeps the bars for the same five cutscenes for this reason. Movies also keep their bars, because the video itself is 4:3.

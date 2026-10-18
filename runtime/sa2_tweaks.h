@@ -96,6 +96,7 @@
     X(SA2_TWEAK_FAST_STAGE_LOAD, "fast-stage-load", "fast stage load", "a stage starts as soon as its files are loaded, without the loading screen's wait") \
     X(SA2_TWEAK_HIDE_HUD, "hide-hud", "hud hidden", "no score, time, rings and lives counters, and no kart race HUD; button prompts and the radar stay") \
     X(SA2_TWEAK_INFINITE_LIVES, "infinite-lives", "lives held", "dying costs no life, so the lives never run out and there is no game over") \
+    X(SA2_TWEAK_METAL_BOUNCE_FIX, "metal-bounce-fix", "metal-bounce fixed", "Metal Sonic's bounce attack uses his own model, so it no longer crashes with an all-upgrades cheat") \
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \
     /* the end of the list */
 

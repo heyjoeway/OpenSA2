@@ -78,6 +78,7 @@ final class GameSettings {
         new Tweak("fast-stage-load", "Faster stage loading", "Starts a stage as soon as it has loaded, without waiting for the loading screen to finish. Chao World loads as usual."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),
         new Tweak("infinite-lives", "Infinite lives", "Dying doesn't cost a life, so you never get a game over. 1-ups still add lives, and your save keeps the count you have."),
+        new Tweak("metal-bounce-fix", "Fix Metal Sonic bounce crash", "Gives Metal Sonic's bounce attack his own model, so it no longer crashes the game when a cheat gives him all upgrades. Changes nothing in normal play."),
         new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
     };
 

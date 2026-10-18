@@ -390,7 +390,7 @@ def test_a_fixture_past_bit_32_runs_its_variant_and_no_other_bit_does(lifted):
 # ---------------------------------------------------------------- the tracked specs
 
 def test_every_tracked_spec_and_fixture_passes_the_checks_on_the_lifted_image():
-    """The shipped specs as one build (none yet), each fixture as its own."""
+    """The shipped specs as one build, each fixture as its own."""
     w = V.load_world()
     assert (w.builtin, w.registered) == V.registrations()
     shipped = V.plan_all(w, [V.read_spec(p) for p in V.shipped_specs()])

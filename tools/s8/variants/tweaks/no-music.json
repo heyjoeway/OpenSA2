@@ -1,0 +1,16 @@
+{
+ "name": "no-music",
+ "report": "music off",
+ "functions": [
+  "0x00442cf0"
+ ],
+ "patches": [
+  {
+   "va": "0x00442cf0",
+   "old": "a1",
+   "new": "c3"
+  }
+ ],
+ "source": "SA2 Mod Loader's code list (Codes.lst), Patch \"Disable Music\" (write8 00442CF0 0xC3), category Audio, author MainMemory",
+ "why": "0x00442CF0 sets the music track, its name in EDI; 115 direct calls reach it. With the music state at [0x01A55998] present, it frees the name stored at its +0x14 (through the allocator table at [0x01D19CAC]+4) and clears it, then, when EDI is not null, copies the name into a new block (through [[0x01D19CAC]]) and stores that at +0x14. The play request reads that field: 0x00442D90, which the change-track path 0x00442E10 jumps to after calling 0x00442CF0, sets the request (byte +0 to 0, word +2 to 5) only when +0x14 is not null. A `ret` at the entry stores no name, so no looping track is requested and the stage, menu and cutscene music stops; sound effects and voices take other paths. Jingles still play: PlayJingle 0x00443480 reaches PlayMusicOnce 0x00442EF0 (call at 0x00443513), which stores its own copy of the name at +0x18 through 0x00442E60 and then sets the request (byte +0 to 0, word +2 to 5) without reading +0x14, and the loader 0x004429E0 reads +0x18 before +0x14, so the 1-up, speed-up, invincibility, goal-ring and boss cues are unaffected, as in the Mod Loader's entry. Every other read of +0x14 (at 0x00442DF2, 0x00442E1C, 0x0044356C and 0x005FFCB4) tests it for null first. The function's only exits are plain `ret` (0x00442D8B, after the `pop esi` at 0x00442D8A on the copy path), it returns nothing its callers use, and it takes no stack arguments, so the entry `ret` leaves every caller's stack as before. Why a tweak: neither the host nor the runtime has a music volume or mute control, and players who stream, record or play their own music want the music off and the sound effects and voices kept."
+}

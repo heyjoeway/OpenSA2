@@ -297,10 +297,11 @@ def test_the_readme_lists_a_code_patch_tweak_only_when_the_game_links_it(tmp_pat
     src = registered_patch_tree(tmp_path)
     ts = load_module(src / "tools" / "s4" / "tweak_sources.py", "tweak_sources_release_test")
     assert [r["name"] for r in ts.patches(src / "runtime")][-1:] == ["zz-patch"]
+    shipped = [p["name"] for p in ts.patches(ROOT / "runtime")]   # the checkout's own, unlinked here
     # Every tweak the desktop has, in name order: the game's but the code-patch ones, and the host's
     # but the Android app's (runtime/sa2_tweaks.h, "Add a host tweak").
     others = [(r["name"], r["summary"]) for r in ts.every_row(ROOT / "runtime")
-              if r["name"] not in {p["name"] for p in ts.patches(ROOT / "runtime")} and r.get("home") != "app"]
+              if r["name"] not in shipped and r.get("home") != "app"]
 
     def listed(linked=()):
         text = RB.player_readme("x86_64-linux", RB.NATIVE_MODE, src, linked)
@@ -311,7 +312,8 @@ def test_the_readme_lists_a_code_patch_tweak_only_when_the_game_links_it(tmp_pat
         {"name": "zz-patch", "spec": "tools/s8/variants/tweaks/zz-patch.json", "shipped": True},
         {"name": "test-x", "spec": "tools/s8/variants/fixtures/test-x.json", "shipped": False}]}}}
     assert RB.variant_tweaks(notes) == ("zz-patch", "test-x")
-    assert RB.unlinked_patches(src, {}) == ["zz-patch"] and RB.unlinked_patches(src, notes["game"]) == []
+    assert RB.unlinked_patches(src, {}) == shipped + ["zz-patch"]
+    assert RB.unlinked_patches(src, notes["game"]) == shipped
     assert RB.variant_globs(notes) == ("tools/s8/variants/variants.py", "tools/s8/variants/tweaks/zz-patch.json",
                                        "tools/s8/variants/fixtures/test-x.json")
     assert RB.variant_globs({"game": {}}) == ()

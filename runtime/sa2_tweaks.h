@@ -182,6 +182,7 @@
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \
     X(SA2_TWEAK_NO_LIVES_BONUS, "no-lives-bonus", "ring 1-ups off", "no extra life for every 100 rings; 1-up boxes still give one") \
     X(SA2_TWEAK_NO_LOADING_TIPS, "no-loading-tips", "loading-tips off", "no Omochao tips or Now Loading animation while loading: black, or the picture already on screen") \
+    X(SA2_TWEAK_NO_MUSIC, "no-music", "music off", "no background music; jingles, sound effects and voices still play") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
     X(SA2_TWEAK_RADAR_ALL_PIECES, "radar-all-pieces", "radar tracks all pieces", "the treasure-hunt radar shows how near every piece is, not only the first") \
@@ -221,6 +222,7 @@ enum {
 /* X(bit): the code-patch tweaks in SA2_TWEAK_LIST, one line each, in name order ("Add a code-patch
  * tweak", step 2). */
 #define SA2_TWEAK_PATCH_LIST(X) \
+    X(SA2_TWEAK_NO_MUSIC) \
     /* the end of the list */
 
 #define SA2_TWEAK_PATCH_OR(bit) | bit

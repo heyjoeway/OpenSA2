@@ -175,6 +175,7 @@
     X(SA2_TWEAK_DRIVES_TO_MINIMALS, "drives-to-minimals", "drives become minimals", "destroyed enemies leave a small animal instead of a Chaos Drive") \
     X(SA2_TWEAK_EVENT_BARS_ALL, "event-bars-all", "event-bars always", "black bars at the sides of every cutscene on a wide screen, as on a 4:3 one") \
     X(SA2_TWEAK_FAST_STAGE_LOAD, "fast-stage-load", "fast stage load", "a stage starts as soon as its files are loaded, without the loading screen's wait") \
+    X(SA2_TWEAK_FORCE_HARD_LAYOUT, "force-hard-layout", "hard layout", "one-player stages use their Hard Mode (mission 5) object layout in every mission; ten stages wait until the save has the upgrade that layout leaves out") \
     X(SA2_TWEAK_FORGIVING_RESTARTS, "forgiving-restarts", "forgiving restarts", "a restart from the pause menu keeps your rings and lives; a miss keeps your score; the save keeps the lives and rings you have") \
     X(SA2_TWEAK_GOLD_BEETLE_STAYS, "gold-beetle-stays", "gold beetle stays", "a Gold Beetle never flies away; it stays until you destroy it (raises scores)") \
     X(SA2_TWEAK_HIDE_HUD, "hide-hud", "hud hidden", "no score, time, rings and lives counters, and no kart race HUD; button prompts and the radar stay") \

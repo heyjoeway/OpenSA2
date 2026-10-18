@@ -5,7 +5,7 @@
  * two-player files do not fit, Pumpkin Hill (5) and Iron Gate (11) (runtime/sa2_tweaks.h: the
  * tweaks and their rules).
  *
- * TWEAK_WRAPS: sub_488f60
+ * TWEAK_WRAPS: none (it acts in force-hard-layout.c's wrap of sub_488f60)
  *
  * Where the layout is chosen, read from the unpacked image. 0x00488F60, LoadStageSETFile (the Mod
  * Loader's SA2Functions.h), builds the stage's two SET file names from ECX, a base name, or
@@ -63,8 +63,8 @@
  * fifth mission asks for its layout, and with the je gone it would load the two-player one. A
  * two-player game is left alone too: it loads the two-player layout already.
  *
- * Off is the lifted code alone: the wrap tests sa2_tweak_on first and only calls __real_. The save
- * is not touched by the wrap: TwoPlayerMode is not saved, and it is back to 0 when the call
+ * Off is the lifted code alone: the function tests sa2_tweak_on first and only calls `real`. The
+ * save is not touched by it: TwoPlayerMode is not saved, and it is back to 0 when the call
  * returns. A stage cleared on the two-player layout counts as cleared, with its rank and emblem, as
  * the Codes.lst code's would; an upgrade or Chao key the layout leaves out is not collected, so it
  * is not saved.
@@ -78,6 +78,14 @@
  * KDASIBA, MSGER and RING_CIRCLE. So a mission may find fewer rings, a different route, or an
  * object it counts on missing, and may not be finishable. A guest read or write that fails leaves
  * the call to the lifted body with the game's own layout, and says so once.
+ *
+ * LoadStageSETFile has one wrap, force-hard-layout.c's (the tools refuse a second): this tweak's
+ * work is the function sa2_2p_layout_in_1p_load_set, which takes the lifted body to call as
+ * `real` and tests its bit first. The wrap calls it with __real_sub_488f60 when force-hard-layout
+ * is off; when that tweak is on, the wrap calls force-hard-layout's function with a `real` that
+ * goes through this one, so MissionNum reads 4 here on a stage that tweak moves to its Hard Mode
+ * layout (left to it, as Hard Mode is), and on a stage it keeps on its own layout this tweak acts
+ * as it does alone.
  *
  * The run says what it did, once per stage (the first 16 stages, at most): "sa2 tweaks: 2p layout:
  * stage 10 loads its two-player object files where it has them", "... stage 11 keeps its own
@@ -129,18 +137,18 @@ static int first_time(int16_t level, int hard) {
     return 1;
 }
 
-void *__real_sub_488f60(void *state, uint32_t pc, void *memory);
-
-__attribute__((used, retain))
-void *__wrap_sub_488f60(void *state, uint32_t pc, void *memory) {
-    if (!sa2_tweak_on(SA2_TWEAK_2P_LAYOUT_IN_1P)) return __real_sub_488f60(state, pc, memory);
+/* LoadStageSETFile with TwoPlayerMode reading 1 for the length of one call of `real`, the lifted
+ * body or force-hard-layout's way to it. Called by force-hard-layout.c's __wrap_sub_488f60. */
+void *sa2_2p_layout_in_1p_load_set(void *state, uint32_t pc, void *memory,
+                                   void *(*real)(void *, uint32_t, void *)) {
+    if (!sa2_tweak_on(SA2_TWEAK_2P_LAYOUT_IN_1P)) return real(state, pc, memory);
     uint8_t two = 0, mission = 0;
     int16_t level = -1;
     if (sa2_peek(TWO_PLAYER_MODE, 1, &two) != SA2_OK || sa2_peek(MISSION_NUM, 1, &mission) != SA2_OK) {
         if (!g_2p_layout_read_said++)
             fprintf(stderr, "sa2 tweaks: 2p layout: TwoPlayerMode (0x%08X) or MissionNum (0x%08X) "
                     "does not read, so the stage loads its own layout\n", TWO_PLAYER_MODE, MISSION_NUM);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     const int level_read = sa2_peek(CURRENT_LEVEL, 2, &level) == SA2_OK;
     if (!level_read) level = -1;
@@ -148,26 +156,26 @@ void *__wrap_sub_488f60(void *state, uint32_t pc, void *memory) {
         if (!g_2p_layout_versus_said++)
             fprintf(stderr, "sa2 tweaks: 2p layout: a two-player game loads its two-player layout "
                     "already\n");
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     if (mission == HARD_MODE) {
         if (first_time(level, 1))
             fprintf(stderr, "sa2 tweaks: 2p layout: stage %d, mission 5 keeps its Hard Mode layout\n",
                     level);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     const uint32_t name = sa2_rt_get_gpr(state, SA2_ECX);
     if (name != 0) {
         if (!g_2p_layout_byname_said++)
             fprintf(stderr, "sa2 tweaks: 2p layout: a SET file loaded by name (ECX 0x%08X), not by "
                     "stage number, keeps its own layout\n", name);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     if (!level_read) {
         if (!g_2p_layout_level_said++)
             fprintf(stderr, "sa2 tweaks: 2p layout: CurrentLevel (0x%08X) does not read, so the "
                     "stage loads its own layout\n", CURRENT_LEVEL);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     int listed = 0;
     const char *why = NULL;
@@ -177,21 +185,21 @@ void *__wrap_sub_488f60(void *state, uint32_t pc, void *memory) {
         if (first_time(level, 0))
             fprintf(stderr, "sa2 tweaks: 2p layout: stage %d has no two-player layout checked for "
                     "one player, so it loads its own\n", level);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     if (why != NULL) {
         if (first_time(level, 0))
             fprintf(stderr, "sa2 tweaks: 2p layout: stage %d keeps its own layout: %s\n", level, why);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
     const uint8_t one = 1;
     if (sa2_poke(TWO_PLAYER_MODE, 1, &one) != SA2_OK) {
         if (!g_2p_layout_write_said++)
             fprintf(stderr, "sa2 tweaks: 2p layout: TwoPlayerMode (0x%08X) does not write, so the "
                     "stage loads its own layout\n", TWO_PLAYER_MODE);
-        return __real_sub_488f60(state, pc, memory);
+        return real(state, pc, memory);
     }
-    void *ret = __real_sub_488f60(state, pc, memory);
+    void *ret = real(state, pc, memory);
     if (sa2_poke(TWO_PLAYER_MODE, 1, &two) != SA2_OK)
         fprintf(stderr, "sa2 tweaks: 2p layout: TwoPlayerMode (0x%08X) did not take its 0 back after "
                 "stage %d's layout loaded\n", TWO_PLAYER_MODE, level);

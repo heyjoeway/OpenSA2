@@ -525,6 +525,16 @@ def test_no_2p_specials_and_ring_loss_cap_share_one_wrap_of_addrings():
     assert LS.PRODUCTION_WRAPS.count("sub_44ce10") == 1
     assert dict(TS.files(RUNTIME))["tweaks/no-2p-specials.c"] == ["sub_44ce10", "sub_46aa80"]
 
+
+def test_force_hard_layout_and_2p_layout_in_1p_share_one_wrap_of_loadstagesetfile():
+    """Both tweaks act on LoadStageSETFile (0x00488F60): force-hard-layout.c wraps it,
+    2p-layout-in-1p.c acts in that wrap, and the links pass -wrap for it once."""
+    assert ("tweaks/2p-layout-in-1p.c", "tweaks/force-hard-layout.c", "sub_488f60") in TS.shares(RUNTIME)
+    assert TS.wraps(RUNTIME, []).count("sub_488f60") == 1
+    assert LS.PRODUCTION_WRAPS.count("sub_488f60") == 1
+    assert dict(TS.files(RUNTIME))["tweaks/2p-layout-in-1p.c"] == []
+
+
 # ------------------------------------------------------------------ the runners' hooks
 
 WRAP_DEF = re.compile(r"\b__wrap_(sub_[0-9a-f]+)\s*\([^;{]*\)\s*\{")

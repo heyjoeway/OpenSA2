@@ -3,8 +3,9 @@ picks the two-player SET files in a one-player game, Hard Mode and a two-player 
 alone, TwoPlayerMode is back to its value when the call returns, and with the tweak off (or in a
 replay) the lifted body runs alone.
 
-The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c, as test_tweaks.py
-builds no-event-bars, and linked with a driver that stands in for the lifted body and the
+The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c and force-hard-layout.c,
+whose wrap of 0x00488F60 this tweak acts in, as test_tweaks.py builds no-event-bars, and linked
+with a driver that stands in for the lifted body and the
 runtime's peek and poke. The guest holds TwoPlayerMode at 0x0174AFDE, MissionNum at 0x0174AFE3 and
 CurrentLevel (a short) at 0x01934B70.
 
@@ -146,7 +147,8 @@ def exe(tmp_path_factory) -> Path:
     (d / "driver.c").write_text(DRIVER)
     out = d / "tw"
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(RUNTIME / "tweaks" / "2p-layout-in-1p.c"), "-o", str(out)],
+                           str(RUNTIME / "tweaks" / "2p-layout-in-1p.c"),
+                           str(RUNTIME / "tweaks" / "force-hard-layout.c"), "-o", str(out)],
                           capture_output=True, text=True, env=zig_env(d))
     assert done.returncode == 0, done.stderr
     return out

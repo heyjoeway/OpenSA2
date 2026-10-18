@@ -83,6 +83,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `fast-stage-load` | Starts a stage as soon as its files are loaded. The game no longer waits at the end of the loading screen, so the loading screen and its tip can end sooner. Chao World loads as usual. |
 | `gold-beetle-stays` | A Gold Beetle that appears no longer flies away when its time runs out; it stays until you destroy it. This raises scores, so the scores and ranks the game saves are higher than in the original game. |
 | `hide-hud` | Hides the score, time, rings, and lives counters during play, and the whole kart race display, for a clean picture. Button prompts and the radar stay, and the game plays the same. |
+| `hide-radar` | Treasure hunts (Knuckles and Rouge) show no emerald radar and no "!" over a piece, and play no radar beep. You find the pieces by eye and with the hint monitors. Your save is not changed. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |
 | `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |
 | `no-event-bars` | Removes the black bars that most in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. |

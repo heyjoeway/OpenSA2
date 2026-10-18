@@ -171,6 +171,7 @@
 /* X(bit, name, report, summary): every tweak, one line each, in name order (step 1 above). */
 #define SA2_TWEAK_LIST(X) \
     X(SA2_TWEAK_2P_LAYOUT_IN_1P, "2p-layout-in-1p", "2p layout", "one-player stages load the leftover two-player object layout where it fits (not Hard Mode, Pumpkin Hill or Iron Gate); most upgrades and Chao keys are left out") \
+    X(SA2_TWEAK_ACTION_BUTTONS, "action-buttons", "Y light dash, X spin dash", "Y does the light dash, so B and X at a line of light-dash rings somersault and spin-dash; X held starts Sonic's or Shadow's spin dash at once, and B keeps the usual hold") \
     X(SA2_TWEAK_ALL_EVENTS_SKIPPABLE, "all-events-skippable", "every event skippable", "Start skips every cutscene, the Hero story ending and the Last story finale included") \
     X(SA2_TWEAK_ALWAYS_RECAP, "always-recap", "recap before stages", "the story-so-far recap before every story stage that has one, not only on a resume") \
     X(SA2_TWEAK_ANALOG_FIX, "analog-fix", "analog full throw", "a gamepad stick gives full speed from about two thirds of a push, not before half, so half a push walks") \

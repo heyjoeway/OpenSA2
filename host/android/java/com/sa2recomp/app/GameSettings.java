@@ -89,6 +89,7 @@ final class GameSettings {
      * this order; the Tweaks card shows them by TWEAK_GROUPS instead. */
     static final Tweak[] TWEAKS = {
         new Tweak("2p-layout-in-1p", "Two-player stage layouts", "13 one-player stages use their leftover two-player object layout: other rings, items and enemies. Hard Mode, Pumpkin Hill and Iron Gate keep their own. These layouts leave out most upgrades and Chao key boxes, and some switches and animals, so a mission may not be finishable. Clears, ranks and emblems still save; an upgrade the layout leaves out cannot be collected or saved."),
+        new Tweak("action-buttons", "Light dash on Y, spin dash on X", "Y does the light dash along a line of rings, so B or X there somersaults instead (the button prompt on screen still shows the usual button). Holding X starts Sonic's or Shadow's spin dash at once, with no charge-up or somersault; B keeps the usual hold, where a tap somersaults. Nothing is saved differently."),
         new Tweak("all-events-skippable", "Skip any cutscene", "Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch."),
         new Tweak("always-recap", "Story recap before every stage", "Plays the story-so-far recap before each story stage, not only when you continue a story from story select. A, B or Start skips it."),
         new Tweak("analog-fix", "Analog stick fix", "Your speed builds up over more of the stick's push: full speed comes at about two thirds of a push instead of before half, so half a push walks and a full push still runs."),
@@ -188,6 +189,7 @@ final class GameSettings {
         },
         {"Controls",
             "analog-fix",
+            "action-buttons",
             "deadzone",
             "camera-invert",
             "hold-toggle",

@@ -164,7 +164,9 @@ def test_the_tweaks_card_shows_the_groups_and_their_tweaks_in_the_tables_order(j
     assert dict(order)["Story and presentation"][:3] == [
         ("skip-intro", "Skip intro"), ("all-events-skippable", "Skip any cutscene"),
         ("no-event-bars", "Remove cutscene black bars")]
-    assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"), ("deadzone", "Round stick deadzone"),
+    assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"),
+                                       ("action-buttons", "Light dash on Y, spin dash on X"),
+                                       ("deadzone", "Round stick deadzone"),
                                        ("camera-invert", "Invert camera"), ("hold-toggle", "Tap to hold B")]
     assert dict(order)["Other"] == [("pause-unfocused", "Pause when unfocused")]
 

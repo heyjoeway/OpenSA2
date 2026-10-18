@@ -63,7 +63,7 @@ RUNTIME_C = ["guest_memory.c", "function_table_impl.c", "sa2_trap.c", "sa2_call.
              "sa2_devprofile.c", "sa2_locale.c",
              "sa2_guest_call.c", "sa2_dinput.c", "sa2_wbem.c", "sa2_poll_handoff.c",
              "sa2_exe_overlay.c", "sa2_cri_dsp.c", "sa2_ninja_math.c", "sa2_widescreen.c",
-             "sa2_crt_x87.c"]
+             "sa2_crt_x87.c", "sa2_tweaks.c"]
 RUNTIME_CXX = ["remill_runtime.cpp", "sa2_emulate.cpp"]
 # The shipped executable's code-section overlay (runtime/sa2_exe_overlay.h): the table
 # tools/s7/text_readset.py writes, never tracked, since it holds code bytes of the game. A build
@@ -115,6 +115,12 @@ def exe_overlay_identity(table: Path) -> dict:
 # guest's earlier code left it, then calls `__real_`; tools/s8/x87_fallback_probe.py holds them to
 # the host libm with C2 clear and set on entry.
 #
+# sub_5f8ec0 is the events' "shown at 4:3?" answer (runtime/sa2_tweaks.c): with play's
+# SA2_TWEAKS=no-event-bars it answers 0 to the event executor's call alone, so in-engine
+# cutscenes draw no side bars; with the tweak off, and in every replay, the wrap only calls
+# `__real_` (Documentation/scripts/tests/test_tweaks.py). It goes before ReadConfig so the HUD
+# sites stay the list's tail (test_widescreen.py).
+#
 # sub_405310 is ReadConfig (runtime/sa2_widescreen.c): play's SA2_PLAY_RES or SA2_PLAY_ASPECT
 # rewrites the config's Width and Height after it, so the game draws at the device's aspect; with
 # neither set, and in every replay, the wrap only calls `__real_`
@@ -128,7 +134,7 @@ def exe_overlay_identity(table: Path) -> dict:
 # replay, each wrap only calls `__real_` (test_widescreen.py holds the list to the file).
 PRODUCTION_WRAPS = ["sub_427ee0", "sub_842500", "sub_843400", "sub_843460", "sub_8418b0",
                     "sub_426cc0", "sub_424ff0", "sub_426e40",
-                    "sub_859ac8", "sub_859648", "sub_829008", "sub_405310",
+                    "sub_859ac8", "sub_859648", "sub_829008", "sub_5f8ec0", "sub_405310",
                     "sub_44e9c0", "sub_7945c0", "sub_794cb0", "sub_44d360", "sub_61bba0",
                     "sub_61b6c0", "sub_4526d0", "sub_6f41b0", "sub_420210", "sub_420390",
                     "sub_4200f0", "sub_77e980", "sub_42b230", "sub_41b0c0"]

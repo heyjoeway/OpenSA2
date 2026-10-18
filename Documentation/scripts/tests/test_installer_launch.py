@@ -42,6 +42,8 @@ its frames and write a final report. What each case pins:
   stream, and the session's launcher.log keeps what it said;
 * play's full width: --play-res and --no-widescreen over game.env's own SA2_PLAY_RES or
   SA2_PLAY_ASPECT, nothing with no display, nothing in the selftest, and the record says which;
+* play's tweaks: game.env's SA2_TWEAKS as written, never the caller's, none in the selftest, and
+  the record says which;
 * --host picks the player; the selftest with no config, a .json record and unknown arguments are
   refused; the launcher compiles for x86_64-windows-gnu;
 * the fresh-host runner binds only each route's source read only, stops on anything it must not
@@ -914,6 +916,39 @@ def test_play_sets_the_full_width_answer_only_where_asked(release, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     got = json.loads((session / "game-args.runrec").read_text())["env"]
     assert not [k for k in got if k.startswith("SA2_PLAY_")] and doc["widescreen"] == ""
+
+
+def test_play_passes_game_envs_tweaks_and_the_selftest_drops_them(release, tmp_path):
+    """Tweaks (runtime/sa2_tweaks.c): game.env's SA2_TWEAKS line reaches play's game as written, and
+    the caller's own SA2_TWEAKS does not; with none the game gets none; the selftest drops game.env's.
+    Each says which, and the record keeps it (`tweaks`)."""
+    home, _ = installed(release, tmp_path)
+    env = env_for(home, FAKE_GAME=json.dumps({"title_at": 30}), FAKE_PLAYER=json.dumps({"end_after": 1.0}),
+                  SA2_TWEAKS="from-the-shell")
+
+    def play(name: str) -> tuple[str | None, str, str]:
+        session = tmp_path / name
+        p = subprocess.run([str(release["rel"] / "bin" / "sa2recomp"), "--no-pace", "--out", str(session)],
+                           capture_output=True, text=True, env=env, timeout=300)
+        assert p.returncode == 0, p.stdout + p.stderr
+        got = json.loads((session / "game-args.runrec").read_text())["env"]
+        return got.get("SA2_TWEAKS"), json.loads((session / "launch.runrec").read_text())["tweaks"], p.stderr
+
+    got, said, err = play("none")
+    assert got is None and said == "none" and "sa2recomp: tweaks: none\n" in err
+    game_env = release["rel"] / "share" / "game.env"
+    text = game_env.read_text()
+    try:
+        game_env.write_text(text + "SA2_TWEAKS=no-event-bars\n")
+        got, said, err = play("game-env")
+        assert got == "no-event-bars" and said == "SA2_TWEAKS=no-event-bars (game.env)"
+        assert "sa2recomp: tweaks: SA2_TWEAKS=no-event-bars (game.env)\n" in err
+        p, doc, session = selftest(release, home, tmp_path, name="selftest")
+        assert p.returncode == 0, p.stdout + p.stderr
+        assert "SA2_TWEAKS" not in json.loads((session / "game-args.runrec").read_text())["env"]
+        assert doc["tweaks"] == "none: the selftest drops game.env's SA2_TWEAKS=no-event-bars"
+    finally:
+        game_env.write_text(text)
 
 
 def test_sdl_disk_sound_is_refused_in_play(release, tmp_path):

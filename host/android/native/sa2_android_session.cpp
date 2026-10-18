@@ -88,6 +88,13 @@
 // the settings screen also sends SA2_PLAYER_PICTURE_Y, where the player puts the picture in an
 // upright window (host/player/player.cpp "The picture's place"); the session says the player's
 // line for it ("player: picture: ...").
+//
+// Tweaks (runtime/sa2_tweaks.c): changes to the game's own behaviour, each off by default. The
+// settings screen's Tweaks card sends the ones turned on as one setting, SA2_TWEAKS=<names>
+// ("no-event-bars": no black bars at the sides of in-engine cutscenes), which reaches the game as
+// every other setting does (a game.env.extra line replaces it). The report names the setting
+// ("settings: SA2_TWEAKS=...") and then the game's own line saying which tweaks are on ("game: sa2
+// tweaks: event-bars off ...", from its game.log).
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -1009,6 +1016,11 @@ int play_game(const Args& a) {
         if (env_find(genv, "SA2_PLAY_RES") || env_find(genv, "SA2_PLAY_ASPECT"))
             relay_line(session + "/game.log", "widescreen: ", "game: ", player_done);
     });
+    // The game's tweaks line (runtime/sa2_tweaks.c), printed at its start.
+    std::thread tweaks_thread([&] {
+        const std::string* t = env_find(genv, "SA2_TWEAKS");
+        if (t && !t->empty()) relay_line(session + "/game.log", "sa2 tweaks: ", "game: ", player_done);
+    });
     // The player's line for the picture's place (its first Present after the first frame).
     std::thread picture_thread([&] {
         if (env_find(prof_env, "SA2_PLAYER_PICTURE_Y"))
@@ -1059,6 +1071,7 @@ int play_game(const Args& a) {
     mon.stop = true;
     mon_thread.join();
     ws_thread.join();
+    tweaks_thread.join();
     picture_thread.join();
     watch.join();
     relay_thread.join();

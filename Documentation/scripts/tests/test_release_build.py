@@ -272,6 +272,9 @@ def test_the_readme_and_the_zip_say_which_build_the_release_holds(tmp_path):
     assert ("This build\n  The game here is the exact build: its x87 floating point runs in the "
             "processor's\n  own 80-bit registers, as the original game's does.\n") in native
     assert "double" not in native
+    # The desktop's one place for a tweak: a line in share/game.env (runtime/sa2_tweaks.c).
+    assert "  share\\game.env:\n    SA2_TWEAKS=no-event-bars " in double
+    assert "  share/game.env:\n    SA2_TWEAKS=no-event-bars " in native
     for notes, mode in ((double_notes, "double"), (native_notes, "native-x87")):
         rel = tmp_path / mode
         rel.mkdir()

@@ -29,8 +29,10 @@ import java.util.Locale;
 /**
  * The game settings screen, opened from the setup screen: the orientation (landscape, portrait or
  * auto-rotate), the full-width picture, the HUD at 4:3, the picture's aspect and resolution, the
- * touch controls' size, opacity and places (Sa2LayoutActivity) and what each touch or controller
- * button sends. Each change is saved at once (GameSettings) and applies from the next session.
+ * touch controls' size, opacity and places (Sa2LayoutActivity), what each touch or controller
+ * button sends, and the tweaks (changes to the game's own behaviour, none made by default: the
+ * cutscenes' black side bars can be turned off). Each change is saved at once (GameSettings) and
+ * applies from the next session.
  * Every setting starts at today's behaviour, and "Reset all" puts them back.
  */
 public class Sa2SettingsActivity extends Activity {
@@ -39,7 +41,7 @@ public class Sa2SettingsActivity extends Activity {
     private GameSettings mS;
     private int mLong, mShort;
     private Button[] mOrientation, mAspect;
-    private Switch mWidescreen, mHud;
+    private Switch mWidescreen, mHud, mEventBars;
     private Button mResolution, mLayoutLandscape, mLayoutPortrait;
     private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel, mPlaceLabel, mPlaceNote;
     private SeekBar mSize, mOpacity, mPlace;
@@ -273,6 +275,15 @@ public class Sa2SettingsActivity extends Activity {
         action(p, "Change what the controller buttons do", v -> pickMap(false, -1));
         note(p, "Buttons are named by where they are: the bottom face button is A, as on an Xbox controller.");
 
+        // Tweaks: changes to the game's own behaviour, none made by default (GameSettings, "The tweaks").
+        LinearLayout tw = card(col, "Tweaks");
+        mEventBars = toggle(tw, "Cutscene black bars", (b, on) -> {
+            mS.eventBars = on;
+            save();
+        });
+        ((LinearLayout.LayoutParams) mEventBars.getLayoutParams()).topMargin = 0;
+        note(tw, "Off removes the black bars at the sides of some cutscenes on a wide picture. Movies keep theirs.");
+
         Button reset = Ui.button(this, "Reset all settings", v -> new AlertDialog.Builder(this)
                 .setMessage("Put every game setting back to its default?")
                 .setPositiveButton("Reset", (dlg, w) -> {
@@ -356,6 +367,7 @@ public class Sa2SettingsActivity extends Activity {
         mResolution.setText(resolutionName(shownResolution()));
         mResolution.setEnabled(fixed || wide);
         mHud.setChecked(mS.hud43);
+        mEventBars.setChecked(mS.eventBars);
         int[] pic = mS.picture(mLong, mShort);
         mPictureNote.setText(pic == null
                 ? "The game keeps its own size (" + GameSettings.CONFIG_W + "x" + GameSettings.CONFIG_H + ")."

@@ -789,6 +789,7 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE) -> str:
     build = README_BUILD.get(f80_mode, [f"  The game here is the {f80_mode} f80 build (tools/s8/perf_f80.py)."])
     run = "bin\\sa2recomp.exe (double-click it)" if win else "bin/sa2recomp"
     data = "%LOCALAPPDATA%\\sa2recomp" if win else "~/.local/share/sa2recomp (and ~/.config/sa2recomp)"
+    env = "share\\game.env" if win else "share/game.env"
     return "\n".join([
         "Sonic Adventure 2, recompiled",
         "=============================",
@@ -809,6 +810,12 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE) -> str:
         "",
         "Saves and logs",
         f"  Saves, settings and each session's logs are under {data}.",
+        "",
+        "Tweaks",
+        "  Optional changes to the game, each off unless named. To turn one on, add a line to",
+        f"  {env}:",
+        "    SA2_TWEAKS=no-event-bars    no black bars at the sides of some cutscenes on a wide screen",
+        "  Name several with commas. Each session's game.log begins by saying which are on.",
         "",
         "This build",
         *build,

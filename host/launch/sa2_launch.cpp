@@ -91,6 +91,14 @@
 // --no-widescreen sets SA2_PLAY_RES=off and --play-res WxH that size, over game.env and the
 // display both. The launcher says which, and the record keeps it (`widescreen`).
 //
+// Tweaks (play only; runtime/sa2_tweaks.c): changes to the game's own behaviour, each off by
+// default, named in one setting, SA2_TWEAKS, a comma-separated list. On the desktop it is a line
+// in share/game.env, which reaches the game as written (the launcher passes none of its own
+// environment's SA2_ variables): SA2_TWEAKS=no-event-bars removes the black bars at the sides of
+// in-engine cutscenes on a screen wider than 4:3. The selftest runs the game as it is and drops
+// the line. The launcher says what the game is given, the record keeps it (`tweaks`), and the
+// game's own line saying which tweaks are on starts the session's game.log ("sa2 tweaks: ...").
+//
 // --player-arg ARG (play only, repeatable) appends ARG to the player's command line: a
 // diagnostic, as the player's own --synthetic-keys with its logs and --max-frames, which drives a
 // play session with no person (host/launch/windows_play.py). The record names them.
@@ -1458,6 +1466,19 @@ int launch(int argc, char** argv) {
         // The HUD at its 4:3 positions (runtime/sa2_widescreen.c), unless game.env sets SA2_PLAY_HUD43.
         if (!in_env("SA2_PLAY_HUD43")) genv.set("SA2_PLAY_HUD43", "1");
     }
+    // Tweaks (the header, "Tweaks"): game.env's SA2_TWEAKS, in play alone.
+    std::string tweaks = "none";
+    const auto tw = std::find_if(genv.kv.begin(), genv.kv.end(), [](const auto& e) { return e.first == "SA2_TWEAKS"; });
+    if (tw != genv.kv.end() && !tw->second.empty()) {
+        const std::string named = "SA2_TWEAKS=" + tw->second;
+        if (o.selftest) {
+            genv.drop("SA2_TWEAKS");
+            tweaks = "none: the selftest drops game.env's " + named;
+        } else {
+            tweaks = named + " (game.env)";
+        }
+    }
+    say("tweaks: %s", tweaks);
     // A console made for this launch alone (Windows, a double-click) goes before the game's window
     // comes; a shell's, or redirected output, stays (sa2l::release_own_console).
     const std::string console = o.selftest ? "" : sa2l::release_own_console();
@@ -1738,6 +1759,7 @@ int launch(int argc, char** argv) {
     j.raw("first_run", first_run_json(first));
     j.s("console", console);
     j.s("widescreen", widescreen);
+    j.s("tweaks", tweaks);
     {
         Json g;
         g.n("exit", game.status);

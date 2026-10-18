@@ -31,6 +31,11 @@ import java.util.Locale;
  * upright. Upright, the picture sits where the picture position puts it (its centre a quarter of the
  * way down by default, the middle of the screen's upper half), so the touch controls below it get
  * the rest of the screen.
+ *
+ * The tweaks. Each is a change to the game's own behaviour, off by default, sent as one name in
+ * SA2_TWEAKS (runtime/sa2_tweaks.c, which ignores it in a replay): the cutscene bars switch off
+ * sends "no-event-bars", and the in-engine cutscenes then draw no black bars at the sides of a
+ * wide picture.
  */
 final class GameSettings {
     static final String PREFS = "game_settings";
@@ -60,6 +65,7 @@ final class GameSettings {
     int pictureY = 25;                         // upright, the picture's centre, percent of the height down (0 to 50)
     String layoutLandscape = "", layoutPortrait = "";  // SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_PORTRAIT; "" its own
     String touchMap = "", padMap = "";         // SA2_TOUCH_MAP and SA2_PAD_MAP, only what differs
+    boolean eventBars = true;                  // the cutscenes' own side bars; false: SA2_TWEAKS no-event-bars
 
     static GameSettings load(Context c) {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -76,6 +82,7 @@ final class GameSettings {
         s.layoutPortrait = p.getString("touch_layout_portrait", s.layoutPortrait);
         s.touchMap = p.getString("touch_map", s.touchMap);
         s.padMap = p.getString("pad_map", s.padMap);
+        s.eventBars = p.getBoolean("event_bars", s.eventBars);
         return s;
     }
 
@@ -95,6 +102,7 @@ final class GameSettings {
                 .putString("touch_layout_portrait", layoutPortrait)
                 .putString("touch_map", touchMap)
                 .putString("pad_map", padMap)
+                .putBoolean("event_bars", eventBars)
                 .commit();
     }
 
@@ -232,7 +240,16 @@ final class GameSettings {
         if (!layoutPortrait.isEmpty()) e.add("SA2_TOUCH_LAYOUT_PORTRAIT=" + layoutPortrait);
         if (!touchMap.isEmpty()) e.add("SA2_TOUCH_MAP=" + touchMap);
         if (!padMap.isEmpty()) e.add("SA2_PAD_MAP=" + padMap);
+        String tweaks = tweaks();
+        if (!tweaks.isEmpty()) e.add("SA2_TWEAKS=" + tweaks);
         return e;
+    }
+
+    /** SA2_TWEAKS's value: the names of the tweaks turned on, comma-separated; "" for none. */
+    String tweaks() {
+        List<String> t = new ArrayList<>();
+        if (!eventBars) t.add("no-event-bars");
+        return String.join(",", t);
     }
 
     private static String fraction(int percent) {

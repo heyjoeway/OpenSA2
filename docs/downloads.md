@@ -43,6 +43,7 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 - **HUD at 4:3 positions** keeps the score, time, and rings near the middle of a wide picture. It is on by default.
 - **Touch controls** sets the size and opacity of the on-screen controls. At 0% opacity the controls are hidden but still work. **Move the controls** lets you drag each control to a new place, and **Change what the touch buttons do** changes the game button each one sends.
 - **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
+- **Tweaks** are optional changes to the game, each off by default. Turn off **Cutscene black bars** to remove the black bars that some in-engine cutscenes draw at the sides of a wide picture. Movies keep their bars. See [Tweaks](#tweaks) for what to expect.
 
 **Reset all settings** restores the defaults.
 
@@ -65,6 +66,26 @@ sudo apt install './OpenSA2-v0.1.0-alpha.3.1-linux-x86_64.deb'
 Open OpenSA2 from your application menu, or run `opensa2`. The first start finds a Steam copy or offers a game-folder picker. A controller is optional.
 
 Saves, settings, and logs use the port's per-user `sa2recomp` directories under your XDG data and configuration locations. The package does not write into your Steam installation.
+
+## Tweaks
+
+Tweaks are optional changes to how the game looks or plays. Each one is off until you turn it on, and replays and the launcher's self-test never use them. Tweaks need a release newer than v0.1.0-alpha.3.1.
+
+| Name | Change |
+| --- | --- |
+| `no-event-bars` | Removes the black bars that some in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. Movies keep their bars, because the video itself is 4:3. |
+
+Some cutscenes, including the opening one, draw title cards, flashes, and backdrops over the middle 4:3 part of the picture only. With `no-event-bars` on, those effects stop at a hard edge where the bars used to start.
+
+On Android, use the **Tweaks** card in **Game settings**. On Windows and Linux, add a line to the release's `share/game.env` file:
+
+```
+SA2_TWEAKS=no-event-bars
+```
+
+On Windows the file is `share\game.env` in the extracted folder. For the Linux package it is `/usr/lib/opensa2/share/game.env`, which you edit as root; a package update replaces it. Separate several tweak names with commas. Setting `SA2_TWEAKS` in a shell has no effect, because the launcher passes only `game.env`'s settings to the game.
+
+The launcher prints the tweaks it passes, and each session's game log starts with a line that names the active tweaks. A name that is not a tweak is reported by name in that line and ignored.
 
 ## Source and checksums
 

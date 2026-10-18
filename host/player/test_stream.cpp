@@ -425,6 +425,36 @@ int main(int argc, char** argv) {
         CHECK(close(video[1]) == 0 && close(cancel[1]) == 0);
     }
 
+    // sa2_cancel_waiting (pause-unfocused's hold, which does not read the stream) looks at the
+    // cancellation pipe without taking its byte: nothing while the pipe is empty; the caller's cancel
+    // said each time it looks, and left for the reader, whose next read still ends Cancelled; a
+    // writer gone said as a closed pipe; no descriptor, nothing.
+    {
+        const auto said = [](const char* s) { return std::string(s ? s : "(nothing)"); };
+        W w;
+        w.header(1, kJson);
+        int video[2], cancel[2];
+        CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, video) == 0);
+        CHECK(pipe(cancel) == 0);
+        CHECK(write(video[1], w.b.data(), w.b.size()) == ssize_t(w.b.size()));
+        Sa2StreamReader reader;
+        CHECK(reader.live_cancel_fd() == -1);
+        CHECK(reader.open_live(video[0], cancel[0], nullptr, nullptr, 1).status == Sa2ReadStatus::Ready);
+        CHECK(reader.live_cancel_fd() == cancel[0]);
+        CHECK(said(sa2_cancel_waiting(-1)) == "(nothing)");
+        CHECK(said(sa2_cancel_waiting(cancel[0])) == "(nothing)");
+        const uint8_t one = 1;
+        CHECK(write(cancel[1], &one, 1) == 1);
+        for (int look = 0; look < 3; look++) CHECK(said(sa2_cancel_waiting(cancel[0])) == "the caller cancelled");
+        Sa2Record r;
+        const auto outcome = reader.next_live(&r);
+        CHECK(outcome.status == Sa2ReadStatus::Cancelled && outcome.detail == "explicit cancellation wake");
+        CHECK(said(sa2_cancel_waiting(cancel[0])) == "(nothing)");   // the reader took the byte
+        CHECK(close(cancel[1]) == 0);
+        CHECK(said(sa2_cancel_waiting(cancel[0])) == "the caller's cancellation pipe is closed");
+        CHECK(close(video[1]) == 0);
+    }
+
     // A live reader parses into storage it keeps (next_live's record swapped with the caller's):
     // a CALL with arguments and a blob, then a FRAME, a NOTE and a CALL with none, each read as
     // into a fresh record, nothing of the one before left in it; and method_argc answers the

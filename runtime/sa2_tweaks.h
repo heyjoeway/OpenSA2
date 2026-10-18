@@ -214,6 +214,7 @@ enum {
     X(SA2_TWEAK_FRAMETIME_OVERLAY, "frametime-overlay", "frame-time overlay on", "a box in the corner with the frame rate, frame time and late frames (sdl3-gpu host)", "player") \
     X(SA2_TWEAK_HOLD_TOGGLE, "hold-toggle", "B toggles", "B held by one tap and let go by the next (a mech's lock-on, the spin-dash charge)", "player") \
     X(SA2_TWEAK_MONO_AUDIO, "mono-audio", "mono audio", "the same sound from both speakers: left and right mixed to mono", "player") \
+    X(SA2_TWEAK_PAUSE_UNFOCUSED, "pause-unfocused", "held while unfocused", "the game and its sound pause while the player's window is out of focus (in a paced session, the default)", "player") \
     /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */

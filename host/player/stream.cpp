@@ -795,6 +795,25 @@ Sa2ReaderStorage Sa2StreamReader::live_storage() const {
             header_strings_bytes_, live_pending_ ? live_pending_->note.size() : 0};
 }
 
+const char* sa2_cancel_waiting(int fd) {
+    if (fd < 0) return nullptr;
+#ifdef _WIN32
+    DWORD error = 0;
+    const long long held = pipe_avail(pipe_of(fd), &error);
+    if (held > 0) return "the caller cancelled";
+    if (held == -1) return "the caller's cancellation pipe is closed";
+    if (held == -2) return "the caller's cancellation pipe failed";
+    return nullptr;
+#else
+    pollfd p{fd, POLLIN, 0};
+    if (::poll(&p, 1, 0) <= 0) return nullptr;
+    if (p.revents & POLLIN) return "the caller cancelled";
+    if (p.revents & POLLHUP) return "the caller's cancellation pipe is closed";
+    if (p.revents & (POLLERR | POLLNVAL)) return "the caller's cancellation pipe failed";
+    return nullptr;
+#endif
+}
+
 Sa2ReadOutcome Sa2StreamReader::finish_live(Sa2ReadStatus status, const std::string& detail) {
     live_status_ = status;
     live_detail_ = detail;

@@ -343,6 +343,7 @@
 #include "tweaks/frametime-overlay.h"
 #include "tweaks/hold-toggle.h"
 #include "tweaks/mono-audio.h"
+#include "tweaks/pause-unfocused.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -1146,6 +1147,13 @@ private:
     bool checkpoint_readback();
     void write_y4m(const uint8_t* bgra, uint32_t pitch);
     void pump_events();
+    // Why the session is ending, or nullptr while it plays (pause-unfocused's hold, which does not
+    // read the stream): the run stopped, the end asked for, the stream's END read, or the caller's
+    // cancellation waiting in its pipe (looked at, not taken: the reader takes it).
+    const char* hold_ending() const {
+        if (stop_ || end_requested_ || end_records_) return "the session is ending";
+        return sa2_cancel_waiting(cancel_fd_ >= 0 ? cancel_fd_ : rd_.live_cancel_fd());
+    }
     void request_end(double now, bool by_close);
     std::string end_request_json() const;
     void pace_until(double target);
@@ -4137,6 +4145,8 @@ void Player::pump_events() {
         if (input_ && !ignored && !consumed) input_->event(e, input_window_id_, timing.handled_s, timing.age_ns);
     }
     if (input_) input_->pump();
+    sa2tw::hold_while_unfocused(win_, audio_stream_, o_.pace, [this] { return hold_ending(); },
+                                [this] { pump_events(); service_pads(); });
 }
 
 // --end-fd: the first close request, or the caller's SIGUSR1. Every key is let up and the

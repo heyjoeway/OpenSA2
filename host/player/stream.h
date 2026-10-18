@@ -126,6 +126,14 @@ private:
     bool do_is_equal(const std::pmr::memory_resource& r) const noexcept override { return this == &r; }
 };
 
+// The caller's cancellation pipe (open_live's cancel_fd), looked at without taking its byte, so
+// the reader still takes it at its next look (service_live) and ends the live read as it says:
+// nullptr while the pipe holds nothing (or fd < 0, or the look itself failed: the reader's own look
+// says that); otherwise why the read will end: "the caller cancelled" (the pipe holds a byte), "the
+// caller's cancellation pipe is closed" or "the caller's cancellation pipe failed". For a wait that
+// does not read the stream (host/player/tweaks/pause-unfocused.cpp's hold).
+const char* sa2_cancel_waiting(int fd);
+
 class Sa2StreamReader {
 public:
     enum { OPEN_OK = 0, OPEN_IO = 1, OPEN_MALFORMED = 2 };
@@ -153,6 +161,7 @@ public:
     Sa2ReaderStorage live_storage() const;
     uint64_t live_read_calls() const { return live_read_calls_; }
     uint64_t live_services() const { return live_services_; }
+    int live_cancel_fd() const { return cancel_fd_; }   // open_live's cancel_fd, -1 before it
     static constexpr size_t live_batch_bytes = 64u << 10;
     static constexpr int live_window_log = 24;
     static constexpr size_t live_codec_cap = 32u << 20;

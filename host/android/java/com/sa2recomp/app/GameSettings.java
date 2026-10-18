@@ -105,6 +105,7 @@ final class GameSettings {
         new Tweak("no-lives-bonus", "No extra life at 100 rings", "Collecting 100 rings (or 200, 300...) no longer gives an extra life. 1-up boxes still do."),
         new Tweak("no-loading-tips", "Skip loading tips", "Hides Omochao's tips and the Now Loading animation while the game loads. Most loads show a black screen instead; a load over a picture already on screen, such as a stage's title card, keeps that picture."),
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
+        new Tweak("pause-unfocused", "Pause when unfocused", "Holds the game and its sound while the app is visible but not in focus, such as under the notification shade."),
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
         new Tweak("radar-all-pieces", "Radar tracks all pieces", "In treasure hunts, every piece still to find shows on the radar how near it is, not only the first. Makes hunts easier."),
         new Tweak("ring-loss-cap", "Lose at most 20 rings", "A hit costs at most 20 rings, the ones that scatter, so you can pick them all back up. Getting back to 100 rings that way gives no second extra life. The higher ring counts, scores and ranks it brings are saved as usual."),

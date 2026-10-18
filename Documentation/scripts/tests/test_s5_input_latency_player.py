@@ -371,7 +371,8 @@ def build(source, template, out):
     (out/'EXTRACTION.json').write_text(json.dumps({'source':str(source),'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
         'spans':bindings,'mechanical_transforms':['run() prefix renamed run_prefix(), ends before pace/mixer and returns 0',
             'main() renamed parser_main()', 'Player::place_picture authored (a trace entry): the window is a stand-in', 'report entry and publisher bracket authored JSON payload; full report serializer not compiled',
-            'guard and finish spans inserted in authored callback methods'], 'driver_sha256':hashlib.sha256(result.encode()).hexdigest()},indent=2)+'\n')
+            'guard and finish spans inserted in authored callback methods',
+            "the host tweaks' calls in the extracted spans reach authored no-ops (each tweak's own test runs it)"], 'driver_sha256':hashlib.sha256(result.encode()).hexdigest()},indent=2)+'\n')
     return out/'driver.cpp'
 
 DRIVER = r'''
@@ -404,6 +405,12 @@ DRIVER = r'''
 #include "prof.h"
 #include "sha256.h"
 #include "tweaks.h"
+#include <functional>
+// The host tweaks' calls in the extracted spans reach these authored stand-ins, which do nothing:
+// each tweak's own test runs its code.
+namespace sa2tw {
+void hold_while_unfocused(SDL_Window*,SDL_AudioStream*,bool,const std::function<const char*()>&,const std::function<void()>&){}  // pause-unfocused
+}
 namespace fs=std::filesystem;
 #define SA2_PLAYER_GPU 0
 using HRESULT=int32_t;
@@ -518,6 +525,8 @@ struct Player {
     void readback_frame(uint64_t,const Sa2Record*){trace.push_back("readback");}
     void place_picture(){trace.push_back("place_picture");}
     void audio_block(){}
+    const char* hold_ending()const{return nullptr;}  // pause-unfocused's ending(): the session plays
+    void service_pads(){}
     void pace_until(double){trace.push_back("pace_wait");}
     void read_dxvk_log(){trace.push_back("dxvk_read");}
     std::string dxvk_log_path()const{return {};}

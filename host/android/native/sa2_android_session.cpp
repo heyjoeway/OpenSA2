@@ -1144,9 +1144,15 @@ int play_game(const Args& a) {
         mon.stopping = true;
         stop_how = stop_game(game);
         game_alive = false;
+        // Said now, not only at the session's end: a player held by pause-unfocused (the app visible
+        // but not in focus) reads no stream until the cancel below, so this is the line that names it.
+        if (!player_done.load())
+            say("%s; the game is stopped (by %s); the player has %.0f s to read its END", ended_by.c_str(),
+                stop_how.c_str(), kFeedGrace);
         const double t0 = sa2p::monotonic_seconds();
         while (!player_done.load() && sa2p::monotonic_seconds() - t0 < kFeedGrace) sa2l::sleep_ms(50);
         if (!player_done.load()) {
+            say("the player did not reach the END in %.0f s: cancelled", kFeedGrace);
             const char byte = 1;
             sa2l::write_all(cancel_w, &byte, 1);
         }

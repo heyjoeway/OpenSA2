@@ -65,9 +65,14 @@
  * they still get the barrier and invincibility. Two-player mode (TwoPlayerMode, 0x0174AFDE, is
  * set): one player held invincible would decide a race or a fight. Player 2 is never touched.
  *
- * Off is the lifted code alone: the wrap tests the tweak's bit first and otherwise only calls
- * `__real_sub_44c1a0`. Risks, all with the tweak on: no effect's task is spawned, so no barrier
- * bubble and no invincibility sparkle is drawn, no music or voice line plays, and
+ * The tweak all-upgrades, every character's upgrades at once, acts in this wrap: when it is on, the
+ * wrap calls sa2_all_upgrades_frame (runtime/tweaks/all-upgrades.c) after the lifted body, and
+ * after this tweak's own work when both are on. Each only ORs bits into Upgrades, so with both on
+ * Upgrades is the union (all-upgrades' 0x1FFF7FFF holds every character's own bits).
+ *
+ * Off is the lifted code alone: the wrap tests the two tweaks' bits first and, when neither is on,
+ * only calls `__real_sub_44c1a0`. Risks, all with the tweak on: no effect's task is spawned, so
+ * no barrier bubble and no invincibility sparkle is drawn, no music or voice line plays, and
  * the three item boxes do nothing (each award returns at once when its bit is set, which for the
  * plain Barrier box is why 0x0001 is held); invincibility does not save the player from a pit,
  * drowning or being crushed; the upgrades open Lost Chao, upgrade-gated emblems and upgrade
@@ -187,10 +192,15 @@ static void assist_frame(void) {
 
 void *__real_sub_44c1a0(void *state, uint32_t pc, void *memory);
 
+/* runtime/tweaks/all-upgrades.c, which acts in this wrap; it tests its own bit first. */
+void sa2_all_upgrades_frame(void);
+
 __attribute__((used, retain))
 void *__wrap_sub_44c1a0(void *state, uint32_t pc, void *memory) {
-    if (!sa2_tweak_on(SA2_TWEAK_START_ASSISTS)) return __real_sub_44c1a0(state, pc, memory);
+    const int assists = sa2_tweak_on(SA2_TWEAK_START_ASSISTS);
+    if (!assists && !sa2_tweak_on(SA2_TWEAK_ALL_UPGRADES)) return __real_sub_44c1a0(state, pc, memory);
     void *ret = __real_sub_44c1a0(state, pc, memory);
-    assist_frame();
+    if (assists) assist_frame();
+    sa2_all_upgrades_frame();
     return ret;
 }

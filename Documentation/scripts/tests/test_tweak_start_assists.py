@@ -3,17 +3,19 @@ player 1's Powerups gets invincibility and both barriers (0x8003: the plain barr
 item box returns at once, as the other two do) and Upgrades the character's own bits, found
 through MainCharacter[0] (0x01DEA6E0) -> task+0x40 -> CharObj2Base.
 
-The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c, as test_tweaks.py
-builds no-event-bars, and linked with a driver that stands in for the lifted function and the
+The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c and all-upgrades.c (which
+acts in this wrap; test_tweak_all_upgrades.py has its cases), as test_tweaks.py builds
+no-event-bars, and linked with a driver that stands in for the lifted function and the
 runtime's accessors over a fake guest heap. The stand-in `__real_sub_44c1a0` counts its calls and
 leaves EAX as the lifted body would (its frame time is on the x87 stack, which no test can see
 here, so a register stands for it); the driver's sa2_peek and sa2_poke count every guest access,
 so "off" can be shown to read and write nothing.
 
 argv is a list of commands applied in order: `task=`, `cp=` (the word at task+0x40), `char=ID,ID2`,
-`pw=`, `up=`, `level=`, `two=` (TwoPlayerMode) set the fake heap; `frame` runs the wrap once and
-prints "<Powerups> <Upgrades> <real calls> <peeks> <pokes> <EAX>" (hex, counters since the last
-frame).
+`pw=`, `up=`, `level=`, `two=` (TwoPlayerMode), `hp=` (a walker's hit points, CharObj2Base+0x48, as
+float bits) set the fake heap; `frame` runs the wrap once and prints "<Powerups> <Upgrades> <real
+calls> <peeks> <pokes> <EAX>" (hex, counters since the last frame); `hp?` prints the hit points'
+bits.
 """
 from __future__ import annotations
 
@@ -102,6 +104,8 @@ int main(int argc, char **argv) {
         else if (!strncmp(argv[i], "up=", 3)) put(cp + 0x24u, 4, v);
         else if (!strncmp(argv[i], "level=", 6)) put(0x01934B70u, 2, v);
         else if (!strncmp(argv[i], "two=", 4)) put(0x0174AFDEu, 1, v);
+        else if (!strncmp(argv[i], "hp=", 3)) put(cp + 0x48u, 4, v);
+        else if (!strcmp(argv[i], "hp?")) printf("%08X\n", get(cp + 0x48u, 4));
         else if (!strcmp(argv[i], "frame")) {
             peeks = pokes = reals = 0;
             gpr[SA2_EAX] = 0xDEADBEEFu;
@@ -129,7 +133,8 @@ def exe(tmp_path_factory) -> Path:
                ZIG_GLOBAL_CACHE_DIR=os.environ.get(
                    "ZIG_GLOBAL_CACHE_DIR", str(ROOT / "private" / "generated" / "zig-cache-tests")))
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(RUNTIME / "tweaks" / "start-assists.c"), "-o", str(out)],
+                           str(RUNTIME / "tweaks" / "start-assists.c"),
+                           str(RUNTIME / "tweaks" / "all-upgrades.c"), "-o", str(out)],
                           capture_output=True, text=True, env=env)
     assert done.returncode == 0, done.stderr
     return out

@@ -13,15 +13,16 @@ header). `Documentation/scripts/tests/test_tweaks.py` holds the spec to both lis
 Android line.
 
 `fixtures/` holds the tool's test fixtures. A fixture is no tweak: it is in no list and no settings
-screen, and its name, which begins `test-`, is one no tweak has. `test-a-rank` (Mod Loader's "Always
-Get A Rank", two `nop`s in each of 0x0044F670 and 0x004505D0) exercises the whole path on two real
-lifted modules that no tweak wraps or patches. A fixture's function must stay one no tweak wraps,
-since `check` refuses a module the runtime or a tweak's file already wraps: Mod Loader's "Disable
-Loading Tips" (a `ret` at 0x00428010) was the first example, until the tweak `no-loading-tips`
-wrapped that function, and "Gold Beetle Never Disappears" (a `jle` made a `jmp` inside 0x00505FA0)
-the second, until the tweak `gold-beetle-stays` wrapped that one. A tweak that wraps a fixture's
-function moves the fixture to another Patch entry (`check --codes` lists them and the modules each
-reaches).
+screen, and its name, which begins `test-`, is one no tweak has. `test-speedup-jingle` (Mod Loader's
+"Disable High Speed Music", five `nop`s over the jingle's call at 0x0046E072 in 0x0046E000)
+exercises the whole path on a real lifted module that no tweak wraps or patches. A fixture's
+function must stay one no tweak wraps, since `check` refuses a module the runtime or a tweak's file
+already wraps: Mod Loader's "Disable Loading Tips" (a `ret` at 0x00428010) was the first example,
+until the tweak `no-loading-tips` wrapped that function; "Gold Beetle Never Disappears" (a `jle`
+made a `jmp` inside 0x00505FA0) the second, until the tweak `gold-beetle-stays` wrapped that one;
+and "Always Get A Rank" (two `nop`s in each of 0x0044F670 and 0x004505D0) the third, until the
+tweak `m4-time-rank` wrapped 0x0044F670. A tweak that wraps a fixture's function moves the fixture
+to another Patch entry (`check --codes` lists them and the modules each reaches).
 
 ## Commands
 
@@ -34,7 +35,7 @@ source tools/env.sh
 # with no spec, every shipped one (none is fine); or the specs named, a fixture among them.
 .venv/bin/python tools/s8/variants/variants.py build \
     --objects private/generated/s8/pc-double/linux-obj --out <dir under private/generated>
-.venv/bin/python tools/s8/variants/variants.py build tools/s8/variants/fixtures/test-a-rank.json \
+.venv/bin/python tools/s8/variants/variants.py build tools/s8/variants/fixtures/test-speedup-jingle.json \
     --objects private/generated/s8/pc-double/linux-obj --out <dir under private/generated>
 # Linked in:
 tools/slot.sh .venv/bin/python tools/s7/release_build.py --f80-objects <the same objects> \

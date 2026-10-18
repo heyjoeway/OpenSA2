@@ -105,6 +105,7 @@ final class GameSettings {
         new Tweak("hide-upgrade-models", "Hide upgrade models", "Upgrades like the Bounce Bracelet and Shovel Claws are not shown on the characters. Walkers keep their guns, because shots fire from them. Upgrades still work, and cutscenes still show them."),
         new Tweak("hold-toggle", "Tap to hold B", "A tap of B holds it down and the next tap lets go, for a mech's lock-on and the spin-dash charge. START lets go too."),
         new Tweak("infinite-lives", "Infinite lives", "Dying doesn't cost a life, so you never get a game over. 1-ups still add lives, and your save keeps the count you have."),
+        new Tweak("m4-time-rank", "Rank Mission 4 by time", "Mission 4, the time-limit mission, is ranked by how fast you finish instead of by score. Your save keeps that rank like any other."),
         new Tweak("metal-bounce-fix", "Fix Metal Sonic bounce crash", "Gives Metal Sonic's bounce attack his own model, so it no longer crashes the game when a cheat gives him all upgrades. Changes nothing in normal play."),
         new Tweak("mono-audio", "Mono audio", "Plays the left and right channels mixed together from both speakers, for one earbud or one ear."),
         new Tweak("no-2p-specials", "No special attacks in 2P", "In 2-player battles, neither player gets special attacks, not from collecting rings and not after losing a life."),

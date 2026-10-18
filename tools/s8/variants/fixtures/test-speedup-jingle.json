@@ -1,0 +1,16 @@
+{
+ "name": "test-speedup-jingle",
+ "report": "test fixture: no high-speed jingle",
+ "functions": [
+  "0x0046e000"
+ ],
+ "patches": [
+  {
+   "va": "0x0046e072",
+   "old": "e8 09 54 fd ff",
+   "new": "90 90 90 90 90"
+  }
+ ],
+ "source": "The variant tool's test fixture, in no tweak list: SA2 Mod Loader Codes.lst, Patch \"Disable High Speed Music\" (writenop 0046E072 5)",
+ "why": "0x0046E000 (PlayerSpeedUp, the high-speed power-up's handler) takes the player's CharObj2 from 0x01DE9600 + 4 * the player number (deleting its task at 0x0046E017 when there is none), scales the three speed fields at +0xFC, +0xD0 and +0x128 by the double at 0x00904F78, calls 0x00443480 (PlayJingle) at 0x0046E072 with EBX = 0x008B94FC (\"speedup.adx\"), then picks a voice line by the character byte at +3 through the jump table at 0x0046E0E4. Five `nop`s in place of the call leave the jingle out; the rest of the function runs as before. The tweak no-powerup-music drops the same jingle inside its wrap of PlayJingle (by the return address 0x0046E077) and wraps no function this fixture patches."
+}

@@ -170,10 +170,10 @@ def test_the_tools_limit_is_the_runtimes_mask():
 
 def test_a_spec_in_the_tweaks_folder_is_a_shipped_one(tmp_path, monkeypatch):
     assert (V.SPECS_DIR, V.FIXTURES_DIR) == (ROOT / TS.SPECS, ROOT / TS.FIXTURES)
-    fixture = V.read_spec(ROOT / TS.FIXTURES / "test-a-rank.json")
-    assert not fixture.shipped and fixture.spec == f"{TS.FIXTURES}/test-a-rank.json"
+    fixture = V.read_spec(ROOT / TS.FIXTURES / "test-speedup-jingle.json")
+    assert not fixture.shipped and fixture.spec == f"{TS.FIXTURES}/test-speedup-jingle.json"
     elsewhere = tmp_path / "x.json"
-    elsewhere.write_text((ROOT / TS.FIXTURES / "test-a-rank.json").read_text())
+    elsewhere.write_text((ROOT / TS.FIXTURES / "test-speedup-jingle.json").read_text())
     assert not V.read_spec(elsewhere).shipped
     monkeypatch.setattr(V, "SPECS_DIR", tmp_path)
     assert V.read_spec(elsewhere).shipped and V.shipped_specs() == [elsewhere]
@@ -403,7 +403,7 @@ def test_every_tracked_spec_and_fixture_passes_the_checks_on_the_lifted_image():
     assert [p["tweak"] for p in shipped] == [r["name"] for r in TS.patches(ROOT / "runtime")]
     fixtures = {p["tweak"]: [r["entry"] for r in p["modules"]]
                 for f in V.fixture_specs() for p in V.plan_all(w, [V.read_spec(f)])}
-    assert fixtures == {"test-a-rank": ["0x0044f670", "0x004505d0"]}
+    assert fixtures == {"test-speedup-jingle": ["0x0046e000"]}
 
 
 def test_linked_refuses_variants_built_for_other_objects(tmp_path):
@@ -425,10 +425,10 @@ def test_linked_refuses_variants_built_for_other_objects(tmp_path):
     assert V.linked(out, a)["wraps"] == []
     with pytest.raises(SystemExit, match="a different build"):
         V.linked(out, b)
-    fixture = {"name": "test-a-rank", "report": "r", "spec": f"{TS.FIXTURES}/test-a-rank.json",
+    fixture = {"name": "test-speedup-jingle", "report": "r", "spec": f"{TS.FIXTURES}/test-speedup-jingle.json",
                "spec_sha256": "", "shipped": False, "modules": []}
     record([fixture])
-    assert [(t["name"], t["shipped"]) for t in V.linked(out, a)["note"]["tweaks"]] == [("test-a-rank", False)]
+    assert [(t["name"], t["shipped"]) for t in V.linked(out, a)["note"]["tweaks"]] == [("test-speedup-jingle", False)]
     record([dict(fixture, name="no-event-bars")])
     with pytest.raises(SystemExit, match="runtime/sa2_tweaks.h has a tweak of that name"):
         V.linked(out, a)

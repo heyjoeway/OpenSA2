@@ -184,6 +184,7 @@
     X(SA2_TWEAK_HIDE_RADAR, "hide-radar", "radar hidden", "no emerald radar, radar beep or radar '!' in the treasure hunts") \
     X(SA2_TWEAK_HIDE_UPGRADE_MODELS, "hide-upgrade-models", "upgrade models hidden", "the upgrades a character has found are not drawn on it in play, but a walker keeps its guns; they still work") \
     X(SA2_TWEAK_INFINITE_LIVES, "infinite-lives", "lives held", "dying costs no life, so the lives never run out and there is no game over") \
+    X(SA2_TWEAK_M4_TIME_RANK, "m4-time-rank", "mission 4 ranked by time", "mission 4 (the time limit) is ranked by clear time, not score; the save keeps that rank") \
     X(SA2_TWEAK_METAL_BOUNCE_FIX, "metal-bounce-fix", "metal-bounce fixed", "Metal Sonic's bounce attack uses his own model, so it no longer crashes with an all-upgrades cheat") \
     X(SA2_TWEAK_NO_2P_SPECIALS, "no-2p-specials", "no 2P specials", "no special attacks in 2-player battles, from rings or after losing a life") \
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \

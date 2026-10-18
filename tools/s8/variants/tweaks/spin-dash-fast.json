@@ -1,0 +1,16 @@
+{
+ "name": "spin-dash-fast",
+ "report": "spin dash charges in 10 frames",
+ "functions": [
+  "0x00723880"
+ ],
+ "patches": [
+  {
+   "va": "0x00723e11",
+   "old": "18",
+   "new": "0a"
+  }
+ ],
+ "source": "SA2 Mod Loader's code list (Codes.lst), Patch \"Reduce Spin Dash Delay\" by MainMemory: write8 00723E11 10 (Codes.lst values are decimal: 10 is 0x0A)",
+ "why": "0x00723880 is Sonic_Somersault (Mod Loader's SA2Functions.h), the somersault and spin-dash input handler, entered with the character's data in EBX. In its charge path (the S3 arm 0x00723DD5), while the action button is held (Action_Held, 0x01DEFBF0) and the counter at EBX+0x368 has started, it runs `inc eax; cmp ax,0x18; mov [ebx+0x368],ax; jle 0x00723E3C`: up to 24 frames the hold goes on (0x00723E3C sets bit 0x400 of the flags at EDX+4 and returns 0), and past them 0x00723E1B calls Sonic_StartSpindash (0x007234C0) and clears the counter. The patch makes the compare's byte 0x18 a 0x0A, so the spin dash starts after 10 frames held instead of 24. A release before that still takes the release path at 0x00723E51, where a counter above 2 goes to the somersault at 0x00723EC0, as before. Mod Loader's list describes it as reducing the spin-dash delay by half; a well-known feel fix, and unlike its \"Instant Spin Dash\" (writenop 00723E19 2), which patches the same function, it keeps the somersault on a short press."
+}

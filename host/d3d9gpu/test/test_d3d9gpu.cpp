@@ -16,6 +16,7 @@
 #include "texcodec.h"
 
 #include "clear_matrix.h"
+#include "tweaks/tex-filter.h"
 
 #include <SDL3/SDL_gpu.h>
 
@@ -1884,6 +1885,73 @@ void test_cube_and_volume_textures() {
     CHECK(keys.find("\"tex\": true, \"levels\": 5, \"cube\": false, \"depth\": false, \"fmt\": 21") != std::string::npos);
 }
 
+// The host tweak tex-filter (host/player/tweaks/tex-filter.h), as a draw's sampler on the CPU
+// model: off, DXVK's sampler at its default options; on, DXVK's with d3d9.samplerAnisotropy 16 and
+// d3d9.samplerLodBias -0.25, so a stage with a mip-mapped texture, a mip filter and a linear min
+// filter gets anisotropy 16 and the game's own bias less a quarter. A point min filter gets the bias
+// and no anisotropy; one level, or no mip filter, is left as it was. Each case is a device of its
+// own: the bit is set before the device is made, as the player's main sets it.
+void test_tex_filter() {
+    struct Sampled { bool drawn; float aniso, bias, max_lod; bool enable; };
+    auto sample = [](bool on, UINT levels, DWORD min_filter, DWORD mip_filter, float game_bias) {
+        sa2tw::g_on = on ? sa2tw::SA2_TWEAK_TEX_FILTER.mask : 0u;
+        d9g::Device* d = make_device(0, kBehavior, true, true);   // depth clip and clamp: the draw is drawn
+        IDirect3DVertexShader9* vs = nullptr;
+        IDirect3DPixelShader9* ps = nullptr;
+        IDirect3DVertexDeclaration9* decl = nullptr;
+        IDirect3DTexture9* tex = nullptr;
+        const D3DVERTEXELEMENT9 e[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, D3DDECL_END()};
+        CHECK(d->CreateVertexShader(kVs, &vs) == D3D_OK && d->CreatePixelShader(kPsSample5, &ps) == D3D_OK);
+        CHECK(d->CreateVertexDeclaration(e, &decl) == D3D_OK);
+        CHECK(d->CreateTexture(64, 64, levels, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr) == D3D_OK);
+        d->SetVertexShader(vs); d->SetPixelShader(ps); d->SetVertexDeclaration(decl);
+        d->SetTexture(5, tex);
+        DWORD bias_bits; std::memcpy(&bias_bits, &game_bias, 4);
+        d->SetSamplerState(5, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        d->SetSamplerState(5, D3DSAMP_MINFILTER, min_filter);
+        d->SetSamplerState(5, D3DSAMP_MIPFILTER, mip_filter);
+        d->SetSamplerState(5, D3DSAMP_MIPMAPLODBIAS, bias_bits);
+        float verts[16] = {};
+        CHECK(d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, verts, 16) == D3D_OK);
+        Sampled out{};
+        const auto* trace = d9g::cpu_gpu_draws(d->gpu());
+        if (trace && trace->size() == 1 && trace->at(0).pixel.samplers.size() == 1 && trace->at(0).pixel.samplers[0].sampler.info) {
+            const SDL_GPUSamplerCreateInfo& ci = *trace->at(0).pixel.samplers[0].sampler.info;
+            out = {true, ci.max_anisotropy, ci.mip_lod_bias, ci.max_lod, ci.enable_anisotropy};
+        } else {
+            std::printf("  tex-filter: no sampled draw: %zu draws, %zu samplers, %zu draw failures%s%s\n",
+                        trace ? trace->size() : size_t(0), trace && !trace->empty() ? trace->at(0).pixel.samplers.size() : size_t(0),
+                        d9g::report().draw_failures.size(), d9g::report().draw_failures.empty() ? "" : ", the first ",
+                        d9g::report().draw_failures.empty() ? "" : d9g::report().draw_failures[0].c_str());
+        }
+        d->SetTexture(5, nullptr);
+        d->SetVertexShader(nullptr); d->SetPixelShader(nullptr); d->SetVertexDeclaration(nullptr);
+        tex->Release(); vs->Release(); ps->Release(); decl->Release();
+        CHECK(d->Release() == 0);
+        sa2tw::g_on = 0;
+        return out;
+    };
+    // a full chain (7 levels), linear in all three filters, as every textured stage of the Chao Garden stream
+    Sampled s = sample(false, 0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, 0.0f);
+    CHECK(s.drawn && !s.enable && s.aniso == 0.0f && s.bias == 0.0f && s.max_lod == 15.99609375f);
+    s = sample(true, 0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, 0.0f);
+    CHECK(s.drawn && s.enable && s.aniso == 16.0f && s.bias == -0.25f && s.max_lod == 15.99609375f);
+    CHECK(sa2tw::tex_filter::kAnisotropy == 16 && sa2tw::tex_filter::kLodBias == -0.25f);
+    // the game's own bias, and the tweak's added to it
+    s = sample(true, 0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, 0.5f);
+    CHECK(s.drawn && s.enable && s.aniso == 16.0f && s.bias == 0.25f);
+    // a point min filter: the bias, no anisotropy (DXVK's samplerAnisotropy asks for a min filter above point)
+    s = sample(true, 0, D3DTEXF_POINT, D3DTEXF_LINEAR, 0.0f);
+    CHECK(s.drawn && !s.enable && s.aniso == 0.0f && s.bias == -0.25f);
+    // one level, and no mip filter: as off
+    for (bool on : {false, true}) {
+        s = sample(on, 1, D3DTEXF_LINEAR, D3DTEXF_LINEAR, 0.0f);
+        CHECK(s.drawn && !s.enable && s.aniso == 0.0f && s.bias == 0.0f && s.max_lod == 1.0f);
+        s = sample(on, 0, D3DTEXF_LINEAR, D3DTEXF_NONE, 0.0f);
+        CHECK(s.drawn && !s.enable && s.aniso == 0.0f && s.bias == 0.0f && s.max_lod == 0.0f);
+    }
+}
+
 // SetStreamSourceFreq's instancing (d9g_pipeline.cpp map_pipeline's streams 1-14, prepare_draw's
 // instance count, d9g_gpu_sdl.cpp's binding of each): the wave-1 synthetic case's shape (stream 0
 // INDEXEDDATA | 2 with one indexed quad, stream 1 INSTANCEDATA | 1 with a per-instance TEXCOORD0, one
@@ -3164,6 +3232,7 @@ int main(int argc, char** argv) {
     test_no_clip_distance();
     test_depth_clamp_clip_only();
     test_cube_and_volume_textures();
+    test_tex_filter();
     test_instanced_streams();
     test_pipeline_streams();
     test_vk11_profile();

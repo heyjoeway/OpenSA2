@@ -1,5 +1,6 @@
 // Resolve current D3D state and consume each draw before any later resource operation.
 #include "d9g.h"
+#include "tweaks/tex-filter.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,18 @@ float as_float(uint32_t bits) { float f; std::memcpy(&f, &bits, sizeof f); retur
 std::array<float, 4> colour(uint32_t bits) {
     return {float((bits >> 16) & 255) / 255, float((bits >> 8) & 255) / 255,
             float(bits & 255) / 255, float(bits >> 24) / 255};
+}
+// DXVK's sampler options at their defaults (d9g_state.h), or, with the host tweak tex-filter on,
+// its anisotropy and mip bias as d3d9.samplerAnisotropy and d3d9.samplerLodBias
+// (host/player/tweaks/tex-filter.h). The tweak's bit is set once, before any device is made (the
+// player's main), so mapped_sampler's memo holds descriptions of one setting.
+SamplerOptions sampler_options() {
+    SamplerOptions o;
+    if (sa2tw::on(sa2tw::SA2_TWEAK_TEX_FILTER)) {
+        o.sampler_anisotropy = sa2tw::tex_filter::kAnisotropy;
+        o.sampler_lod_bias = sa2tw::tex_filter::kLodBias;
+    }
+    return o;
 }
 bool reads_stream_zero(const PipelineDesc& p) {
     for (uint32_t i = 0; i < p.n_attrs; i++) if (p.attrs[i].buffer_slot == 0) return true;
@@ -103,7 +116,7 @@ const SamplerDesc& Device::mapped_sampler(const SamplerInput& in) {
     MappedSampler& m = mapped_samplers_[memo_hash(&in, sizeof in) & (kMappedSamplers - 1)];
     if (!m.valid || m.faults != faults || !same_params(m.dp, dp_) || !same_bytes(&m.in, &in, sizeof in)) {
         m.valid = false;
-        m.desc = map_sampler(in, SamplerOptions{}, dp_, faults);
+        m.desc = map_sampler(in, sampler_options(), dp_, faults);
         std::memcpy(static_cast<void*>(&m.in), &in, sizeof in);
         m.dp = dp_;
         m.faults = faults;

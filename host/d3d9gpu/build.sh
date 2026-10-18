@@ -68,9 +68,11 @@ mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 # What the build reads, hashed before it compiles anything and again in its records at the
 # end (host/player/build_record.py): a source that changes while the build runs refuses it.
+# "$P/tweaks" is the player's host tweaks (runtime/sa2_tweaks.h, "Add a host tweak"): d9g and
+# test_d3d9gpu include their headers (tweaks/tex-filter.h), whose values the tools compile in.
 P=$HOST/player
 SOURCES=("$HERE" "$P/sha256.cpp" "$P/sha256.h" "$P/stream.cpp" "$P/stream.h" "$P/texcodec.cpp" "$P/texcodec.h"
-         "$STREAM_H_DIR/sa2_stream.h" "$P/tweaks.h" "$REPO/runtime/sa2_tweaks.h")
+         "$STREAM_H_DIR/sa2_stream.h" "$P/tweaks.h" "$P/tweaks" "$REPO/runtime/sa2_tweaks.h")
 "$PY" "$P/build_record.py" --start --out "$OUT/d3d9gpu_tools.json" --tree "$HOST/.." --sources "${SOURCES[@]}"
 # The pinned dxbc-spirv archive the translator links (R1 U1): tools/pins.json, a source of the
 # player's record, holds its sha256, and shader/build_translator.sh refuses any other.

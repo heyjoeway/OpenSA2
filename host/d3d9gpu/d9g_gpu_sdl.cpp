@@ -5,6 +5,7 @@
 // (upload_up); ordinary resources never cycle.
 #include "d9g.h"
 #include "d9g_props.h"
+#include "tweaks/tex-filter.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -1065,11 +1066,17 @@ private:
         auto ci = desc.create_info(props.id());
         // A device made without samplerAnisotropy (make_sdl_gpu: one that lacks it) cannot filter
         // anisotropically, and SDL refuses the request there: the sampler is made without it, counted,
-        // and said once. The streams recorded so far ask for none (D3DTEXF_ANISOTROPIC never set).
+        // and said once. The streams recorded so far ask for none (D3DTEXF_ANISOTROPIC never set); the
+        // host tweak tex-filter does.
         if (ci.enable_anisotropy && !info_.sampler_anisotropy) {
-            if (!report().anisotropy_dropped_samplers)
+            if (!report().anisotropy_dropped_samplers) {
                 std::fprintf(stderr, "d3d9gpu: a sampler asks for anisotropic filtering (%g) on a device made without "
                                      "samplerAnisotropy: made without it\n", double(ci.max_anisotropy));
+                // the host tweak tex-filter asks for it on every mip-mapped stage (host/player/tweaks/tex-filter.h)
+                if (sa2tw::on(sa2tw::SA2_TWEAK_TEX_FILTER))
+                    std::fprintf(stderr, "sa2 host tweaks: texture filter 16x: this device has no samplerAnisotropy: "
+                                         "its samplers are made without anisotropy, and the mip bias is kept\n");
+            }
             report().anisotropy_dropped_samplers++;
             ci.enable_anisotropy = false;
             ci.max_anisotropy = 0.0f;

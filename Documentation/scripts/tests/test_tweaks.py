@@ -920,3 +920,44 @@ def test_the_launcher_and_the_player_take_the_same_synthetic_input_flags():
     launcher = (ROOT / "host/launch/sa2_launch.cpp").read_text()
     assert ("    for (const std::string& a : o.player_args)\n        for (const char* f : sa2tw::kSyntheticFlags)\n"
             "            if (!synthetic && a == f) synthetic = f;\n") in launcher
+
+
+def d3d9gpu_tools_uncovered(build_sh: str) -> tuple[list[str], set[str]]:
+    """The checkout's files that host/d3d9gpu's sources include, followed through each header they
+    include (searched as its compiles search: the including file's directory, then -I$HERE,
+    -I$HOST/player and -I$STREAM_H_DIR), that build_sh's SOURCES, the start set of the
+    d3d9gpu_tools.json record, leaves out; and every such file reached."""
+    block = re.search(r"^SOURCES=\(.*?\)$", build_sh, re.M | re.S)
+    assert block, "host/d3d9gpu/build.sh: no SOURCES=(...)"
+    here, host = ROOT / "host" / "d3d9gpu", ROOT / "host"
+    script = (f'HERE={here}; HOST={host}; P={host}/player; STREAM_H_DIR={host}; REPO={ROOT}\n'
+              f'{block.group(0)}\nprintf "%s\\0" "${{SOURCES[@]}}"')
+    sources = [Path(s).resolve() for s in subprocess.run(["bash", "-c", script], capture_output=True,
+                                                         check=True).stdout.decode().split("\0") if s]
+    search = [here, host / "player", host]
+    todo = [f for f in here.rglob("*") if f.suffix in (".cpp", ".h", ".inc") and f.is_file()]
+    reached: set[Path] = set()
+    while todo:
+        f = todo.pop()
+        for name in re.findall(r'^\s*#\s*include\s+"([^"]+)"', f.read_text(errors="replace"), re.M):
+            hit = next((c.resolve() for c in [f.parent / name, *(d / name for d in search)] if c.is_file()), None)
+            if hit and hit.is_relative_to(ROOT) and hit not in reached:
+                reached.add(hit)
+                todo.append(hit)
+    uncovered = sorted(str(h.relative_to(ROOT)) for h in reached
+                       if not any(h == s or h.is_relative_to(s) for s in sources))
+    return uncovered, {str(h.relative_to(ROOT)) for h in reached}
+
+
+def test_the_d3d9gpu_tools_record_names_every_header_d9g_includes_a_host_tweaks_among_them():
+    """test_d3d9gpu, the census and the matrices compile d9g, which includes the player's host tweak
+    headers (tweaks/tex-filter.h, its kLodBias and kAnisotropy): the tools' group record must start
+    from them, or a record would still match a tree whose tweak values changed."""
+    text = (ROOT / "host/d3d9gpu/build.sh").read_text()
+    uncovered, reached = d3d9gpu_tools_uncovered(text)
+    assert {"host/player/tweaks.h", "host/player/tweaks/tex-filter.h", "runtime/sa2_tweaks.h"} <= reached
+    assert uncovered == []
+    block = re.search(r"^SOURCES=\(.*?\)$", text, re.M | re.S).group(0)
+    assert block.count(' "$P/tweaks" ') == 1
+    without = text.replace(block, block.replace(' "$P/tweaks" ', ' '))
+    assert d3d9gpu_tools_uncovered(without)[0] == ["host/player/tweaks/tex-filter.h"]

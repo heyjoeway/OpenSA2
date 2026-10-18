@@ -75,6 +75,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | --- | --- |
 | `2p-layout-in-1p` | Thirteen one-player stages load their leftover two-player object layout, with other rings, items, and enemies. Hard Mode, Pumpkin Hill, and Iron Gate keep their own layout. These layouts leave out most upgrades and Chao key boxes, and some switches and animals, so a mission may not be finishable. Clears, ranks, and emblems still save, but an upgrade that the layout leaves out cannot be collected or saved. |
 | `all-events-skippable` | Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch. |
+| `analog-fix` | A gamepad stick reaches full speed at about two thirds of a push instead of before half, so half a push walks and a full push still runs. The keyboard plays as before. |
 | `fast-stage-load` | Starts a stage as soon as its files are loaded. The game no longer waits at the end of the loading screen, so the loading screen and its tip can end sooner. Chao World loads as usual. |
 | `hide-hud` | Hides the score, time, rings, and lives counters during play, and the whole kart race display, for a clean picture. Button prompts and the radar stay, and the game plays the same. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |

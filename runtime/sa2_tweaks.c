@@ -85,7 +85,8 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
     }
     known_read();
     uint32_t on = 0, without = 0;
-    char unknown[256] = "", absent[256] = "", active[256] = "", known[256] = "";
+    /* Room for every tweak there can be (32): the names, the reports and the line's tail. */
+    char unknown[256] = "", absent[512] = "", active[1536] = "", known[1024] = "";
     size_t ul = 0, bl = 0, al = 0, kl = 0;
     for (const char *p = value; *p;) {
         const char *end = strchr(p, ',');
@@ -108,7 +109,7 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
             al = list_add(active, sizeof active, al, "", g_known[i].report, strlen(g_known[i].report));
         if (g_known[i].has) kl = list_add(known, sizeof known, kl, "", g_known[i].name, strlen(g_known[i].name));
     }
-    char why[768] = "";
+    char why[2048] = "";
     if (absent[0])
         snprintf(why, sizeof why, "; this game was built without the code-patch tweak%s %s, so %s ignored",
                  strchr(absent, ',') ? "s" : "", absent, strchr(absent, ',') ? "they are" : "it is");
@@ -130,7 +131,7 @@ int sa2_tweak_patch_on(unsigned row) {
 }
 
 __attribute__((constructor)) static void sa2_tweaks_read(void) {
-    char line[1024];
+    char line[4096];
     const int replay = getenv("SA2_REPLAY_TICKS") != NULL || getenv("SA2_REPLAY_WORDS") != NULL;
     g_tweaks = sa2_tweaks_parse(getenv("SA2_TWEAKS"), replay, line, sizeof line);
     if (line[0]) fprintf(stderr, "%s\n", line);

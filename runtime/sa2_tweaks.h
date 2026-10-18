@@ -203,6 +203,7 @@
     X(SA2_TWEAK_NO_MUSIC, "no-music", "music off", "no background music; jingles, sound effects and voices still play") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
     X(SA2_TWEAK_NO_VOICES, "no-voices", "voices off", "no character voices in stages, from Omochao or in cutscenes") \
+    X(SA2_TWEAK_NO_WJ_RAIN, "no-wj-rain", "wj rain off", "no rain in White Jungle: the drops are made as usual but neither moved nor drawn, less work for a slow device; the stage plays the same") \
     X(SA2_TWEAK_PHYSICS_PRESET, "physics-preset", "physics preset", "Sonic and Shadow move with Metal Sonic's physics (SA2_PHYSICS_PRESET=<to>=<from>,... picks others)") \
     X(SA2_TWEAK_PRACTICE_STAGE, "practice-stage", "practice stage", "the game starts straight in one stage, City Escape or the one a line SA2_PRACTICE=level[,character[,mission]] names, and saves nothing in that run; upgrades from the save are not loaded, and mission 1 of Green Forest, White Jungle and Security Hall keeps its story time limit") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \

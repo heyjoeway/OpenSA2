@@ -1,0 +1,22 @@
+{
+ "name": "test-a-rank",
+ "report": "test fixture: always an A rank",
+ "functions": [
+  "0x0044f670",
+  "0x004505d0"
+ ],
+ "patches": [
+  {
+   "va": "0x0044f799",
+   "old": "72 08",
+   "new": "90 90"
+  },
+  {
+   "va": "0x00450688",
+   "old": "7f 1c",
+   "new": "90 90"
+  }
+ ],
+ "source": "The variant tool's test fixture, in no tweak list: SA2 Mod Loader Codes.lst, Patch \"Always Get A Rank\" (writenop 0044F799 2, writenop 00450688 2)",
+ "why": "0x0044F670 and 0x004505D0 each grade a finished stage: from the rank byte at +2 of the record in ECX (0x0044F670) or EDI (0x004505D0), a loop of four steps raises the rank by one for each threshold passed, `jb 0x0044F7A3` at 0x0044F799 (the score below the threshold) or `jg 0x004506A6` at 0x00450688 (the time, minutes * 60 + seconds, above it) leaving the loop early; either way the function then stores the rank at 0x0174B001 and at +3 of the object at [0x01A5A230]. Two `nop`s in place of each exit run all four steps, so the rank is always four above where it started, the A; the rest of each function runs as before."
+}

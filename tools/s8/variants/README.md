@@ -13,11 +13,15 @@ header). `Documentation/scripts/tests/test_tweaks.py` holds the spec to both lis
 Android line.
 
 `fixtures/` holds the tool's test fixtures. A fixture is no tweak: it is in no list and no settings
-screen, and its name, which begins `test-`, is one no tweak has. `test-beetle-stays` (Mod Loader's
-"Gold Beetle Never Disappears", a `jle` made a `jmp` inside 0x00505FA0) exercises the whole path on
-a real lifted module that no tweak wraps. Mod Loader's "Disable Loading Tips" (a `ret` at
-0x00428010) was the first example; the tweak `no-loading-tips` wraps that function, so a variant of
-it would be refused.
+screen, and its name, which begins `test-`, is one no tweak has. `test-a-rank` (Mod Loader's "Always
+Get A Rank", two `nop`s in each of 0x0044F670 and 0x004505D0) exercises the whole path on two real
+lifted modules that no tweak wraps or patches. A fixture's function must stay one no tweak wraps,
+since `check` refuses a module the runtime or a tweak's file already wraps: Mod Loader's "Disable
+Loading Tips" (a `ret` at 0x00428010) was the first example, until the tweak `no-loading-tips`
+wrapped that function, and "Gold Beetle Never Disappears" (a `jle` made a `jmp` inside 0x00505FA0)
+the second, until the tweak `gold-beetle-stays` wrapped that one. A tweak that wraps a fixture's
+function moves the fixture to another Patch entry (`check --codes` lists them and the modules each
+reaches).
 
 ## Commands
 
@@ -30,7 +34,7 @@ source tools/env.sh
 # with no spec, every shipped one (none is fine); or the specs named, a fixture among them.
 .venv/bin/python tools/s8/variants/variants.py build \
     --objects private/generated/s8/pc-double/linux-obj --out <dir under private/generated>
-.venv/bin/python tools/s8/variants/variants.py build tools/s8/variants/fixtures/test-beetle-stays.json \
+.venv/bin/python tools/s8/variants/variants.py build tools/s8/variants/fixtures/test-a-rank.json \
     --objects private/generated/s8/pc-double/linux-obj --out <dir under private/generated>
 # Linked in:
 tools/slot.sh .venv/bin/python tools/s7/release_build.py --f80-objects <the same objects> \

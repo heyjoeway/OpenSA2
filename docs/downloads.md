@@ -81,6 +81,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `drives-to-minimals` | Destroyed enemies leave a small animal instead of a Chaos Drive, which changes what you can collect for your Chao. |
 | `event-bars-all` | Draws black bars at the sides of every in-engine cutscene on a screen wider than 4:3, so each one looks as it does on a 4:3 screen. Movies are unchanged. It cannot be combined with `no-event-bars`: with both set, neither applies. |
 | `fast-stage-load` | Starts a stage as soon as its files are loaded. The game no longer waits at the end of the loading screen, so the loading screen and its tip can end sooner. Chao World loads as usual. |
+| `gold-beetle-stays` | A Gold Beetle that appears no longer flies away when its time runs out; it stays until you destroy it. This raises scores, so the scores and ranks the game saves are higher than in the original game. |
 | `hide-hud` | Hides the score, time, rings, and lives counters during play, and the whole kart race display, for a clean picture. Button prompts and the radar stay, and the game plays the same. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |
 | `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |

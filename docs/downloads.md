@@ -123,6 +123,8 @@ On Windows the file is `share\game.env` in the extracted folder. For the Linux p
 
 The launcher prints the tweaks it passes, and each session's game log starts with a line that names the active tweaks. A name that is not a tweak is reported by name in that line and ignored. Some tweaks change the player or the launcher instead of the game. The game's line names them as host tweaks, and the player says which of its tweaks are on in its own log, `player.err` (on Android, the session report). The launcher says which of its own are on in `launcher.log`.
 
+There is no tweak to remove the game's quit confirmation, the Mod Loader's DisableExitPrompt option, because OpenSA2 never shows it: closing the window, or pressing Back twice on Android, ends the game at once.
+
 ## Source and checksums
 
 The release provides `SHA256SUMS` for the downloadable files. The project source for all three packages is at the release tag. The [developer guide](getting-started.md) explains the local build inputs and the current limits of the public build setup.

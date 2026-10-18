@@ -135,6 +135,27 @@
  *      the reader to its cases; what the tweak does goes in a test file of its own.
  *   5. A row in the player's guide (OpenSA2's docs/downloads.md, "Tweaks"). The release's
  *      README.txt lists it with the game's when its home is "player" or "launcher".
+ *
+ * Asked for, and already so. A change players ask for as a tweak that this port makes with none is
+ * recorded here, and is in no list and on no settings screen: a switch whose on and off are the
+ * same would tell the player it did something.
+ *
+ *   no-exit-prompt (the Mod Loader's DisableExitPrompt, on by default there): the game asks before
+ *   it quits from its window procedure's WM_CLOSE arm (0x0040184A, then 0x004015F0, 0x004026E0 and
+ *   0x00404A00, which creates the dialog at 0x00404CBA). The guest is never sent WM_CLOSE. The
+ *   player owns the window, and a close (SDL_EVENT_WINDOW_CLOSE_REQUESTED, or SDL_EVENT_QUIT, which
+ *   the Android app's Back sends) is its end request (host/player/player.cpp, Player::pump_events),
+ *   which the launcher or the Android session turns into the game's SIGTERM, and the runtime into
+ *   WM_QUIT at its next keyboard poll (runtime/sa2_dinput.c); the guest leaves its loop and calls
+ *   ExitProcess(0) itself. That WM_CLOSE never arrives is the whole guarantee. The arm itself does
+ *   not end cleanly: a WM_CLOSE sent at the title (SA2_PUMP_INJECT) stops the game on MulDiv, an
+ *   import the runtime does not provide, from the dialog's sizer at 0x004029FD, before the dialog
+ *   is created. CreateDialogIndirectParamW would answer NULL (runtime/sa2_dialog.h), and the guest
+ *   has the branch for that at 0x00404CC2. A change that sends the guest WM_CLOSE must provide
+ *   MulDiv first. The Android app's "Press Back again to end the game" is the app's guard against
+ *   a stray Back, not the game's prompt, and stays. Documentation/scripts/tests/
+ *   test_tweak_no_exit_prompt.py holds the dialog's answer and keeps the name out of the lists; the
+ *   close's own tests are named there.
  */
 #ifndef SA2_TWEAKS_H
 #define SA2_TWEAKS_H

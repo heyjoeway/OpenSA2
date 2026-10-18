@@ -327,8 +327,9 @@ def test_the_readme_and_the_zip_say_which_build_the_release_holds(tmp_path):
             "processor's\n  own 80-bit registers, as the original game's does.\n") in native
     assert "double" not in native
     # The desktop's one place for a tweak: a line in share/game.env (runtime/sa2_tweaks.c).
-    assert "  share\\game.env:\n    SA2_TWEAKS=no-event-bars " in double
-    assert "  share/game.env:\n    SA2_TWEAKS=no-event-bars " in native
+    # The tweaks follow in name order, whichever comes first (test_tweaks.py holds the list).
+    assert "  share\\game.env:\n    SA2_TWEAKS=" in double and "\n    SA2_TWEAKS=no-event-bars " in double
+    assert "  share/game.env:\n    SA2_TWEAKS=" in native and "\n    SA2_TWEAKS=no-event-bars " in native
     for notes, mode in ((double_notes, "double"), (native_notes, "native-x87")):
         rel = tmp_path / mode
         rel.mkdir()

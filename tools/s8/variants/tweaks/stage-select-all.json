@@ -1,0 +1,16 @@
+{
+ "name": "stage-select-all",
+ "report": "all stages in Stage Select",
+ "functions": [
+  "0x00677350"
+ ],
+ "patches": [
+  {
+   "va": "0x006773bc",
+   "old": "0f95c333",
+   "new": "b3019033"
+  }
+ ],
+ "source": "SA2 Mod Loader's code list (Codes.lst), Patch \"All Stages Appear in Stage Select\" by MainMemory (write32 006773BC 0x339001B3); the fourth byte, 0x33, is the image's own",
+ "why": "0x00677350 is the Stage Select map's update, reached only through the pointer at 0x006779A8. Its loop 0x006773A0-0x00677437 walks the stage table (0x00C75078, 0x10 bytes a stage, the level number at +0) and writes each stage's visible flag to the next dword from 0x01A4A974. For any level but 0x46 and 0x5A it reads that level's save byte at 0x01DEC638 + level*0xC4 and sets the flag with `xor ebx,ebx; cmp [eax],bl; setne bl`, so a stage shows only once the save has it. The patch makes the `setne bl` at 0x006773BC a `mov bl,1; nop`, so every such stage shows; levels 0x46 and 0x5A keep their own tests (0x006773C5 and 0x006773E1). Nothing else in the function changes, and nothing is written to the save to show a stage. The byte the loop reads is Ranks[0] of the level's SaveLevelInfo (0xC4 bytes: Ranks[6], PlayCounts[5] and Scores[15], each score with its rings and time; the save at 0x01DEC600, the records from +0x38, as the Mod Loader's SA2Variables.h and SA2Structs.h have them), so a stage played through the tweak records its ranks, times and emblems in the save as any stage does, and they stay after the tweak is off."
+}

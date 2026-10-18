@@ -191,6 +191,7 @@
     X(SA2_TWEAK_RIVAL_UPGRADES, "rival-upgrades", "rival upgrades shared", "Shadow, Rouge and Mech Tails share the upgrades Sonic, Knuckles and Eggman have found") \
     X(SA2_TWEAK_SKIP_INTRO, "skip-intro", "intro skipped", "the game starts at the title screen, without the logos and the opening cutscene") \
     X(SA2_TWEAK_SPIN_DASH_FAST, "spin-dash-fast", "spin dash charges in 10 frames", "the spin dash starts after 10 frames held instead of 24; a short press still somersaults") \
+    X(SA2_TWEAK_STAGE_SELECT_ALL, "stage-select-all", "all stages in Stage Select", "every stage shows in Stage Select, without clearing it in story mode first") \
     X(SA2_TWEAK_WALKER_CANNON_FIX, "walker-cannon-fix", "walker-cannon fix", "a Chao Walker given the Mech's cannon upgrade by a cheat no longer crashes the game") \
     /* the end of the list */
 
@@ -227,6 +228,7 @@ enum {
     X(SA2_TWEAK_NO_MUSIC) \
     X(SA2_TWEAK_NO_VOICES) \
     X(SA2_TWEAK_SPIN_DASH_FAST) \
+    X(SA2_TWEAK_STAGE_SELECT_ALL) \
     /* the end of the list */
 
 #define SA2_TWEAK_PATCH_OR(bit) | bit

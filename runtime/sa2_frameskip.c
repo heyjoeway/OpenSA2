@@ -95,32 +95,67 @@
  * another process counts as the game's own cost. A wait in the stream pipe's write(2), where the
  * game stands when the player is behind, or on the guest lock is neither. Where the schedstat
  * file does not open, busy is CPU time alone and a line says so; where it stops reading, the wait
- * stays at what it read last. sa2_frameskip_auto_sample judges
- * the samples over 0.5 s windows:
+ * stays at what it read last. At N > 1 the same busy clock is read at the first pass's Control and
+ * at the last pass's: the difference is the frame's N-1 undrawn ticks (each a whole tick), and the
+ * rest is the drawn tick, the draw and the frame's other work (two clock reads and one pread a
+ * frame, Auto only). sa2_frameskip_auto_sample judges the samples over 0.5 s windows:
  *
  *   step up      the frames came more than 10 % later than N frame periods (the player's pace or
- *                the game's work, whichever is behind), to at most 3, unless a hold is on;
+ *                the game's work, whichever is behind) in two windows running (1 s; one late
+ *                window, a hitch or a spell of shader compiles, is not a pace; within 2 s of a step
+ *                down one is enough: it failed), to at most 3, unless the spiral guard's hold is
+ *                on;
  *   spiral guard the first window after a step up: when each tick cost the game at least 95 % of
  *                what it did before and the game's busy time still passes 110 % of the new budget,
  *                the frame is bound by game logic, which more ticks per frame only makes worse; N
  *                goes back and step ups wait 3 s, then 6, 12 and 30 s on repeats (reset by a step
- *                up that holds);
- *   step down    the frames on time and the busy time under 75 % of (N-1) frame periods for 3 s,
- *                and no refusal on N-1. A window late while the game worked under 90 % of it was
- *                the player's pace (or a wait); the player renders in its own process and frames at
- *                N+1 are paced to N+1 frame periods, so nothing there shows it get faster. Step
- *                downs to that N are then refused, 30 s at first. Each N keeps its own length: a
- *                step down to N that fails (a step up from N, late with the game idle, before the
- *                step down held 30 s, however long the frames queued toward the player took to show
- *                it) doubles N's (60, 120 s, up to 10 min); a step down to N that holds 30 s resets
- *                N's and every higher N's; a new stage (CurrentLevel changed) resets them all. The
- *                hold runs through a refusal. Before this a player-bound device stepped down after
- *                every hold and came back up within a window, about every 30 s for the whole stage;
- *                now its retries thin out (about 4 in 10 min), and a short spell of lateness (a
- *                shader compile) at an N whose step downs have not been failing costs about 30 s at
- *                N+1, whatever the retries of another N have built up. A step up within 2 s of a
- *                step down reverses it and doubles the 3 s hold (6, 12, then 30 s), which falls
- *                back to 3 s once a step down holds.
+ *                up that holds). The hold runs on wall time, into the next stage too. It does not
+ *                hold the step up that ends a step down still being judged: that goes back to the
+ *                N the step down left, which N could not pass in the hold, so a step down or a
+ *                probe made in the hold that fails comes back within a window or two, not at the
+ *                hold's end;
+ *   step down    the frames on time and N-1's busy time, projected as this frame's less one undrawn
+ *                tick, under 75 % of (N-1) frame periods for 3 s, and no refusal on N-1. (The
+ *                whole N-tick frame against N-1 periods, as this was until the S25 Edge's alpha.4
+ *                session, wanted two ticks under 12.5 ms at N=2: never met where a tick costs
+ *                9 to 14 ms, so one late window kept N=2 for the rest of the stage.) Undrawn ticks
+ *                not timed: the whole frame, as before. A window late while the game worked under
+ *                90 % of it was the player's pace (or a wait); the player renders in its own process
+ *                and frames at N+1 are paced to N+1 frame periods, so nothing there shows it get
+ *                faster. Step downs to that N are then refused, 30 s at first. Each N keeps its own
+ *                length: a step down to N that fails (a step up from N, late with the game idle,
+ *                before the step down held for 30 s of level play, however long the frames queued
+ *                toward the player took to show it) doubles N's (60, 120 s, up to 10 min); a step
+ *                down to N that holds for 30 s of level play resets N's and every higher N's (a
+ *                pause or a menu adds nothing to the 30 s: the frames queued toward the player
+ *                drain there, so the first window back can be on time where N is not); a new stage
+ *                (CurrentLevel changed) resets them all. The hold runs through a refusal. Before
+ *                this a player-bound device stepped down after every hold and came back up within a
+ *                window, about every 30 s for the whole stage; now its retries thin out (about 4 in
+ *                10 min), and a short spell of lateness at an N whose step downs have not been
+ *                failing costs about 30 s at N+1, whatever the retries of another N have built up.
+ *                A step up within 2 s of a step down reverses it and doubles the 3 s hold (6, 12,
+ *                then 30 s), which falls back to 3 s once a step down holds;
+ *   probe        at N > 1 with the frames on time, no refusal on N-1, no step down to N still being
+ *                judged (it holds after 30 s of level play, which a pause or a hitch puts behind
+ *                wall time), and refuse_ns[N-1] passed since N last changed (30 s at first; the
+ *                step-down hold after a new stage): one step down to N-1, whose first 150 ms are
+ *                not judged. A phone's governor turns N's spare time into a lower clock and holds
+ *                the busy time near its utilization target (the S25 Edge: 2650 to 1690 MHz, busy 63
+ *                to 84 % of the 33.3 ms frame), so no projection made at N shows whether N-1 fits
+ *                at the clock N-1 would get, and none gates the probe: running N-1 shows it. (A
+ *                gate at 125 % of N-1's budget, tried first, never let a probe through at N=2 where
+ *                the undrawn tick is the 7 to 15 % of a frame's busy time this game shows on a
+ *                desktop and the emulator: N=2 held near 26.7 ms projects N=1 at 130 to 145 %.) A
+ *                probe a step up ends before it held for 30 s of level play failed, idle or not,
+ *                and doubles refuse_ns[N-1] (60, 120 s, up to 10 min); one that held resets it as a
+ *                step down does. A device that cannot keep N-1 spends about 0.6 s there per probe,
+ *                at about 30, 90, 210 and 450 s, then every 10 min.
+ *
+ * Each change of N and each step down that held print one line on stderr: why, the deciding
+ * window's wall and busy time, its undrawn tick's busy time and N-1's projection, and the refusal
+ * or the next probe that follows. A window that finds a step down held and also changes N prints
+ * both lines, the held one first.
  *
  * N changes only at a level-loop entry. Frames outside the level loop do not count, and the next
  * stage starts at the N the last one ended with. Auto reads host time, so its choices are not
@@ -223,16 +258,34 @@ static uint64_t fs_next_hold(uint64_t hold) {
     return next > 4u * SA2_FS_HOLD_MIN_NS ? SA2_FS_HOLD_MAX_NS : next;
 }
 
-static void fs_window_reset(sa2_fs_auto *a) {
-    a->frames = 0;
-    a->wall_sum = a->busy_sum = a->window_ns = 0;
+static uint64_t fs_doubled_refusal(uint64_t r) {
+    return r * 2u > SA2_FS_REFUSE_MAX_NS ? SA2_FS_REFUSE_MAX_NS : r * 2u;
 }
 
-static void fs_set_n(sa2_fs_auto *a, int n) {
+static void fs_window_reset(sa2_fs_auto *a) {
+    a->frames = a->timed = 0;
+    a->wall_sum = a->busy_sum = a->window_ns = a->undrawn_sum = 0;
+}
+
+static void fs_set_n(sa2_fs_auto *a, int n, uint64_t now_ns) {
     a->n = n;
     fs_window_reset(a);
     a->skip = 1;                 /* the first frame at a new N, while the pipe and the pace settle */
     a->down_ok_ns = 0;
+    a->prev_late = 0;
+    a->changed_at = now_ns;
+    a->probe_at = n > 1 ? now_ns + a->refuse_ns[n - 1] : 0;
+}
+
+static void fs_decide(sa2_fs_auto *a, int why, int from, int to, uint64_t now_ns) {
+    a->why = why;
+    a->why_from = from;
+    a->why_to = to;
+    a->why_at = now_ns;
+    a->why_age = now_ns - a->last_down;
+    a->why_run = a->down_run_ns;
+    a->why_span = now_ns - a->changed_at;
+    a->why_seq++;
 }
 
 /* Refusals of `from` and every higher N end, and their lengths go back to the minimum. */
@@ -252,85 +305,161 @@ void sa2_frameskip_auto_init(sa2_fs_auto *a, int cap) {
     a->skip = 1;
 }
 
-void sa2_frameskip_auto_gap(sa2_fs_auto *a, int new_stage) {
+void sa2_frameskip_auto_gap(sa2_fs_auto *a, int new_stage, uint64_t now_ns) {
     fs_window_reset(a);
     a->skip = 1;
     a->down_ok_ns = 0;
+    a->prev_late = 0;            /* late windows on either side of a gap are not two running */
     a->guard_pending = 0;        /* a step up that left the stage before its window: not judged */
     if (new_stage) {
         fs_refusals_end(a, 0);
-        a->down_to = 0;          /* a step down from the last stage is not judged in this one */
+        a->down_to = a->down_probe = 0;   /* a step down from the last stage is not judged in this one */
+        if (a->n > 1) a->probe_at = now_ns + a->down_hold_ns;
     }
 }
 
+static void fs_step_down(sa2_fs_auto *a, int probe, uint64_t now_ns) {
+    a->downs++;
+    a->probes += (uint64_t)probe;
+    a->last_down = now_ns;
+    a->down_run_ns = 0;
+    a->down_to = a->n - 1;
+    a->down_probe = probe;
+    fs_decide(a, probe ? SA2_FS_WHY_PROBE : SA2_FS_WHY_PROJECTION, a->n, a->n - 1, now_ns);
+    fs_set_n(a, a->n - 1, now_ns);
+    /* A probe's N-1 runs on the clock the device gave N's lighter load until its governor sees
+     * the new one: its first 150 ms are not judged, so the window that can reverse it alone is
+     * not made of that ramp. (The unit test's governor, half the way to its target each frame,
+     * is up within a few frames: there the settle only moves a failed probe's step up about
+     * 0.1 s later. A governor that waits longer before it raises the clock would fail a probe on
+     * the ramp's frames.) */
+    if (probe) a->settle_until = now_ns + SA2_FS_SETTLE_NS;
+}
+
 int sa2_frameskip_auto_sample(sa2_fs_auto *a, int n, uint64_t wall_ns, uint64_t busy_ns,
-                              uint64_t now_ns, uint64_t tick_ns) {
+                              uint64_t undrawn_ns, uint64_t now_ns, uint64_t tick_ns) {
     if (!tick_ns) tick_ns = FS_DEFAULT_TICK_NS;
     if (n != a->n) return a->n;  /* the game's own catch-up, or a frame from before a change */
     if (a->skip > 0) {
         a->skip--;
         return a->n;
     }
+    if (now_ns < a->settle_until) return a->n;
     const uint64_t budget = (uint64_t)a->n * tick_ns;
     /* One long frame (a load's hitch) weighs at most two budgets, in the means and in the window's
      * length both, so it neither decides a window nor closes one early. */
     const uint64_t clamp = 2u * budget;
     const uint64_t wall_c = wall_ns < clamp ? wall_ns : clamp;
+    const uint64_t busy_c = busy_ns < clamp ? busy_ns : clamp;
     a->frames++;
     a->wall_sum += wall_c;
-    a->busy_sum += busy_ns < clamp ? busy_ns : clamp;
+    a->busy_sum += busy_c;
     a->window_ns += wall_c;
+    if (a->n > 1) {
+        if (undrawn_ns) {
+            a->timed++;
+            a->undrawn_sum += undrawn_ns < busy_c ? undrawn_ns : busy_c;
+        } else {
+            a->untimed++;
+        }
+    }
     if (a->frames < 4 || (a->window_ns < SA2_FS_WINDOW_NS && a->frames < SA2_FS_WINDOW_MAX))
         return a->n;
     const uint64_t span = a->window_ns;
     const uint64_t wall = a->wall_sum / (uint64_t)a->frames, busy = a->busy_sum / (uint64_t)a->frames;
     const uint64_t busy_tick = busy / (uint64_t)a->n;
+    /* N-1's busy time, projected: this frame's less one undrawn tick (the drawn tick, the draw
+     * and the rest of the frame stay). Undrawn ticks not timed: the whole frame, as before. */
+    const uint64_t u = a->n > 1 && a->timed ? a->undrawn_sum / (uint64_t)a->timed / (uint64_t)(a->n - 1) : 0;
+    const uint64_t proj = busy > u ? busy - u : 0;
     a->windows++;
+    a->w_n = a->n;
+    a->w_frames = a->frames;
+    a->w_timed = a->timed;
+    a->w_wall = wall;
+    a->w_busy = busy;
+    a->w_undrawn_tick = u;
+    a->w_proj = proj;
+    a->w_tick = tick_ns;
     fs_window_reset(a);
+    if (a->down_to) a->down_run_ns += span;   /* level play since the step down */
     const int late = wall * 100u > budget * 110u;
     /* late frames the game's own work does not explain: the player's pace, or a wait */
     const int idle = busy * 100u < wall * 90u;
+    a->w_idle = idle;
     if (a->guard_pending) {
         a->guard_pending = 0;
         if (busy_tick * 100u >= a->guard_busy_tick * 95u && busy * 100u > budget * 110u) {
             a->guards++;
             a->up_hold_until = now_ns + a->up_hold_ns;
             a->up_hold_ns = fs_next_hold(a->up_hold_ns);
-            fs_set_n(a, a->guard_from);
+            fs_decide(a, SA2_FS_WHY_GUARD, a->n, a->guard_from, now_ns);
+            fs_set_n(a, a->guard_from, now_ns);
             return a->n;
         }
         a->up_hold_ns = SA2_FS_HOLD_MIN_NS;   /* the step up holds */
     }
-    if (late && a->n < a->cap && now_ns >= a->up_hold_until) {
+    /* A step up takes two windows running late (1 s): one late window is a hitch or a spell of
+     * shader compiles, not a pace. Within 2 s of a step down, one: it failed. */
+    const int reversing = a->down_to && now_ns - a->last_down < SA2_FS_REVERSAL_NS;
+    const int up = late && (a->prev_late || reversing);
+    a->prev_late = late;
+    /* The spiral guard's hold keeps N from rising past the N it went back to. A step down still
+     * judged (down_to) left an N at or below that one, since N cannot rise in the hold, so the
+     * step up that ends it, back to the N it left, is not held: a new stage's probe (3 s in, while
+     * a hold from the last stage runs on) or a projection step down after a guard would otherwise
+     * keep a late N-1 to the hold's end, up to 30 s, not the 0.6 s a failed probe takes. */
+    if (up && a->n < a->cap && (now_ns >= a->up_hold_until || a->down_to)) {
         uint64_t *refuse = &a->refuse_ns[a->n];
+        int why = SA2_FS_WHY_LATE;
         if (a->down_to) {
             /* The step down to this N failed before it held: however late the lateness showed (a
              * queue of frames between the game and the player can hide it for seconds), the
-             * player did not keep this N's pace, and the next retry of it waits twice as long. */
+             * device did not keep this N's pace, and the next retry of it waits twice as long. A
+             * failed probe doubles it whatever the window's busy time said: the probe is the
+             * retry of an N the game's work at N could not clear. */
             a->down_to = 0;
             a->failed++;
-            if (idle) *refuse = *refuse * 2u > SA2_FS_REFUSE_MAX_NS ? SA2_FS_REFUSE_MAX_NS : *refuse * 2u;
-            if (now_ns - a->last_down < SA2_FS_REVERSAL_NS) {
-                a->reversals++;
-                a->down_hold_ns = fs_next_hold(a->down_hold_ns);
+            if (a->down_probe) {
+                a->probes_failed++;
+                *refuse = fs_doubled_refusal(*refuse);
+                why = SA2_FS_WHY_PROBE_FAILED;
+            } else {
+                if (idle) *refuse = fs_doubled_refusal(*refuse);
+                if (reversing) {
+                    a->reversals++;
+                    a->down_hold_ns = fs_next_hold(a->down_hold_ns);
+                }
+                why = SA2_FS_WHY_DOWN_FAILED;
             }
+            a->down_probe = 0;
         }
         if (idle) a->refuse_until[a->n] = now_ns + *refuse;
         a->guard_pending = 1;
         a->guard_from = a->n;
         a->guard_busy_tick = busy_tick;
         a->ups++;
-        fs_set_n(a, a->n + 1);
+        fs_decide(a, why, a->n, a->n + 1, now_ns);
+        fs_set_n(a, a->n + 1, now_ns);
         return a->n;
     }
-    if (a->down_to && !late && now_ns - a->last_down >= SA2_FS_HOLD_RESET_NS) {
-        /* The step down held: the player keeps this N's pace, so every higher N's too. */
+    if (a->down_to && !late && a->down_run_ns >= SA2_FS_HOLD_RESET_NS) {
+        /* The step down held: the device keeps this N's pace, so every higher N's too. Counted
+         * on level play: a pause or a menu neither confirms nor fails it (the frames queued
+         * toward the player drain there, so the first window back can be on time where N is
+         * not). Its line is its own (held_seq): this window can also probe or step down. */
         a->down_hold_ns = SA2_FS_HOLD_MIN_NS;
         fs_refusals_end(a, a->down_to);
-        a->down_to = 0;
+        a->held_n = a->n;
+        a->held_at = now_ns;
+        a->held_run = a->down_run_ns;
+        a->held_age = now_ns - a->last_down;
+        a->held_seq++;
+        a->down_to = a->down_probe = 0;
     }
     const uint64_t lower = (uint64_t)(a->n - 1) * tick_ns;
-    const int could = a->n > 1 && wall * 100u <= budget * 105u && busy * 100u < lower * 75u;
+    const int on_time = a->n > 1 && wall * 100u <= budget * 105u;
+    const int could = on_time && proj * 100u < lower * SA2_FS_DOWN_PCT;
     if (could) {
         /* The hold runs through a refusal: the two measure different things (the game's work,
          * the player's pace), so a short spell of lateness costs the longer of them, not both. */
@@ -338,15 +467,94 @@ int sa2_frameskip_auto_sample(sa2_fs_auto *a, int n, uint64_t wall_ns, uint64_t 
         if (now_ns < a->refuse_until[a->n - 1]) {
             a->refusals++;
         } else if (a->down_ok_ns >= a->down_hold_ns) {
-            a->downs++;
-            a->last_down = now_ns;
-            a->down_to = a->n - 1;
-            fs_set_n(a, a->n - 1);
+            fs_step_down(a, 0, now_ns);
         }
     } else {
         a->down_ok_ns = 0;
+        /* No projection gates the probe: one made at N, on the clock a governor lowered on N's
+         * spare time, cannot show whether N-1 fits at the clock N-1 would get. A device that
+         * cannot keep N-1 fails each probe in about 0.6 s, and the doubling waits bound them.
+         * Nor does a probe come while the step down to N is judged (down_to): its hold counts
+         * level play and probe_at wall time, so a hitch, the skipped frame or a pause would bring
+         * the probe due first, and the probe's step down would end N's unjudged (no held line,
+         * N's refusal length not reset). The window that finds it held clears down_to above, and
+         * a probe already due comes in that window. */
+        if (on_time && !a->down_to && now_ns >= a->probe_at && now_ns >= a->refuse_until[a->n - 1])
+            fs_step_down(a, 1, now_ns);
     }
     return a->n;
+}
+
+/* ns as "x.y" (tenths of a millisecond, or of a second) */
+#define FS_MS1(t) (unsigned long long)((t) / 1000000ull), (unsigned long long)((t) / 100000ull % 10ull)
+#define FS_S1(t)  (unsigned long long)((t) / 1000000000ull), (unsigned long long)((t) / 100000000ull % 10ull)
+#define FS_S(t)   (unsigned long long)((t) / 1000000000ull)
+
+static unsigned long long fs_pct(uint64_t x, uint64_t of) { return of ? (unsigned long long)(x * 100u / of) : 0; }
+
+void sa2_frameskip_auto_why(const sa2_fs_auto *a, uint64_t t_ns, char *line, size_t n) {
+    static const char *const names[] = {"", "late", "step down failed", "probe failed", "spiral guard",
+                                        "projection", "probe"};
+    size_t k = 0;
+    if (!n) return;
+    line[0] = 0;
+    if (a->why <= SA2_FS_WHY_NONE || a->why > SA2_FS_WHY_PROBE) return;
+#define FS_PUT(...) do { if (k < n) { const int r_ = snprintf(line + k, n - k, __VA_ARGS__); \
+                         if (r_ > 0) k += (size_t)r_; } } while (0)
+    const int from = a->why_from, to = a->why_to;
+    const uint64_t budget = (uint64_t)a->w_n * a->w_tick, lower = (uint64_t)(a->w_n - 1) * a->w_tick;
+    FS_PUT("frameskip: auto N %d -> %d at %llu.%llu s (%s)", from, to, FS_S1(t_ns), names[a->why]);
+    FS_PUT(": %d frames at N=%d, wall %llu.%llu ms (%llu%% of %llu.%llu), busy %llu.%llu ms%s",
+           a->w_frames, a->w_n, FS_MS1(a->w_wall), fs_pct(a->w_wall, budget), FS_MS1(budget),
+           FS_MS1(a->w_busy), a->w_idle && a->w_wall * 100u > budget * 110u ?
+           " (late and idle: the player's pace or a wait)" : "");
+    if (a->w_n > 1 && a->w_timed)
+        FS_PUT(", undrawn tick %llu.%llu ms, so %llu.%llu ms at N=%d (%llu%% of its budget)",
+               FS_MS1(a->w_undrawn_tick), FS_MS1(a->w_proj), a->w_n - 1, fs_pct(a->w_proj, lower));
+    else if (a->w_n > 1)
+        FS_PUT(", undrawn ticks not timed (judged on the whole frame)");
+    switch (a->why) {
+    case SA2_FS_WHY_GUARD:
+        FS_PUT("; busy per tick %llu.%llu ms against %llu.%llu at N=%d: bound by game logic, step "
+               "ups wait %llu s", FS_MS1(a->w_busy / (uint64_t)a->w_n), FS_MS1(a->guard_busy_tick),
+               to, FS_S(a->up_hold_until - a->why_at));
+        return;
+    case SA2_FS_WHY_PROJECTION:
+        FS_PUT("; under %d%% of N=%d's budget through %llu s", SA2_FS_DOWN_PCT, to, FS_S(a->down_hold_ns));
+        return;
+    case SA2_FS_WHY_PROBE:
+        FS_PUT("; %llu s after N=%d began: a step up before %llu s of level play doubles N=%d's wait "
+               "to %llu s", FS_S(a->why_span), from, FS_S(SA2_FS_HOLD_RESET_NS), to,
+               FS_S(fs_doubled_refusal(a->refuse_ns[to])));
+        return;
+    case SA2_FS_WHY_LATE:
+        FS_PUT("; late two windows running");
+        break;
+    case SA2_FS_WHY_DOWN_FAILED:
+        FS_PUT("; %llu.%llu s after the step down to N=%d%s", FS_S1(a->why_age), from,
+               a->why_age < SA2_FS_REVERSAL_NS ? ", within 2 s: the step-down hold doubles" : "");
+        break;
+    case SA2_FS_WHY_PROBE_FAILED:
+        FS_PUT("; %llu.%llu s after the probe of N=%d", FS_S1(a->why_age), from);
+        break;
+    }
+    if ((a->why == SA2_FS_WHY_DOWN_FAILED || a->why == SA2_FS_WHY_PROBE_FAILED) &&
+        a->why_age >= a->why_run + 1000000000ull)   /* a pause or a menu in between */
+        FS_PUT(", %llu.%llu s of it level play", FS_S1(a->why_run));
+    if (a->refuse_until[from] > a->why_at)
+        FS_PUT("; step downs to N=%d refused %llu s", from, FS_S(a->refuse_until[from] - a->why_at));
+    if (a->probe_at > a->why_at)
+        FS_PUT("; next probe of N=%d in %llu s", from, FS_S(a->probe_at - a->why_at));
+#undef FS_PUT
+}
+
+void sa2_frameskip_auto_held(const sa2_fs_auto *a, uint64_t t_ns, char *line, size_t n) {
+    if (!n) return;
+    line[0] = 0;
+    if (!a->held_seq) return;
+    snprintf(line, n, "frameskip: auto N=%d held at %llu.%llu s: %llu.%llu s of level play since the "
+             "step down (%llu.%llu s of wall time); step downs to N=%d and above are no longer refused",
+             a->held_n, FS_S1(t_ns), FS_S1(a->held_run), FS_S1(a->held_age), a->held_n);
 }
 
 /* ------------------------------------------------------------------ the report's numbers */
@@ -378,6 +586,10 @@ static sa2_fs_auto g_auto;
 static fs_stats g_period, g_total;
 static uint64_t g_prev_wall, g_prev_cpu, g_prev_frames;
 static int g_have_prev, g_prev_n, g_prev_ok, g_prev_timer_ok;
+/* Auto only: the busy clock at the frame's first Control, the busy time of its undrawn ticks (to
+ * the last pass's Control; 0 until then), the previous level frame's, and the decisions printed. */
+static uint64_t g_pass_busy0, g_undrawn, g_prev_undrawn, g_why_seen, g_held_seen;
+static int g_untimed_said;
 static uint32_t g_prev_timer;
 static int g_level = -1;              /* CurrentLevel at the last level frame, -1 unread */
 static uint64_t g_t0_ns;
@@ -441,6 +653,16 @@ static uint64_t fs_run_wait(void) {
     }
 #endif
     return g_sched_wait;
+}
+
+/* The busy clock alone (the process's CPU time plus the level loop's thread's run-queue wait), as
+ * fs_frame_enter reads it: Auto's per-pass stamps. */
+static uint64_t fs_busy_clock(void) {
+    struct timespec t;
+    uint64_t cpu = 0;
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t) == 0)
+        cpu = (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+    return cpu + fs_run_wait();
 }
 
 static uint64_t fs_tick_ns(void) {
@@ -544,16 +766,18 @@ static void fs_exit(void) {
             (unsigned long long)g_total.tail);
     if (g_mode == SA2_FRAMESKIP_AUTO)
         fprintf(stderr, "; auto: %llu windows, %llu step downs failed before they held (%llu "
-                "within 2 s), %llu windows whose step "
+                "within 2 s), %llu probes (%llu failed), %llu windows whose step "
                 "down a refusal held back (refusal of N=1 %llu s, of N=2 %llu s), step-down hold %llu s, "
-                "step-up hold %llu s",
+                "step-up hold %llu s, %llu samples at N>1 whose undrawn ticks were not timed",
                 (unsigned long long)g_auto.windows, (unsigned long long)g_auto.failed,
                 (unsigned long long)g_auto.reversals,
+                (unsigned long long)g_auto.probes, (unsigned long long)g_auto.probes_failed,
                 (unsigned long long)g_auto.refusals,
                 (unsigned long long)(g_auto.refuse_ns[1] / 1000000000ull),
                 (unsigned long long)(g_auto.refuse_ns[2] / 1000000000ull),
                 (unsigned long long)(g_auto.down_hold_ns / 1000000000ull),
-                (unsigned long long)(g_auto.up_hold_ns / 1000000000ull));
+                (unsigned long long)(g_auto.up_hold_ns / 1000000000ull),
+                (unsigned long long)g_auto.untimed);
     fprintf(stderr, "\n");
     fs_hist_line("frame wall time per level frame", g_total.wall);
     fs_hist_line("game busy time per level frame", g_total.busy);
@@ -729,11 +953,29 @@ static void fs_frame_enter(void) {
                 g_period.stage_wall += w;
                 g_total.stage_wall += w;
             }
-            if (g_mode == SA2_FRAMESKIP_AUTO)
-                sa2_frameskip_auto_sample(&g_auto, g_prev_n, w, b, wall, fs_tick_ns());
+            if (g_mode == SA2_FRAMESKIP_AUTO) {
+                if (g_prev_n > 1 && g_prev_n == g_auto.n && !g_prev_undrawn && !g_untimed_said++)
+                    fprintf(stderr, "frameskip: a level frame at N=%d ran without its last pass's "
+                            "Control at counter %d, so its undrawn ticks were not timed; its window "
+                            "is judged on the whole frame's busy time (said once; counted at exit)\n",
+                            g_prev_n, g_prev_n - 1);
+                sa2_frameskip_auto_sample(&g_auto, g_prev_n, w, b, g_prev_undrawn, wall, fs_tick_ns());
+            }
         } else if (g_mode == SA2_FRAMESKIP_AUTO) {
-            sa2_frameskip_auto_gap(&g_auto, level < 0 || level != g_level);   /* frames outside the
-                                                                         loop, or one in a pass */
+            sa2_frameskip_auto_gap(&g_auto, level < 0 || level != g_level, wall);   /* frames outside
+                                                                         the loop, or one in a pass */
+        }
+        if (g_mode == SA2_FRAMESKIP_AUTO && g_auto.held_seq != g_held_seen) {
+            char line[256];
+            g_held_seen = g_auto.held_seq;
+            sa2_frameskip_auto_held(&g_auto, g_auto.held_at - g_t0_ns, line, sizeof line);
+            fprintf(stderr, "%s\n", line);
+        }
+        if (g_mode == SA2_FRAMESKIP_AUTO && g_auto.why_seq != g_why_seen) {
+            char line[768];
+            g_why_seen = g_auto.why_seq;
+            sa2_frameskip_auto_why(&g_auto, wall - g_t0_ns, line, sizeof line);
+            fprintf(stderr, "%s\n", line);
         }
     }
     g_level = level;
@@ -757,6 +999,7 @@ void *__wrap_sub_43ce20(void *state, uint32_t pc, void *memory) {
     g_in_loop = 1;
     g_decided = g_catchup = g_steps = g_step_failed = 0;
     g_frame_n = 1;
+    g_undrawn = 0;
     memset(g_zeroed, 0, sizeof g_zeroed);
     fs_tail_words tail;
     fs_tail_note(&tail);
@@ -795,6 +1038,7 @@ void *__wrap_sub_43ce20(void *state, uint32_t pc, void *memory) {
     fs_count_frame(&g_total, ran, g_decided);
     g_prev_n = ran;
     g_prev_ok = g_decided && !g_catchup;    /* a sample is a frame that ran the N it says */
+    g_prev_undrawn = ran == g_frame_n ? g_undrawn : 0;
     return ret;
 }
 
@@ -816,6 +1060,7 @@ void *__wrap_sub_441ba0(void *state, uint32_t pc, void *memory) {
                 if (sa2_poke(FS_FRAME_INCREMENT, 4, &n) == SA2_OK) {
                     g_frame_n = g_target;
                     fs_note_edges();
+                    if (g_mode == SA2_FRAMESKIP_AUTO) g_pass_busy0 = fs_busy_clock();
                 } else {
                     fs_unreadable("FrameIncrement could not be written; the frame runs one tick");
                 }
@@ -826,6 +1071,12 @@ void *__wrap_sub_441ba0(void *state, uint32_t pc, void *memory) {
             }
         }
     } else if (g_frame_n > 1) {
+        if (g_mode == SA2_FRAMESKIP_AUTO && counter == (uint32_t)(g_frame_n - 1) && !g_undrawn) {
+            /* the frame's first N-1 passes ran from the first pass's Control to here: its undrawn
+             * ticks, each a whole tick (Control, the objects, the collisions, the stage timer) */
+            const uint64_t b = fs_busy_clock();
+            g_undrawn = b > g_pass_busy0 ? b - g_pass_busy0 : 1;
+        }
         fs_zero_edges();
         if (g_step_failed) {
             /* this frame's counters are GameLoop's */

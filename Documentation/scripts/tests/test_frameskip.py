@@ -16,11 +16,15 @@ The scheduler's half is runtime/sa2_threads.c itself, linked with the poll-hando
 stand-ins: an owed boundary moves the clock N periods and counts one frame.
 
 Auto is a pure function (sa2_frameskip_auto_sample) driven here by a model device: each frame the
-game is busy n*L + G, the player needs R, paced frames come no faster than n frame periods, and up
-to Q frames can wait between the game and the player before the game waits on it.
+game is busy n*L + G (n-1 of the ticks undrawn, L each), the player needs R, paced frames come no
+faster than n frame periods, up to Q frames can wait between the game and the player before the
+game waits on it, and the CPU clock can follow a utilization governor that lowers it when the
+game's work leaves the frame spare time (the work then takes longer in proportion).
 
 Busy time's run-queue wait is read from /proc/thread-self/schedstat; a second build points that read
-at a file the driver rewrites between frames, for the paths where it does not open or stops reading.
+at a file the driver rewrites between frames, for the paths where it does not open or stops reading,
+and inside a frame's passes, for Auto's split of a frame's busy time into its undrawn ticks and the
+drawn rest.
 
 The rest are source checks: the wraps' place in PRODUCTION_WRAPS and every reader of that list,
 the variable stripped from every registered run's environment and refused as a run's extra
@@ -52,6 +56,7 @@ DRIVER = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "cpu_state.h"
 #include "guest_memory.h"
 #include "sa2_frameskip.h"
@@ -79,6 +84,17 @@ static void sched_file(const char *spec, int f) {
     if (!strcmp(end + 1, "-")) { remove(SA2_FS_SCHEDSTAT); return; }
     FILE *o = fopen(SA2_FS_SCHEDSTAT, "w");
     for (const char *c = end + 1; *c; c++) fputc(*c == '_' ? ' ' : *c, o);
+    fclose(o);
+}
+/* "passwait=US" and "drawwait=US": the run-queue wait the file shows grows US before the Control
+ * of each pass after the first (the tick before it) and after the passes (the draw); "sleep=A,B,C"
+ * sleeps A, B or C us after the passes of a frame that ran 1, 2 or 3 ticks, so frames run late. */
+static long passwait_us, drawwait_us, sleep_us[4];
+static unsigned long long fake_wait_ns;
+static void bump_wait(long us) {
+    fake_wait_ns += (unsigned long long)us * 1000u;
+    FILE *o = fopen(SA2_FS_SCHEDSTAT, "w");
+    fprintf(o, "1 %llu 1\n", fake_wait_ns);
     fclose(o);
 }
 #endif
@@ -149,6 +165,9 @@ void *__real_sub_43ce20(void *s, uint32_t pc, void *m) {      /* the level loop 
     if (pal_every && fno % pal_every == pal_every - 1) loopw[0] = 2;   /* the game's catch-up */
     in_level = 1;
     while (loopw[1] < loopw[0]) {
+#ifdef SA2_FS_SCHEDSTAT
+        if (loopw[1] > 0 && passwait_us) bump_wait(passwait_us);
+#endif
         __wrap_sub_441ba0(s, pc, m);
         if (fno == inner_at && loopw[1] == 0) boundary();             /* a frame drawn in a pass */
         if (fno == rewrite_at && loopw[1] == 1) wr(pads, 1, 0x10, 0x40);  /* a new edge in a pass */
@@ -158,6 +177,14 @@ void *__real_sub_43ce20(void *s, uint32_t pc, void *m) {      /* the level loop 
         loopw[1]++;
     }
     in_level = 0;
+#ifdef SA2_FS_SCHEDSTAT
+    if (drawwait_us) bump_wait(drawwait_us);
+    {
+        const long us = sleep_us[loopw[0] < 4 ? loopw[0] : 3];
+        const struct timespec t = {us / 1000000, us % 1000000 * 1000};
+        if (us) nanosleep(&t, NULL);
+    }
+#endif
     /* the tail, once per call (0x0043D139 to 0x0043D228) */
     if (overlay_on && overlay > 0) overlay--;
     if (emblems < 180 && (int32_t)play[0] < 0x7FFFFF00) play[0]++;
@@ -183,20 +210,34 @@ static int listed(const char *list, int f) {
 }
 
 /* Auto on a model device: phases "ms:R:L:G" (from ms on, the player needs R us a frame and the
- * game is busy n*L + G us), "hitch:ms" (one frame of 600 ms there), "stage:ms" (5 s outside the
- * level loop there, into another stage), "pause:ms" (5 s in the pause menu, the same stage) and
- * "queue:Q" (Q frames fit between the game and the player: the relay and the pipes; the game
- * waits on the player only once they are full), then the run's length in ms. With no queue a
- * frame takes max(n frame periods, R, busy). */
+ * game's work is n*L + G us at the device's top clock, n*L of it before the last tick), "hitch:ms"
+ * (one frame of 600 ms there), "stage:ms" (5 s outside the level loop there, into another stage),
+ * "pause:ms[:len]" (len ms, 5 s if not given, in the pause menu, the same stage), "queue:Q" (Q
+ * frames fit between the game and the player: the relay and the pipes; the game waits on the
+ * player only once they are full; they drain outside the level loop) and
+ * "gov:FMIN:FMAX:RISE:FALL" (the CPU clock, MHz, follows a utilization governor: after each frame
+ * it moves RISE or FALL percent of the way to 5/4 of the frame's work at FMAX over its wall time,
+ * times FMAX, held to FMIN..FMAX; the work takes FMAX/f longer), "untimed" (the undrawn ticks'
+ * busy time is not given), then the run's length in ms. With
+ * no queue a frame takes max(n frame periods, R, busy). Each change of N prints its time on stdout
+ * and the unit's decision lines on stderr: a step down that held, then the decision. */
 static int auto_main(int argc, char **argv) {
-    long phase_at[16], R[16], L[16], G[16], hitch = -1, length = 0, gap_at[16], queue = 0;
-    int phases = 0, gaps = 0, gap_next = 0, gap_stage[16];
+    long phase_at[16], R[16], L[16], G[16], hitch = -1, length = 0, gap_at[16], gap_len[16], queue = 0;
+    long fmin = 0, fmax = 0, rise = 100, fall = 100;
+    int phases = 0, gaps = 0, gap_next = 0, gap_stage[16], untimed = 0;
     uint64_t backlog = 0;                         /* the player's work queued ahead of it, us */
     for (int i = 0; i < argc; i++) {
         if (!strncmp(argv[i], "hitch:", 6)) hitch = atol(argv[i] + 6);
         else if (!strncmp(argv[i], "queue:", 6)) queue = atol(argv[i] + 6);
-        else if (!strncmp(argv[i], "stage:", 6) && gaps < 16) { gap_stage[gaps] = 1; gap_at[gaps++] = atol(argv[i] + 6); }
-        else if (!strncmp(argv[i], "pause:", 6) && gaps < 16) { gap_stage[gaps] = 0; gap_at[gaps++] = atol(argv[i] + 6); }
+        else if (!strncmp(argv[i], "gov:", 4)) sscanf(argv[i] + 4, "%ld:%ld:%ld:%ld", &fmin, &fmax, &rise, &fall);
+        else if (!strcmp(argv[i], "untimed")) untimed = 1;
+        else if (!strncmp(argv[i], "stage:", 6) && gaps < 16) {
+            gap_stage[gaps] = 1; gap_len[gaps] = 5000; gap_at[gaps++] = atol(argv[i] + 6);
+        } else if (!strncmp(argv[i], "pause:", 6) && gaps < 16) {
+            gap_stage[gaps] = 0; gap_len[gaps] = 5000;
+            sscanf(argv[i] + 6, "%ld:%ld", &gap_at[gaps], &gap_len[gaps]);
+            gaps++;
+        }
         else if (strchr(argv[i], ':') && phases < 16) {
             sscanf(argv[i], "%ld:%ld:%ld:%ld", &phase_at[phases], &R[phases], &L[phases], &G[phases]);
             phases++;
@@ -205,12 +246,17 @@ static int auto_main(int argc, char **argv) {
     sa2_fs_auto a;
     sa2_frameskip_auto_init(&a, SA2_FRAMESKIP_CAP);
     const uint64_t tick = (uint64_t)TICK_US * 1000u;
-    uint64_t now = 0, at_n[4] = {0, 0, 0, 0};
+    uint64_t now = 0, at_n[4] = {0, 0, 0, 0}, seen = 0, held_seen = 0, clock_sum = 0, clock_frames = 0;
+    int64_t f = fmax * 1000;                      /* the clock, kHz */
     int n = a.n, hitched = 0;
+    char why[768];
     while (now < (uint64_t)length * 1000000u) {
         int k = 0;
         for (int i = 0; i < phases; i++) if ((uint64_t)phase_at[i] * 1000000u <= now) k = i;
-        const uint64_t busy = (uint64_t)n * (uint64_t)L[k] * 1000u + (uint64_t)G[k] * 1000u;
+        const uint64_t work = (uint64_t)n * (uint64_t)L[k] * 1000u + (uint64_t)G[k] * 1000u;
+        const uint64_t work_undrawn = (uint64_t)(n - 1) * (uint64_t)L[k] * 1000u;
+        const uint64_t busy = fmax ? work * (uint64_t)fmax * 1000u / (uint64_t)f : work;
+        const uint64_t undrawn = fmax ? work_undrawn * (uint64_t)fmax * 1000u / (uint64_t)f : work_undrawn;
         uint64_t wall = (uint64_t)n * tick;
         if (busy > wall) wall = busy;
         {   /* the player takes R a frame; the game blocks once Q frames wait for it */
@@ -221,19 +267,38 @@ static int auto_main(int argc, char **argv) {
         }
         if (!hitched && hitch >= 0 && now >= (uint64_t)hitch * 1000000u) { wall = 600000000u; hitched = 1; }
         if (gap_next < gaps && now >= (uint64_t)gap_at[gap_next] * 1000000u) {
-            now += 5000000000u;
-            sa2_frameskip_auto_gap(&a, gap_stage[gap_next]);
+            now += (uint64_t)gap_len[gap_next] * 1000000u;
+            backlog = 0;                          /* the player caught up while the game was away */
+            sa2_frameskip_auto_gap(&a, gap_stage[gap_next], now);
             printf("%llu ms: %s\n", (unsigned long long)(now / 1000000u), gap_stage[gap_next] ? "stage" : "pause");
             gap_next++;
         }
         now += wall;
         at_n[n] += wall;
-        const int next = sa2_frameskip_auto_sample(&a, n, wall, busy, now, tick);
+        if (fmax) {
+            int64_t target = (int64_t)(5u * work * (uint64_t)fmax * 1000u / (4u * wall));
+            if (target < fmin * 1000) target = fmin * 1000;
+            if (target > fmax * 1000) target = fmax * 1000;
+            f += (target - f) * (target > f ? rise : fall) / 100;
+            if (n > 1) { clock_sum += (uint64_t)f; clock_frames++; }
+        }
+        const int next = sa2_frameskip_auto_sample(&a, n, wall, busy, untimed ? 0 : undrawn, now, tick);
         if (next != n) printf("%llu ms: N %d -> %d\n", (unsigned long long)(now / 1000000u), n, next);
+        if (a.held_seq != held_seen) {
+            held_seen = a.held_seq;
+            sa2_frameskip_auto_held(&a, a.held_at, why, sizeof why);
+            fprintf(stderr, "%s\n", why);
+        }
+        if (a.why_seq != seen) {
+            seen = a.why_seq;
+            sa2_frameskip_auto_why(&a, now, why, sizeof why);
+            fprintf(stderr, "%s\n", why);
+        }
         n = next;
     }
     printf("end N=%d ups=%llu downs=%llu guards=%llu reversals=%llu refusals=%llu at1=%llu at2=%llu "
-           "at3=%llu down_hold=%llu up_hold=%llu refuse=%llu refuse2=%llu\n", n, (unsigned long long)a.ups,
+           "at3=%llu down_hold=%llu up_hold=%llu refuse=%llu refuse2=%llu probes=%llu pfail=%llu "
+           "mhz2=%llu\n", n, (unsigned long long)a.ups,
            (unsigned long long)a.downs, (unsigned long long)a.guards,
            (unsigned long long)a.reversals, (unsigned long long)a.refusals,
            (unsigned long long)(at_n[1] / 1000000u),
@@ -241,7 +306,9 @@ static int auto_main(int argc, char **argv) {
            (unsigned long long)(a.down_hold_ns / 1000000000u),
            (unsigned long long)(a.up_hold_ns / 1000000000u),
            (unsigned long long)(a.refuse_ns[1] / 1000000000u),
-           (unsigned long long)(a.refuse_ns[2] / 1000000000u));
+           (unsigned long long)(a.refuse_ns[2] / 1000000000u),
+           (unsigned long long)a.probes, (unsigned long long)a.probes_failed,
+           (unsigned long long)(clock_frames ? clock_sum / clock_frames / 1000u : 0));
     return 0;
 }
 
@@ -266,7 +333,16 @@ int main(int argc, char **argv) {
         else if (!strncmp(argv[i], "play=", 5)) play[0] = play[1] = (uint32_t)strtoul(argv[i] + 5, NULL, 0);
         else if (!strncmp(argv[i], "emblems=", 8)) emblems = atoi(argv[i] + 8);
         else if (!strncmp(argv[i], "overlay=", 8)) { overlay = (int16_t)atoi(argv[i] + 8); overlay_on = 1; }
+#ifdef SA2_FS_SCHEDSTAT
+        else if (!strncmp(argv[i], "passwait=", 9)) passwait_us = atol(argv[i] + 9);
+        else if (!strncmp(argv[i], "drawwait=", 9)) drawwait_us = atol(argv[i] + 9);
+        else if (!strncmp(argv[i], "sleep=", 6))
+            sscanf(argv[i] + 6, "%ld,%ld,%ld", &sleep_us[1], &sleep_us[2], &sleep_us[3]);
+#endif
     }
+#ifdef SA2_FS_SCHEDSTAT
+    if (passwait_us || drawwait_us) bump_wait(0);
+#endif
     int token;
     for (fno = 0; fno < frames; fno++) {
 #ifdef SA2_FS_SCHEDSTAT
@@ -439,10 +515,11 @@ def test_off_runs_one_tick_a_frame_and_touches_no_guest_word(exe):
                               "ticks": 4, "peeks": 0, "pokes": 0}
 
 
+@pytest.mark.parametrize("value", ["3", "auto"])
 @pytest.mark.parametrize("replay", ["SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"])
-def test_ignored_in_a_replay(exe, replay):
-    lines, err = run(exe, 3, "press=1", SA2_PLAY_FRAMESKIP="3", **{replay: "/dev/null"})
-    assert err == ("frameskip: SA2_PLAY_FRAMESKIP=3 ignored in a replay (SA2_REPLAY_TICKS or "
+def test_ignored_in_a_replay(exe, replay, value):
+    lines, err = run(exe, 3, "press=1", SA2_PLAY_FRAMESKIP=value, **{replay: "/dev/null"})
+    assert err == (f"frameskip: SA2_PLAY_FRAMESKIP={value} ignored in a replay (SA2_REPLAY_TICKS or "
                    "SA2_REPLAY_WORDS is set)\n")
     assert end(lines) == {"boundaries": 4, "clock": 4 * TICK_US, "framecount": 3, "counter": 3,
                           "ticks": 3, "peeks": 0, "pokes": 0}
@@ -677,9 +754,25 @@ def test_an_owed_boundary_moves_the_clock_n_periods_and_counts_one_frame(threads
 # ---------------------------------------------------------------- Auto
 
 
+def auto_lines(exe: Path, *args) -> tuple[list[str], dict, list[str]]:
+    """The changes of N (stdout), the end's counts, and the unit's decision lines (stderr)."""
+    lines, err = run(exe, "auto", *args)
+    return (lines[:-1], {k: int(v) for k, v in (x.split("=") for x in lines[-1].split()[1:])},
+            err.splitlines())
+
+
 def auto(exe: Path, *args) -> tuple[list[str], dict]:
-    lines, _ = run(exe, "auto", *args)
-    return lines[:-1], {k: int(v) for k, v in (x.split("=") for x in lines[-1].split()[1:])}
+    return auto_lines(exe, *args)[:2]
+
+
+def at(changes: list[str], what: str) -> list[int]:
+    """The times (ms) of the changes that end with `what`."""
+    return [int(c.split()[0]) for c in changes if c.endswith(what)]
+
+
+# A phone's CPU clock (MHz): an S25 Edge's top core, 1018 to 4474 MHz; the governor reaches up
+# within a few frames (half the way each frame) and comes down over a few seconds (5 % a frame).
+GOV = "gov:1018:4474:50:5"
 
 
 def test_auto_stays_at_one_on_a_fast_device(exe):
@@ -707,7 +800,8 @@ def test_auto_s_retries_on_a_player_bound_device_thin_out(exe):
     assert len(retries) == 4 and (got["ups"], got["downs"], got["reversals"], got["N"]) == (5, 4, 4, 2)
     gaps = [b - a for a, b in zip(retries, retries[1:])]
     assert all(2 * g0 - 10000 < g1 < 2 * g0 + 10000 for g0, g1 in zip(gaps, gaps[1:])), gaps
-    assert got["at1"] < 3000 and got["refuse"] == 480
+    # N=1's time: the first step up's two windows (1 s) and each retry's one window.
+    assert got["at1"] < 3500 and got["refuse"] == 480
     # Between 2 and 3 likewise: the player needs 40 ms.
     changes, got = auto(exe, "0:40000:2000:4000", 300000)
     assert [c.split(": ")[1] for c in changes][:2] == ["N 1 -> 2", "N 2 -> 3"]
@@ -787,9 +881,37 @@ def test_auto_s_spiral_guard_keeps_a_logic_bound_device_at_one(exe):
 
 
 def test_auto_keeps_two_where_the_draw_side_was_the_cost(exe):
-    # 10 ms a tick and 12 ms a frame: 22 ms at N=1, 32 ms at N=2, inside 33.3.
-    changes, got = auto(exe, "0:10000:10000:12000", 60000)
-    assert got["guards"] == 0 and got["N"] == 2 and got["at2"] >= 0.95 * 60000
+    # 10 ms a tick and 12 ms a frame: 22 ms at N=1, 32 ms at N=2, inside 33.3. N=1 projected at
+    # 22 ms is 132 % of a tick. No projection holds the probe back (one made on a lowered clock
+    # cannot tell), so each probe runs N=1 for one window, fails, and doubles the wait: 30, 60 s.
+    # Governor or not (the clock stays at the top).
+    for gov in ((), (GOV,)):
+        changes, got, why = auto_lines(exe, "0:10000:10000:12000", *gov, 120000)
+        assert at(changes, "N 2 -> 1") == [31466, 92401] and at(changes, "N 1 -> 2") == [1034, 32104, 93039]
+        assert (got["guards"], got["N"], got["probes"], got["pfail"], got["refuse"]) == (0, 2, 2, 2, 120)
+        assert got["at2"] >= 0.98 * 120000
+        assert [w.split(" (")[1].split(")")[0] for w in why] == ["late"] + ["probe", "probe failed"] * 2
+        assert why[1].endswith("busy 32.0 ms, undrawn tick 10.0 ms, so 22.0 ms at N=1 (132% of its budget); "
+                               "30 s after N=2 began: a step up before 30 s of level play doubles N=1's "
+                               "wait to 60 s"), why[1]
+        assert why[2].endswith("busy 22.0 ms; 0.6 s after the probe of N=1; next probe of N=1 in 60 s"), why[2]
+
+
+def test_auto_projects_n_minus_1_per_undrawn_tick_at_three(exe):
+    # 10 ms a tick, 12 ms a draw, a 45 ms player: N=3 on time at 42 ms of busy time. N=2 projected
+    # is 42 less ONE undrawn tick, the mean of N=3's two: 32 ms, 96 % of 33.3, so not a step down
+    # on the projection (75 %); the probe at 30 s finds the player late at N=2 and fails.
+    changes, got, why = auto_lines(exe, "0:45000:10000:12000", 120000)
+    assert at(changes, "N 3 -> 2") == [32908, 94131] and got["N"] == 3
+    assert (got["probes"], got["pfail"], got["refuse2"]) == (2, 2, 120)
+    down = [w for w in why if " N 3 -> 2 " in w][0]
+    assert down.startswith("frameskip: auto N 3 -> 2 at 32.9 s (probe): 11 frames at N=3, wall 49.9 ms "
+                           "(100% of 49.9), busy 42.0 ms, undrawn tick 10.0 ms, so 32.0 ms at N=2 (96% "
+                           "of its budget); 30 s after N=3 began"), down
+    # The probe's first 150 ms are not judged (the governor's ramp): its first window closes 0.6 s
+    # after it, not 0.5.
+    failed = [w for w in why if " N 2 -> 3 at 33." in w][0]
+    assert "(probe failed)" in failed and "; 0.6 s after the probe of N=2; " in failed, failed
 
 
 def test_auto_steps_down_when_the_game_s_work_falls(exe):
@@ -808,6 +930,248 @@ def test_auto_steps_down_after_the_player_catches_up(exe):
     assert [c.split(": ")[1] for c in changes] == ["N 1 -> 2", "N 2 -> 1"]
     assert 30000 < int(changes[1].split()[0]) < 36000
     assert (got["N"], got["downs"], got["reversals"]) == (1, 1, 0)
+
+
+def test_auto_returns_to_one_after_the_clock_fell_at_two(exe):
+    """The S25 Edge's alpha.4 sessions: N=1 at about 17 ms a frame, then one late stretch stepped
+    up to N=2. There the governor spent the spare time on a lower clock (2650 to about 1018 MHz)
+    and held the game's busy time near 80 % of the 33.3 ms frame, 10.5 to 14 ms a tick, with
+    little change from window to window: two ticks never came under 12.5 ms, the old step-down
+    rule's whole-frame test, and N=2 held for the rest of the stage.
+
+    The work splits as this game's desktop and emulator runs measured it: the undrawn tick 7 to
+    15 % of a frame's busy time (1.2 ms a tick and 5.3 ms of draw and the rest at the top clock;
+    0.8 and 5.7). N=1 projected from N=2's busy time is then 135 to 142 % of a tick at N=2's
+    clock, over any gate a projection could set, yet N=1 needs only 6.5 ms at the top clock. N=1
+    is probed 30 s after the step up, the governor raises the clock, and N=1 keeps its pace."""
+    for split, undrawn, proj, pct in (("1200:5300", "4.1", "22.5", 135), ("800:5700", "2.9", "23.7", 142)):
+        changes, got, why = auto_lines(exe, f"0:17000:{split}", "hitch:3000", f"6000:20000:{split}",
+                                       f"7000:17000:{split}", GOV, 180000)
+        assert changes == ["7193 ms: N 1 -> 2", "37625 ms: N 2 -> 1"], changes
+        assert got["N"] == 1 and got["at1"] >= 0.8 * 180000 and (got["probes"], got["pfail"]) == (1, 0)
+        assert 1200 <= got["mhz2"] <= 1400       # the clock at N=2, from 4474
+        assert why[0].startswith("frameskip: auto N 1 -> 2 at 7.1 s (late)")
+        assert "late two windows running; step downs to N=1 refused 30 s; next probe of N=1 in 30 s" in why[0]
+        assert why[1] == (f"frameskip: auto N 2 -> 1 at 37.6 s (probe): 16 frames at N=2, wall 33.3 ms (100% "
+                          f"of 33.3), busy 26.6 ms, undrawn tick {undrawn} ms, so {proj} ms at N=1 ({pct}% "
+                          f"of its budget); 30 s after N=2 began: a step up before 30 s of level play "
+                          f"doubles N=1's wait to 60 s"), why[1]
+        assert why[2] == ("frameskip: auto N=1 held at 67.8 s: 30.0 s of level play since the step down "
+                          "(30.2 s of wall time); step downs to N=1 and above are no longer refused")
+        assert len(why) == 3
+
+
+def test_auto_s_probe_holds_on_level_play_not_on_a_pause(exe):
+    # A player at 18.6 ms behind 8 queued frames: each probe of N=1 fails about 2.6 s in, once the
+    # queue fills. The second probe (95.9 s) is followed 0.1 s later by 40 s in the pause menu,
+    # where the queue drains. Counted on wall time, the first window back passed for a probe that
+    # held 30 s: the refusals reset, and the late windows after it were a plain step up (the next
+    # probe 30 s later, not 120). Counted on level play the probe fails as the others do.
+    changes, got, why = auto_lines(exe, "0:18600:2000:4000", "queue:8", GOV, "pause:96000:40000", 300000)
+    assert at(changes, "N 2 -> 1") == [32998, 95976, 258607] and at(changes, ": pause") == [136014]
+    assert (got["probes"], got["pfail"], got["refuse"], got["N"]) == (3, 3, 240, 2)
+    assert not [w for w in why if " held at " in w], why
+    failed = [w for w in why if " at 138.5 s " in w][0]
+    assert failed.startswith("frameskip: auto N 1 -> 2 at 138.5 s (probe failed)") and failed.endswith(
+        "; 42.6 s after the probe of N=1, 2.5 s of it level play; step downs to N=1 refused 120 s; next "
+        "probe of N=1 in 120 s"), failed
+    # A probe that holds holds across a pause too, after 30 s of level play: the S25 case above
+    # with 40 s in the pause menu 0.4 s after its probe.
+    changes, got, why = auto_lines(exe, "0:17000:1200:5300", "hitch:3000", "6000:20000:1200:5300",
+                                   "7000:17000:1200:5300", GOV, "pause:38000:40000", 180000)
+    held = [w for w in why if " held at " in w]
+    assert held == ["frameskip: auto N=1 held at 108.1 s: 30.0 s of level play since the step down (70.4 s "
+                    "of wall time); step downs to N=1 and above are no longer refused"], why
+    assert got["N"] == 1 and (got["probes"], got["pfail"]) == (1, 0)
+
+
+def test_auto_prints_each_held_step_down_of_a_three_two_one_chain(exe):
+    # 15 s of a scene three times heavier takes N to 3; the probes bring it back to 2, then to 1.
+    # The window that finds the step down to 2 held is the one the probe of 1 comes due in (both
+    # 30 s after it): each prints its line, the held one first.
+    light, heavy = "12000:4500:2000", "12000:20000:8000"
+    changes, got, why = auto_lines(exe, f"0:{light}", f"60000:{heavy}", f"75000:{light}", GOV, 240000)
+    assert changes == ["61035 ms: N 1 -> 2", "62139 ms: N 2 -> 3", "92309 ms: N 3 -> 2", "122841 ms: N 2 -> 1"]
+    assert [w.split(" s")[0].split("auto ")[1] for w in why] == [
+        "N 1 -> 2 at 61.0", "N 2 -> 3 at 62.1", "N 3 -> 2 at 92.3", "N=2 held at 122.8", "N 2 -> 1 at 122.8",
+        "N=1 held at 153.4"], why
+    assert "(probe)" in why[2] and "(probe)" in why[4]
+    assert why[3] == ("frameskip: auto N=2 held at 122.8 s: 30.3 s of level play since the step down (30.5 s of "
+                      "wall time); step downs to N=2 and above are no longer refused")
+    assert (got["N"], got["probes"], got["pfail"]) == (1, 2, 0)
+
+
+def test_auto_judges_a_step_down_before_it_probes_the_n_below(exe):
+    # N=3 keeps the pace and N=2 does not (15 ms a tick and 7 ms) until 200 s, so the probes of 2
+    # fail and N=2's wait grows to 120 s; then a lighter scene that N=2 keeps and N=1 does not (14
+    # and 6, or 13.8 and 6.2). The probe of 2 at 214.4 s holds after 30 s of level play; the probe
+    # of 1 is due 30 s of wall time after it. A 600 ms hitch (two budgets of it counted), a 5 s pause
+    # or the windows' phase brought the probe first, and its step down ended N=2's unjudged: no held
+    # line, N=2's wait still 120 s, and 10 s of the heavier scene at 500 s cost 120 s at N=3, not 30.
+    heavy = "12000:15000:7000"
+    for light, extra, held, run, wall, back, at3 in (
+            ("12000:14000:6000", ("hitch:220000",), "245.2", "30.0", "30.7", 531578, 241348),
+            ("12000:14000:6000", ("pause:216000",), "250.1", "30.0", "35.6", 531331, 241306),
+            ("12000:13800:6200", (), "245.0", "30.4", "30.5", 531349, 241304)):
+        changes, got, why = auto_lines(exe, f"0:{heavy}", f"200000:{light}", f"500000:{heavy}",
+                                       f"510000:{light}", *extra, 800000)
+        assert at(changes, "N 3 -> 2") == [32319, 93357, 214450, back], (extra, changes)
+        k = why.index(f"frameskip: auto N=2 held at {held} s: {run} s of level play since the step down "
+                      f"({wall} s of wall time); step downs to N=2 and above are no longer refused")
+        assert why[k + 1].startswith(f"frameskip: auto N 2 -> 1 at {held} s (probe)"), why[k:k + 2]
+        assert (got["at3"], got["refuse2"], got["N"]) == (at3, 30, 2), (extra, got)
+
+
+def test_auto_steps_down_on_n_minus_1_s_projection(exe):
+    # A fixed clock, 5 ms a tick and 4 ms a frame (N=1 9 ms), and 2 s of a heavy scene (20 ms at
+    # N=1, game-bound). Back to the light scene at N=2 the frame's two ticks take 14 ms, over the
+    # old rule's 12.5 (75 % of one tick for the whole N-tick frame), which kept N=2 to the end; one
+    # tick less is 9 ms, so N=1 comes back after the 3 s hold.
+    changes, got, why = auto_lines(exe, "0:12000:5000:4000", "6000:12000:12000:8000",
+                                   "8000:12000:5000:4000", 60000)
+    (up,), (down,) = at(changes, "N 1 -> 2"), at(changes, "N 2 -> 1")
+    assert 6500 < up < 7500 and 8000 + 3000 < down < 8000 + 4500, changes
+    assert (got["N"], got["downs"], got["probes"], got["reversals"]) == (1, 1, 0, 0)
+    assert re.search(r"^frameskip: auto N 2 -> 1 at 11\.\d s \(projection\): 16 frames at N=2, wall 33\.3 ms "
+                     r"\(100% of 33\.3\), busy 14\.0 ms, undrawn tick 5\.0 ms, so 9\.0 ms at N=1 \(54% of "
+                     r"its budget\); under 75% of N=1's budget through 3 s$", why[1]), why[1]
+
+
+def test_auto_keeps_one_through_a_hitch_and_a_short_spell(exe):
+    # One late window (a 0.4 s spell of 20 ms frames, or a 600 ms hitch, clamped to two budgets) is
+    # not a pace: a step up takes two windows running late.
+    for case in (("6000:20000:4500:2000", "6400:17000:4500:2000"), ("hitch:6000",),
+                 ("6000:20000:4500:2000", "6400:17000:4500:2000", "hitch:20000")):
+        changes, got, why = auto_lines(exe, "0:17000:4500:2000", *case, GOV, 60000)
+        assert changes == [] and why == [] and got["ups"] == 0, case
+
+
+def test_auto_keeps_a_phone_that_cannot_hold_60_at_two_and_its_probes_thin_out(exe):
+    # The game needs 20 ms a frame at N=1 at the top clock (14 ms a tick and 6 ms): late at N=1 in
+    # every window, on time at N=2 (34 ms). Each probe of N=1 fails within its first window and
+    # doubles the wait for the next: 30, 60, 120, 240 s.
+    for gov in ((GOV,), ()):
+        changes, got, why = auto_lines(exe, "0:12000:14000:6000", *gov, 600000)
+        ups, probes = at(changes, "N 1 -> 2"), at(changes, "N 2 -> 1")
+        assert ups[0] < 1500 and len(probes) == 4 and len(ups) == 5, changes
+        waits = [p - u for u, p in zip(ups, probes)]
+        assert all(w <= g < w + 1000 for w, g in zip((30000, 60000, 120000, 240000), waits)), waits
+        assert all(u - p < 1000 for p, u in zip(probes, ups[1:])), changes
+        assert (got["N"], got["probes"], got["pfail"], got["guards"], got["refuse"]) == (2, 4, 4, 0, 480)
+        assert got["at2"] >= 0.99 * 600000
+        assert [w.split(" (")[1].split(")")[0] for w in why] == ["late"] + ["probe", "probe failed"] * 4
+        assert why[-1].endswith("; next probe of N=1 in 480 s"), why[-1]
+
+
+def test_auto_s_retries_of_a_render_bound_device_back_off_under_a_governor(exe):
+    # The player at 30 ms, the game 2 ms a tick and 4 ms. With the clock lowered at N=2 the busy
+    # time fills 80 % of the frame and the old rule never tried N=1 again (0 retries); the probe
+    # keeps the backoff the refusal gives without a governor: 30, 60, 120, 240 s.
+    changes, got, why = auto_lines(exe, "0:30000:2000:4000", GOV, 600000)
+    ups, probes = at(changes, "N 1 -> 2"), at(changes, "N 2 -> 1")
+    waits = [p - u for u, p in zip(ups, probes)]
+    assert all(w <= g < w + 1000 for w, g in zip((30000, 60000, 120000, 240000), waits)), waits
+    assert len(probes) == 4 and (got["N"], got["pfail"], got["refuse"]) == (2, 4, 480)
+    assert got["at2"] >= 0.99 * 600000 and got["mhz2"] < 1500
+
+
+def test_auto_returns_after_a_heavy_section(exe):
+    # 60 to 120 s the game's work is 3.2 times heavier (N=1 125 % of a tick at the top clock, N=2
+    # 106 %: not on time, so no probe); the first window after it is on time and the probe due
+    # since 91 s runs. A section that ends before the probe is due: the probe at 30 s returns.
+    light, heavy = "4500:2000", "14400:6400"
+    changes, got, why = auto_lines(exe, f"0:12000:{light}", f"60000:12000:{heavy}",
+                                   f"120000:12000:{light}", GOV, 240000)
+    assert [c.split(": ")[1] for c in changes] == ["N 1 -> 2", "N 2 -> 1"], changes
+    (up,), (down,) = at(changes, "N 1 -> 2"), at(changes, "N 2 -> 1")
+    assert 60000 < up < 62000 and 120000 < down < 122000 and got["N"] == 1 and got["pfail"] == 0
+    changes, got, why = auto_lines(exe, f"0:12000:{light}", f"60000:12000:{heavy}",
+                                   f"75000:12000:{light}", GOV, 240000)
+    (up,), (down,) = at(changes, "N 1 -> 2"), at(changes, "N 2 -> 1")
+    assert 30000 <= down - up < 31000 and got["N"] == 1
+
+
+def test_auto_s_probe_comes_after_the_hold_on_a_new_stage_and_keeps_its_time_through_a_pause(exe):
+    # The low-end phone above: its second probe is due 60 s after the first failed. A new stage at
+    # 45 s (5 s outside the level loop) may draw at another pace: the probe comes the step-down
+    # hold after it, and its wait starts again from 30 s, so its failure makes the next 60 s, not
+    # 120 s.
+    changes, got, why = auto_lines(exe, "0:12000:14000:6000", GOV, "stage:45000", 200000)
+    stage = at(changes, ": stage")[0]
+    later = [p for p in at(changes, "N 2 -> 1") if p > stage]
+    assert later[0] - stage < 4500 and 60000 <= later[1] - later[0] < 61500, changes
+    plain, _ = auto(exe, "0:12000:14000:6000", GOV, 200000)
+    paused, _ = auto(exe, "0:12000:14000:6000", GOV, "pause:45000", 200000)
+    assert len(at(paused, "N 2 -> 1")) == len(at(plain, "N 2 -> 1")) == 2
+    assert all(abs(a - b) < 1000 for a, b in zip(at(paused, "N 2 -> 1"), at(plain, "N 2 -> 1")))
+
+
+def test_auto_s_spiral_guard_is_named_and_its_holds_double(exe):
+    # The guard's rule is as it was; each revert is one line naming it, with the hold it sets.
+    changes, got, why = auto_lines(exe, "0:5000:20000:2000", 120000)
+    guards = [w for w in why if "(spiral guard)" in w]
+    assert [g.split("step ups wait ")[1] for g in guards] == ["3 s", "6 s", "12 s"] + ["30 s"] * 4
+    assert "busy per tick 21.0 ms against 22.0 at N=1: bound by game logic" in guards[0]
+    assert got["guards"] == 7 and got["probes"] == 0 and got["N"] == 1
+
+
+def test_auto_s_spiral_guard_hold_does_not_keep_a_step_down_that_failed(exe):
+    # 18 ms a tick and 4 ms: N=3 is bound by game logic, and the guard's hold grows to 30 s (the
+    # last guard at 118.2 s). The hold runs on wall time, into the next stage. There N=2 keeps the
+    # pace and N=1 does not (12 ms and 8, 20 ms at N=1): the new stage's probe 3 s in was late in
+    # its first window, but the step back up waited for the hold's end, 21 s at N=1 at 120 % of its
+    # budget. Or the same stage turns light behind a 20 ms player: N=1's projection fits, and the
+    # step down 4 s after the guard is late at once, and was kept 26 s. Each step up goes back to
+    # the N the step down left, which N could not pass in the hold.
+    logic = "0:12000:18000:4000"
+    for scene, after, failed, at1 in (
+            (("119000:12000:12000:8000", "stage:119000"),
+             ["124014 ms: stage", "127247 ms: N 2 -> 1", "127887 ms: N 1 -> 2", "188184 ms: N 2 -> 1",
+              "188824 ms: N 1 -> 2"],
+             "N 1 -> 2 at 127.8 s (probe failed): 25 frames at N=1, wall 20.0 ms (120% of 16.6), busy 20.0 ms; "
+             "0.6 s after the probe of N=1; next probe of N=1 in 60 s", 2314),
+            (("119000:20000:3000:2000",),
+             ["122480 ms: N 2 -> 1", "123000 ms: N 1 -> 2", "183298 ms: N 2 -> 1", "183818 ms: N 1 -> 2"],
+             "N 1 -> 2 at 123.0 s (step down failed): 25 frames at N=1, wall 20.0 ms (120% of 16.6), busy "
+             "5.0 ms (late and idle: the player's pace or a wait); 0.5 s after the step down to N=1, within "
+             "2 s: the step-down hold doubles; step downs to N=1 refused 60 s; next probe of N=1 in 60 s", 2074)):
+        changes, got, why = auto_lines(exe, logic, *scene, 200000)
+        assert [c for c in changes if int(c.split()[0]) > 118000] == ["118214 ms: N 3 -> 2", *after], changes
+        assert why[14].startswith("frameskip: auto N 3 -> 2 at 118.2 s (spiral guard)") and why[14].endswith(
+            "step ups wait 30 s"), why[14]
+        assert f"frameskip: auto {failed}" in why, why
+        assert (got["at1"], got["guards"], got["N"]) == (at1, 7, 2), got
+
+
+def test_auto_without_the_undrawn_split_judges_the_whole_frame(exe):
+    # A frame whose undrawn ticks were not timed (undrawn 0): its window is judged on the frame's
+    # whole busy time, as before the split, and the line says so.
+    changes, got, why = auto_lines(exe, "0:30000:2000:4000", "untimed", 40000)
+    assert [c.split(": ")[1] for c in changes] == ["N 1 -> 2", "N 2 -> 1", "N 1 -> 2"]
+    assert "busy 8.0 ms, undrawn ticks not timed (judged on the whole frame); under 75%" in why[1]
+
+
+def test_auto_times_the_undrawn_ticks_apart_from_the_drawn_one(sched_exe):
+    """Through the wraps: the run-queue wait the schedstat file shows grows 10 ms before each later
+    pass's Control (the tick before it) and 3 ms after the passes (the draw); frames sleep 20 ms
+    at N=1 and 40 ms at N=2, so both step up (real time, about 2 s). The window at N=2: two ticks
+    13 ms of busy time, over the old rule's 12.5, of which the undrawn one is 10: N=1 projected at
+    3 ms."""
+    exe, stat = sched_exe
+    lines, err = run(exe, 200, "passwait=10000", "drawwait=3000", "sleep=20000,40000,0",
+                     SA2_PLAY_FRAMESKIP="auto")
+    why = [x for x in err.splitlines() if x.startswith("frameskip: auto N")]
+    assert len(why) == 2 and why[0].startswith("frameskip: auto N 1 -> 2 at 1.") and "busy 3." in why[0]
+    assert re.search(r"^frameskip: auto N 2 -> 3 at 2\.\d s \(late\): 1\d frames at N=2, wall 4\d\.\d ms "
+                     r"\(1\d\d% of 33\.3\), busy 13\.[0-4] ms \(late and idle: the player's pace or a "
+                     r"wait\), undrawn tick 10\.[01] ms, so 3\.[0-4] ms at N=1", why[1]), why[1]
+    assert "0 samples at N>1 whose undrawn ticks were not timed" in err and "not timed;" not in err
+    # The fixed modes read the busy clock only at a frame's entry, as before: the same frames, the
+    # same guest reads and writes, and no decision line.
+    for mode in ("2", "3"):
+        plain, perr = run(exe, 6, "press=1", SA2_PLAY_FRAMESKIP=mode)
+        waits, werr = run(exe, 6, "press=1", "passwait=10000", "drawwait=3000", SA2_PLAY_FRAMESKIP=mode)
+        assert waits == plain and "auto" not in werr + perr
 
 
 # ---------------------------------------------------------------- the links and the runs

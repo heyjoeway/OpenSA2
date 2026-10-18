@@ -301,7 +301,7 @@ public class Sa2SettingsActivity extends Activity {
 
         // Tweaks: changes to the game's own behaviour, none made by default, a switch and its note for
         // each line of GameSettings.TWEAKS, under GameSettings.TWEAK_GROUPS's headings, each group
-        // sorted by label (GameSettings, "The tweaks"). A switch is its tweak's by name.
+        // in the group's own order (GameSettings, "The tweaks"). A switch is its tweak's by name.
         LinearLayout tw = card(col, "Tweaks");
         List<String> problems = new ArrayList<>();
         List<GameSettings.TweakGroup> groups =

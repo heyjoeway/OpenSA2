@@ -10,7 +10,6 @@ import android.os.Build;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -45,7 +44,7 @@ import java.util.Set;
  * a switch is a switch either way: the settings screen's Tweaks card makes one of every line, kept
  * in the preferences as "tweak_<name>", and sessionSettings sends the names of those turned on, in
  * TWEAKS's order, to the game and the player alike. The card shows them under TWEAK_GROUPS's
- * headings, each group sorted by label (tweakGroups), not in TWEAKS's order. A host tweak whose home
+ * headings, each group in TWEAK_GROUPS's own order (tweakGroups), not in TWEAKS's order. A host tweak whose home
  * is this app has its helper, Tweak<Name>.java, which asks tweaksOn. A new tweak is one line in
  * TWEAKS and its name in one group of TWEAK_GROUPS (runtime/sa2_tweaks.h, "Add a tweak", "Add a host
  * tweak").
@@ -143,68 +142,68 @@ final class GameSettings {
     };
 
     /** The Tweaks card's groups, in the card's order: each a heading, then the names of its tweaks,
-     * one a line in name order; the card sorts each group by label (tweakGroups). Every TWEAKS name
+     * one a line, in the order the card shows them: the ones players want most first. Every TWEAKS name
      * is in exactly one group (test_tweaks.py): a new Android tweak adds its line to TWEAKS and its
      * name's line to one group (runtime/sa2_tweaks.h, "Add a tweak"). The headings follow the
      * release notes; pause-unfocused, which they list under Windows and Linux, is under Other. */
     static final String[][] TWEAK_GROUPS = {
-        {"Story and presentation",
-            "all-events-skippable",
-            "always-recap",
-            "draw-distance",
-            "event-bars-all",
-            "fast-stage-load",
-            "fov",
-            "frametime-overlay",
-            "hide-hud",
-            "hide-upgrade-models",
-            "no-event-bars",
-            "no-loading-tips",
-            "reduce-shake",
-            "skip-intro",
-            "tex-filter",
-            "vsync",
-        },
         {"Gameplay and assists",
-            "2p-layout-in-1p",
-            "force-hard-layout",
-            "forgiving-restarts",
-            "gold-beetle-stays",
-            "hide-radar",
             "infinite-lives",
-            "m4-time-rank",
-            "no-2p-specials",
-            "no-lives-bonus",
-            "physics-preset",
+            "stage-select-all",
             "practice-stage",
+            "spin-dash-fast",
+            "physics-preset",
             "quiet-omochao",
+            "start-assists",
+            "forgiving-restarts",
             "radar-all-pieces",
             "ring-loss-cap",
+            "force-hard-layout",
+            "2p-layout-in-1p",
+            "m4-time-rank",
             "rival-upgrades",
-            "slow-mode",
-            "spin-dash-fast",
-            "stage-select-all",
-            "start-assists",
+            "gold-beetle-stays",
             "victory-powerups",
+            "no-lives-bonus",
+            "hide-radar",
+            "no-2p-specials",
+            "slow-mode",
+        },
+        {"Story and presentation",
+            "skip-intro",
+            "all-events-skippable",
+            "no-event-bars",
+            "always-recap",
+            "fast-stage-load",
+            "no-loading-tips",
+            "fov",
+            "draw-distance",
+            "tex-filter",
+            "reduce-shake",
+            "hide-hud",
+            "frametime-overlay",
+            "hide-upgrade-models",
+            "vsync",
+            "event-bars-all",
         },
         {"Controls",
             "analog-fix",
-            "camera-invert",
             "deadzone",
+            "camera-invert",
             "hold-toggle",
         },
         {"Audio",
-            "mono-audio",
             "no-music",
-            "no-powerup-music",
             "no-voices",
+            "no-powerup-music",
+            "mono-audio",
             "swap-audio",
         },
         {"Chao",
-            "chao-key-always",
             "chao-stat-x5",
-            "drives-to-minimals",
+            "chao-key-always",
             "garden-ring-trickle",
+            "drives-to-minimals",
         },
         {"Fixes",
             "metal-bounce-fix",
@@ -227,8 +226,8 @@ final class GameSettings {
         }
     }
 
-    /** The Tweaks card's order: `groups` in their order, each group's tweaks sorted by label (case
-     * ignored, Locale.ROOT), every line of `tweaks` once. A mistake in `groups` is added to
+    /** The Tweaks card's order: `groups` in their order, each group's tweaks in the group's own
+     * order, every line of `tweaks` once. A mistake in `groups` is added to
      * `problems` by name and never hides a switch: a name in no group is shown under OTHER (the
      * last group, or a new one at the end); a name in two groups is shown in the first only; a
      * name that is no tweak's is left out; a group left with no tweak is not shown. */
@@ -259,10 +258,7 @@ final class GameSettings {
             if (other == null) out.add(other = new TweakGroup(OTHER));
             other.tweaks.add(t);
         }
-        Comparator<Tweak> byLabel = Comparator.comparing((Tweak t) -> t.label.toLowerCase(Locale.ROOT))
-                                              .thenComparing(t -> t.name);
         out.removeIf(g -> g.tweaks.isEmpty());
-        for (TweakGroup g : out) g.tweaks.sort(byLabel);
         return out;
     }
 

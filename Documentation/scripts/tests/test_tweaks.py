@@ -385,7 +385,7 @@ def test_every_tweak_has_its_android_switch_and_every_switch_its_tweak():
 
 
 # The Tweaks card's headings, in its order: the release notes' groups, and Other.
-CARD_HEADINGS = ["Story and presentation", "Gameplay and assists", "Controls", "Audio", "Chao", "Fixes", "Other"]
+CARD_HEADINGS = ["Gameplay and assists", "Story and presentation", "Controls", "Audio", "Chao", "Fixes", "Other"]
 
 
 def android_tweak_groups() -> list[tuple[str, list[str]]]:
@@ -399,12 +399,11 @@ def android_tweak_groups() -> list[tuple[str, list[str]]]:
 
 def test_every_android_tweak_is_in_one_group_of_the_tweaks_card():
     """The card shows TWEAK_GROUPS: the headings in their order, none empty, each group's names one a
-    line in name order (so tweaks added at once merge as added lines), and each TWEAKS name in exactly
+    line in the card's order, and each TWEAKS name in exactly
     one group, so a new tweak whose name is in no group (or two) fails here by name."""
     groups = android_tweak_groups()
     assert [heading for heading, _ in groups] == CARD_HEADINGS
     assert all(names for _, names in groups), [heading for heading, names in groups if not names]
-    assert all(names == sorted(names) for _, names in groups), "each group's names go in name order"
     grouped = [n for _, names in groups for n in names]
     twice = sorted({n for n in grouped if grouped.count(n) > 1})
     assert not twice, f"in two groups of TWEAK_GROUPS: {twice}"

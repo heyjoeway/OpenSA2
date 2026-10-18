@@ -8,7 +8,7 @@ session with every setting at its default runs as before there were tweaks, and 
 tweaks turned on, in GameSettings.TWEAKS's order, otherwise. TWEAKS is the one place a tweak is
 named on Android: the Tweaks card makes a switch of each line (test_tweaks.py holds the lines to
 runtime/sa2_tweaks.h's list), shown under GameSettings.TWEAK_GROUPS's headings with each group
-sorted by label (GameSettings.tweakGroups), while SA2_TWEAKS and the preferences keep the names. A small Java driver runs GameSettings here against android.jar; the
+in the table's own order (GameSettings.tweakGroups), while SA2_TWEAKS and the preferences keep the names. A small Java driver runs GameSettings here against android.jar; the
 settings screen (Sa2SettingsActivity, with Ui and the layout editor it opens) is compiled beside
 it, so a card that no longer builds fails here, not in the APK's build.
 
@@ -137,25 +137,35 @@ def card(java, *groups) -> tuple[list[tuple[str, list[tuple[str, str]]]], list[s
     return order, problems
 
 
-def test_the_tweaks_card_shows_the_groups_in_order_each_sorted_by_label(java):
-    """The card's headings in TWEAK_GROUPS's order, each group's switches sorted by label with case
-    ignored, every TWEAKS line once, and no problem. Remove cutscene black bars, which players
-    could not find among switches in name order, is under Story and presentation."""
+def groups_of_table() -> list[list[str]]:
+    """GameSettings.TWEAK_GROUPS as written: each group's heading, then its names in order."""
+    import re
+    text = (ROOT / "host/android/java/com/sa2recomp/app/GameSettings.java").read_text()
+    body = re.search(r"static final String\[\]\[\] TWEAK_GROUPS = \{(.*?)\n    \};", text, re.S).group(1)
+    return [re.findall(r'"([^"]+)"', g) for g in re.findall(r"\{(.*?)\}", body, re.S)]
+
+
+def test_the_tweaks_card_shows_the_groups_and_their_tweaks_in_the_tables_order(java):
+    """The card's headings in TWEAK_GROUPS's order, each group's switches in the table's own order
+    (the ones players want most first), every TWEAKS line once, and no problem. Remove cutscene
+    black bars, which players could not find among switches in name order, is near the top of Story
+    and presentation."""
     order, problems = card(java)
     assert problems == []
     assert [heading for heading, _ in order] == [
-        "Story and presentation", "Gameplay and assists", "Controls", "Audio", "Chao", "Fixes", "Other"]
+        "Gameplay and assists", "Story and presentation", "Controls", "Audio", "Chao", "Fixes", "Other"]
+    table = {g[0]: g[1:] for g in groups_of_table()}
     for heading, tweaks in order:
-        labels = [label for _, label in tweaks]
-        assert labels and labels == sorted(labels, key=str.lower), heading
+        assert [name for name, _ in tweaks] == table[heading], heading
     names = [name for _, tweaks in order for name, _ in tweaks]
     assert sorted(names) == sorted(line.split("|")[0] for line in java("list"))
+    assert dict(order)["Gameplay and assists"][:2] == [
+        ("infinite-lives", "Infinite lives"), ("stage-select-all", "Show all stages in Stage Select")]
     assert dict(order)["Story and presentation"][:3] == [
-        ("event-bars-all", "Black bars on every cutscene"), ("draw-distance", "Double draw distance"),
-        ("fast-stage-load", "Faster stage loading")]
-    assert ("no-event-bars", "Remove cutscene black bars") in dict(order)["Story and presentation"]
-    assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"), ("camera-invert", "Invert camera"),
-                                       ("deadzone", "Round stick deadzone"), ("hold-toggle", "Tap to hold B")]
+        ("skip-intro", "Skip intro"), ("all-events-skippable", "Skip any cutscene"),
+        ("no-event-bars", "Remove cutscene black bars")]
+    assert dict(order)["Controls"] == [("analog-fix", "Analog stick fix"), ("deadzone", "Round stick deadzone"),
+                                       ("camera-invert", "Invert camera"), ("hold-toggle", "Tap to hold B")]
     assert dict(order)["Other"] == [("pause-unfocused", "Pause when unfocused")]
 
 

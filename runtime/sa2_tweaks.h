@@ -79,8 +79,8 @@
  *   3. One line in host/android GameSettings.TWEAKS: new Tweak("<name>", the switch's label, the
  *      note under it). The settings screen's Tweaks card makes a switch of each line, and
  *      sessionSettings sends the ones turned on. And one line, "<name>", in one group of
- *      GameSettings.TWEAK_GROUPS, in name order: the heading the card shows the switch under (the
- *      card sorts each group by label). A name in no group shows under Other, and test_tweaks.py
+ *      GameSettings.TWEAK_GROUPS, at the place in that group the card shows it: the heading the
+ *      card shows the switch under, in the group's own order. A name in no group shows under Other, and test_tweaks.py
  *      fails until it is in one.
  *   4. Its tests. Documentation/scripts/tests/test_tweaks.py holds the list, the files and the
  *      Android lines and groups to one another, and each file's TWEAK_WRAPS line to the wraps it

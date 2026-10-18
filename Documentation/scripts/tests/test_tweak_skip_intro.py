@@ -117,12 +117,6 @@ void *sub_427ef0(void *state, uint32_t pc, void *memory) {
     else ret_();
     return memory;
 }
-/* wrap_test_spawn.c's other wraps and callees, for the build that links it. */
-void *__real_sub_77dd10(void *s, uint32_t pc, void *m) { (void)s; (void)pc; return m; }
-void *__real_sub_4436a0(void *s, uint32_t pc, void *m) { (void)s; (void)pc; return m; }
-void *__real_sub_426760(void *s, uint32_t pc, void *m) { (void)s; (void)pc; return m; }
-void *sub_41d490(void *s, uint32_t pc, void *m) { (void)s; (void)pc; return m; }
-
 void *__wrap_sub_434160(void *state, uint32_t pc, void *memory);
 
 int main(int argc, char **argv) {

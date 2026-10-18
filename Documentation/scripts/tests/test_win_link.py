@@ -322,8 +322,7 @@ def test_the_runners_hooks_and_wraps_are_read_from_their_files():
     hooks, wraps = WL.runner_links("stage")
     assert hooks == ["harness/replay/wrap_tick_probe.c", "harness/replay/wrap_test_spawn.c",
                      "harness/replay/wrap_input_replay.c", "harness/stage_goal_probe.c"]
-    assert wraps == ["sub_433ee0", "sub_77dd10", "sub_4436a0", "sub_426760", "sub_77e780",
-                     "sub_7a8948"]
+    assert wraps == ["sub_433ee0", "sub_77e780", "sub_7a8948"]
 
 
 def test_literal_refuses_a_name_the_file_does_not_assign(tmp_path):

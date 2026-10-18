@@ -115,8 +115,11 @@ HOOKS = ["harness/replay/wrap_tick_probe.c", "harness/replay/wrap_test_spawn.c",
          "harness/replay/wrap_input_replay.c", "harness/stage_goal_probe.c"]
 # sub_434160, GameModeHandler, is not here: the runtime wraps it in every build
 # (runtime/tweaks/skip-intro.c), and wrap_test_spawn.c's rule for it is the hook that wrap calls,
-# sa2_harness_gamemode_after.
-WRAPS = ["sub_433ee0", "sub_77dd10", "sub_4436a0", "sub_426760", "sub_77e780", "sub_7a8948"]
+# sa2_harness_gamemode_after. Nor are sub_77dd10, sub_4436a0 and sub_426760: the runtime wraps them
+# in every build too (runtime/tweaks/practice-stage.c, the practice-stage tweak), and the test
+# spawn's start and save blocks are those wraps, which ask wrap_test_spawn.c's
+# sa2_harness_test_spawn.
+WRAPS = ["sub_433ee0", "sub_77e780", "sub_7a8948"]
 # What a run records beside its own record. A run with observe=False sets none
 # of them: tools/s4/tick_replay.py's baseline for "the observers changed
 # nothing" is that run.

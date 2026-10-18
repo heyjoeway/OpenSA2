@@ -586,8 +586,21 @@ def test_the_skip_intro_hook_is_defined_by_the_test_spawn_and_called_by_the_twea
     assert "sub_434160" in dict(TS.files(RUNTIME))["tweaks/skip-intro.c"]
     assert "sub_434160" not in WL.runner_links("stage")[1]
     spawn = code(ROOT / "harness" / "replay" / "wrap_test_spawn.c")
-    assert HOOK_DEF.findall(spawn) == ["sa2_harness_gamemode_after"]
+    assert "sa2_harness_gamemode_after" in HOOK_DEF.findall(spawn)
     assert "sub_434160" not in WRAP_DEF.findall(spawn)
+
+
+def test_the_practice_stage_hook_is_defined_by_the_test_spawn_and_called_by_the_tweak():
+    """The test spawn's start (the data-DLL loader's init) and its save blocks are
+    runtime/tweaks/practice-stage.c's wraps, which ask wrap_test_spawn.c's
+    sa2_harness_test_spawn; the stage runner wraps none of the three. With skip-intro's hook, the
+    test spawn defines two hooks and no wrap."""
+    moved = {"sub_77dd10", "sub_4436a0", "sub_426760"}
+    assert moved <= set(dict(TS.files(RUNTIME))["tweaks/practice-stage.c"])
+    assert not moved & set(WL.runner_links("stage")[1])
+    spawn = code(ROOT / "harness" / "replay" / "wrap_test_spawn.c")
+    assert sorted(HOOK_DEF.findall(spawn)) == ["sa2_harness_gamemode_after", "sa2_harness_test_spawn"]
+    assert WRAP_DEF.findall(spawn) == []
 
 
 def hooks_tree(tmp_path: Path, stage_wraps: list[str], spawn: str, tweak: str) -> tuple[Path, dict]:

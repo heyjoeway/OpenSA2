@@ -486,6 +486,15 @@ def test_a_tweak_file_may_act_in_another_tweak_files_wrap(tmp_path):
     assert TS.wraps(rt, []) == ["sub_401000"]
 
 
+
+def test_no_2p_specials_and_ring_loss_cap_share_one_wrap_of_addrings():
+    """Both tweaks act on AddRings (0x0044CE10): no-2p-specials.c wraps it, ring-loss-cap.c acts in
+    that wrap, and the links pass -wrap for it once."""
+    assert ("tweaks/ring-loss-cap.c", "tweaks/no-2p-specials.c", "sub_44ce10") in TS.shares(RUNTIME)
+    assert TS.wraps(RUNTIME, []).count("sub_44ce10") == 1
+    assert LS.PRODUCTION_WRAPS.count("sub_44ce10") == 1
+    assert dict(TS.files(RUNTIME))["tweaks/no-2p-specials.c"] == ["sub_44ce10", "sub_46aa80"]
+
 # ------------------------------------------------------------------ the runners' hooks
 
 WRAP_DEF = re.compile(r"\b__wrap_(sub_[0-9a-f]+)\s*\([^;{]*\)\s*\{")

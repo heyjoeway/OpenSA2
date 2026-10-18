@@ -2,17 +2,18 @@
 (0x0044CE10) when DropRings (0x006C1AF0) calls it, and the 100-ring 1-up is not paid twice for the
 same hundred.
 
-The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c, as test_tweaks.py
-builds no-event-bars, and linked with a driver that stands in for the lifted AddRings and the
-runtime's peek, poke and register accessors. The stand-in `__real_sub_44ce10` does what the lifted
-body does (0x0044CE10-0x0044CEAB): the ring count of player EAX & 1 (the word at 0x0174B028 + 2p in
-the driver's guest memory) plus EDX, clamped to 0..999; when the new count's hundreds are higher
-than the old count's and TwoPlayerMode (the byte at 0x0174AFDE) is 0, AddLives: Life_Count plus the
-hundreds gained, clamped to 99; EBP kept (AddRings pushes and pops it), then the RET that pops the
-return address (ESP + 4). Each call puts its caller's return address at guest [ESP] first, as the
-lifted CALL does, and sets the registers DropRings has at its call: EDX = -rings and EBP =
-min(rings, 20), the rings it will scatter. Each call prints the ring count after it, EBP, how far
-ESP moved and the player's lives (4 at the start), so a case reads what the game sees after it.
+The tweak's file is built with the pinned zig beside runtime/sa2_tweaks.c and no-2p-specials.c,
+whose wrap of AddRings it acts in, as test_tweaks.py builds no-event-bars, and linked with a driver
+that stands in for the lifted AddRings and the runtime's peek, poke and register accessors. The
+stand-in `__real_sub_44ce10` does what the lifted body does (0x0044CE10-0x0044CEAB): the ring count
+of player EAX & 1 (the word at 0x0174B028 + 2p in the driver's guest memory) plus EDX, clamped to
+0..999; when the new count's hundreds are higher than the old count's and TwoPlayerMode (the byte
+at 0x0174AFDE) is 0, AddLives: Life_Count plus the hundreds gained, clamped to 99; EBP kept
+(AddRings pushes and pops it), then the RET that pops the return address (ESP + 4). Each call puts
+its caller's return address at guest [ESP] first, as the lifted CALL does, and sets the registers
+DropRings has at its call: EDX = -rings and EBP = min(rings, 20), the rings it will scatter. Each
+call prints the ring count after it, EBP, how far ESP moved and the player's lives (4 at the
+start), so a case reads what the game sees after it.
 """
 from __future__ import annotations
 
@@ -91,6 +92,7 @@ void *__real_sub_44ce10(void *state, uint32_t pc, void *memory) {
     gpr[SA2_ESP] += 4;                                         /* the RET */
     return memory;
 }
+void *__real_sub_46aa80(void *state, uint32_t pc, void *memory) { (void)state; (void)pc; return memory; }
 void *__wrap_sub_44ce10(void *state, uint32_t pc, void *memory);
 
 int main(int argc, char **argv) {
@@ -128,7 +130,8 @@ def exe(tmp_path_factory) -> str:
     (d / "driver.c").write_text(DRIVER)
     out = d / "rl"
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(RUNTIME / "tweaks" / "ring-loss-cap.c"), "-o", str(out)],
+                           str(RUNTIME / "tweaks" / "ring-loss-cap.c"),
+                           str(RUNTIME / "tweaks" / "no-2p-specials.c"), "-o", str(out)],
                           capture_output=True, text=True, env=zig_env(d))
     assert done.returncode == 0, done.stderr
     return str(out)

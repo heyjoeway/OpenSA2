@@ -86,6 +86,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `hide-radar` | Treasure hunts (Knuckles and Rouge) show no emerald radar and no "!" over a piece, and play no radar beep. You find the pieces by eye and with the hint monitors. Your save is not changed. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |
 | `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |
+| `no-2p-specials` | In 2-player battles, neither player earns special attacks, from collecting rings or after losing a life. 1-player games and save data are unchanged. |
 | `no-event-bars` | Removes the black bars that most in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. |
 | `no-loading-tips` | Hides Omochao's tips and the animated Now Loading ring while the game loads. Most loads show a black screen instead. A load over a picture already on screen, such as a stage's title card, keeps that picture. |
 | `no-powerup-music` | The speed shoes and invincibility item boxes no longer play their own tune, so the stage music keeps playing. The power-ups still work as before. |

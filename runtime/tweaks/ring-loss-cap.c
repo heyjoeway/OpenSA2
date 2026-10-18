@@ -3,7 +3,7 @@
  * can pick them all back up, though not for a second 100-ring extra life (runtime/sa2_tweaks.h: the
  * tweaks and their rules).
  *
- * TWEAK_WRAPS: sub_44ce10
+ * TWEAK_WRAPS: none (it acts in no-2p-specials.c's wrap of sub_44ce10)
  *
  * Where the rings go, read from the unpacked image. 0x006C1AF0 (DropRings, its player number the
  * stack argument, reached through the characters' function pointers) reads the player's ring count,
@@ -15,40 +15,47 @@
  * loop 0x006C1B50-0x006C1C75 scatters EBP ring objects, and the hit sound (0x8014) plays at
  * 0x006C1C7B. A player with 150 rings loses 150 and sees 20 of them scattered.
  *
- * The wrap reads the return address at guest [ESP] on entry (the lifted CALL has pushed it). When
- * the call came from DropRings (0x006C1B3F) and the change in EDX is below -20, it sets EDX to -20
- * and calls the lifted body: the player loses 20 rings, the 20 that EBP, untouched, still scatters.
- * A player with 20 rings or fewer loses them all, as without the tweak, and scatters them all; a
- * player with none dies, as without the tweak (DropRings does not call AddRings then). The cap is
- * the scatter count on purpose, so the loss and the scatter stay equal and EBP needs no change.
- * AddRings's 26 other call sites in the image (ring pickups among them) pass straight through after
- * the compare. Codes.lst's "Don't Lose Rings" patches .text (a NOP over the call at 0x006C1B3A and
- * a jump at 0x006C1B41), which OpenSA2 cannot apply because it never runs guest .text; this wrap
- * makes the change at the call's callee, with the loss capped rather than removed.
+ * AddRings has one wrap, no-2p-specials.c's (the tools refuse a second): it calls the function
+ * sa2_ring_loss_cap first when this tweak is on, with the way to the lifted body as `real` (through
+ * no-2p-specials' own AddRings half, which only calls the body unless that tweak is on too).
+ *
+ * The function reads the return address at guest [ESP] on entry (the lifted CALL has pushed it).
+ * When the call came from DropRings (0x006C1B3F) and the change in EDX is below -20, it sets EDX to
+ * -20 and calls the lifted body: the player loses 20 rings, the 20 that EBP, untouched, still
+ * scatters. A player with 20 rings or fewer loses them all, as without the tweak, and scatters them
+ * all; a player with none dies, as without the tweak (DropRings does not call AddRings then). The
+ * cap is the scatter count on purpose, so the loss and the scatter stay equal and EBP needs no
+ * change. AddRings's 26 other call sites in the image (ring pickups among them) pass straight
+ * through after the compare. Codes.lst's "Don't Lose Rings" patches .text (a NOP over the call at
+ * 0x006C1B3A and a jump at 0x006C1B41), which OpenSA2 cannot apply because it never runs guest
+ * .text; this tweak makes the change at the call's callee, with the loss capped rather than
+ * removed.
  *
  * The 100-ring 1-up is given once per hundred, as without the tweak. AddRings itself gives it: from
  * 0x0044CE62 to 0x0044CE93 it compares the old count's hundreds with the new count's, and when the
- * new ones are higher and TwoPlayerMode (the byte at 0x0174AFDE) is 0 it calls 0x0044CB10 (AddLives:
- * the 1-up jingle 0x1008, Life_Count at 0x0174B024 + 2 * player plus BX, clamped to 99, and the
- * HUD's copy) at 0x0044CEA6 with BX = the hundreds gained. Nothing records a hundred already paid;
- * without the tweak none can be paid twice, because a hit takes every ring and the count must climb
- * from 0 again. With the cap, a hit at 100 leaves 80 and picking the 20 back up would cross 100
- * again, a life each time, up to 99, and the save writer copies Life_Count into the save (0x004438A3).
- * So the wrap keeps g_ring_loss_paid[player], the highest hundred a capped hit has dropped the count
- * from (old count / 100 at that hit, the higher of it and the mark kept). On a call from any other
- * site, in a 1P game, when the count would rise into hundreds at or below that mark, the wrap
- * rewrites the call so AddRings sees only the hundreds not yet paid: with `award` the new count's
- * hundreds less the higher of the old count's and the mark, it writes new - 100 * award into the
- * ring count and sets EDX to 100 * award before calling the lifted body, which then stores the same
- * new count and HUD value it would have and calls AddLives for `award` hundreds, or not at all when
- * that is 0 (no jingle, no life). On the 1P path nothing after 0x0044CEAB reads the old count
- * (its copies at [esp+0x20] and [esp+0x24] are dead once AddRings returns), and a held-back call
- * returns the registers AddRings' path without a 1-up returns; the 2P tail at 0x0044CECB, which
- * reads the old count, is not taken in 1P, and the wrap leaves 2P calls alone. The mark goes back to 0 when an AddRings call finds the
- * count at 0, which is where a hit that takes every ring, a death and a stage's start leave it, so a
- * player back at 0 earns every hundred again, as without the tweak.
+ * new ones are higher and TwoPlayerMode (the byte at 0x0174AFDE) is 0 it calls 0x0044CB10
+ * (AddLives: the 1-up jingle 0x1008, Life_Count at 0x0174B024 + 2 * player plus BX, clamped to 99,
+ * and the HUD's copy) at 0x0044CEA6 with BX = the hundreds gained. Nothing records a hundred
+ * already paid; without the tweak none can be paid twice, because a hit takes every ring and the
+ * count must climb from 0 again. With the cap, a hit at 100 leaves 80 and picking the 20 back up
+ * would cross 100 again, a life each time, up to 99, and the save writer copies Life_Count into the
+ * save (0x004438A3). So the function keeps g_ring_loss_paid[player], the highest hundred a capped
+ * hit has dropped the count from (old count / 100 at that hit, the higher of it and the mark kept).
+ * On a call from any other site, in a 1P game, when the count would rise into hundreds at or below
+ * that mark, the function rewrites the call so AddRings sees only the hundreds not yet paid: with
+ * `award` the new count's hundreds less the higher of the old count's and the mark, it writes new -
+ * 100 * award into the ring count and sets EDX to 100 * award before calling the lifted body, which
+ * then stores the same new count and HUD value it would have and calls AddLives for `award`
+ * hundreds, or not at all when that is 0 (no jingle, no life). On the 1P path nothing after
+ * 0x0044CEAB reads the old count (its copies at [esp+0x20] and [esp+0x24] are dead once AddRings
+ * returns), and a held-back call returns the registers AddRings' path without a 1-up returns; the
+ * 2P tail at 0x0044CECB, which reads the old count, is not taken in 1P, and the function leaves 2P
+ * calls alone. The mark goes back to 0 when an AddRings call finds the count at 0, which is where a
+ * hit that takes every ring, a death and a stage's start leave it, so a player back at 0 earns
+ * every hundred again, as without the tweak.
  *
- * Off is the lifted code alone: the wrap tests its bit first and only calls __real_sub_44ce10.
+ * Off is the lifted code alone: unless this tweak is on, the wrap does not call this file, and the
+ * function's own first test, sa2_tweak_on, calls `real` and returns.
  *
  * Each of the first 16 hits it caps or leaves alone is said in a line of its own, "sa2 tweaks: ring
  * loss capped at 20: player 0 lost 20 of 150 rings", then one line saying later hits are not
@@ -60,7 +67,7 @@
  * Risks. The player keeps more rings, so stage scores, ranks and the rings a stage gives the Chao
  * are higher than an unassisted run's, and the game saves its results as usual; the Android
  * description says so. Lives are not: the 1-ups stay one per hundred until the count is back at 0.
- * The wrap writes no save data itself; the only guest write is the ring count on a held-back 1-up,
+ * The tweak writes no save data itself; the only guest write is the ring count on a held-back 1-up,
  * which AddRings overwrites with the same new count it stores without the tweak. A hit at 0 rings
  * (a death, or nothing for a mech) is unchanged, and a ring pickup only loses a 1-up it would have
  * paid a second time; a mech's hit with rings is capped as any other. A count set to a new value
@@ -85,8 +92,6 @@ static unsigned g_ring_loss_hits, g_ring_loss_held;
 static int g_ring_loss_stack_said, g_ring_loss_rings_said, g_ring_loss_write_said;
 static int g_ring_loss_mode_said;
 static int g_ring_loss_paid[2];   /* the highest hundred a capped hit dropped the count from */
-
-void *__real_sub_44ce10(void *state, uint32_t pc, void *memory);
 
 /* A call from a site other than DropRings', in a 1P game, that would pay a hundred's 1-up a second
  * time: the ring count and EDX are rewritten so AddRings pays only the hundreds not yet paid. */
@@ -128,9 +133,10 @@ static void ring_loss_hold_one_ups(void *state, uint32_t player, int old) {
                 "are not\n", RING_LOSS_CAP, RING_LOSS_LISTED);
 }
 
-__attribute__((used, retain))
-void *__wrap_sub_44ce10(void *state, uint32_t pc, void *memory) {
-    if (!sa2_tweak_on(SA2_TWEAK_RING_LOSS_CAP)) return __real_sub_44ce10(state, pc, memory);
+/* Called by no-2p-specials.c's __wrap_sub_44ce10 when this tweak is on. */
+void *sa2_ring_loss_cap(void *state, uint32_t pc, void *memory,
+                        void *(*real)(void *, uint32_t, void *)) {
+    if (!sa2_tweak_on(SA2_TWEAK_RING_LOSS_CAP)) return real(state, pc, memory);
     const uint32_t esp = sa2_rt_get_gpr(state, SA2_ESP);
     uint32_t site = 0;
     if (sa2_peek(esp, 4, &site) != SA2_OK) {
@@ -138,7 +144,7 @@ void *__wrap_sub_44ce10(void *state, uint32_t pc, void *memory) {
             fprintf(stderr, "sa2 tweaks: ring loss capped at %d: the guest stack at 0x%08X does not "
                     "read, so the caller is unknown and the ring change is left alone\n",
                     RING_LOSS_CAP, esp);
-        return __real_sub_44ce10(state, pc, memory);
+        return real(state, pc, memory);
     }
     const uint32_t player = sa2_rt_get_gpr(state, SA2_EAX) & 1u;
     int16_t old = 0;
@@ -147,12 +153,12 @@ void *__wrap_sub_44ce10(void *state, uint32_t pc, void *memory) {
             fprintf(stderr, "sa2 tweaks: ring loss capped at %d: the ring count at 0x%08X does not "
                     "read, so the ring change is left alone\n", RING_LOSS_CAP,
                     RING_LOSS_RINGS + 2 * player);
-        return __real_sub_44ce10(state, pc, memory);
+        return real(state, pc, memory);
     }
     if (old == 0) g_ring_loss_paid[player] = 0;
     if (site != RING_LOSS_DROP_RINGS_RET) {
         ring_loss_hold_one_ups(state, player, old);
-        return __real_sub_44ce10(state, pc, memory);
+        return real(state, pc, memory);
     }
     const int32_t change = (int32_t)sa2_rt_get_gpr(state, SA2_EDX);
     const int32_t lost = change < -RING_LOSS_CAP ? RING_LOSS_CAP : -change;
@@ -168,5 +174,5 @@ void *__wrap_sub_44ce10(void *state, uint32_t pc, void *memory) {
     else if (hit == RING_LOSS_LISTED)
         fprintf(stderr, "sa2 tweaks: ring loss capped at %d: %d hits listed; later hits are not\n",
                 RING_LOSS_CAP, RING_LOSS_LISTED);
-    return __real_sub_44ce10(state, pc, memory);
+    return real(state, pc, memory);
 }

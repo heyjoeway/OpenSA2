@@ -10,10 +10,15 @@ Present did on the Thor, while the main thread starts the watch, waits, and send
 
 Held here: the table's text, line for line; the watch's one table on stderr after
 SA2_STALL_DUMP_MS without a frame, naming the writer's host thread, the kernel's sleep in pipe_write
-and the write it is inside; no table and no thread without SA2_STALL_DUMP_MS, and a refusal line
-for a value that is not a count; the nudge taken by the main thread and passed on to the token's
-holder, whose write SA_RESTART restarts rather than cuts short; and SA2_GUEST_HOST_CPUS's lines,
-said only after the call and only when the thread does not run where it was asked.
+and the write it is inside; one table a stall however long it lasts, and one more for a stall after
+a frame; the line that says the game waits for the player, and that a paused player or an app in
+the background looks like this, when the writer is in the recorder's write of the stream FIFO
+(SA2_REC_TRACE) or its read of the pace pipe (SA2_REC_PACE_FD), and only then (the Android app's
+backgrounding printed a table each time, and a second after 30 s, with nothing to say it was the
+player's pause); no table and no thread without SA2_STALL_DUMP_MS, and a refusal line for a value
+that is not a count; the nudge taken by the main thread and passed on to the token's holder, whose
+write SA_RESTART restarts rather than cuts short; and SA2_GUEST_HOST_CPUS's lines, said only after
+the call and only when the thread does not run where it was asked.
 
 Linux only: the watch's host columns are /proc's.
 """
@@ -32,7 +37,7 @@ ZIG = ROOT / "private" / "predecessor-tools" / "zig" / "zig-x86_64-linux-0.15.2"
 RUNTIME = ROOT / "runtime"
 PROBE = ROOT / "harness" / "stall_watch_probe.c"
 CC = ["-target", "x86_64-linux-musl", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(RUNTIME)]
-SETTINGS = ("SA2_STALL_DUMP_MS", "SA2_GUEST_HOST_CPUS", "SA2_THREADS_BREAK")
+SETTINGS = ("SA2_STALL_DUMP_MS", "SA2_GUEST_HOST_CPUS", "SA2_THREADS_BREAK", "SA2_REC_TRACE", "SA2_REC_PACE_FD")
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the watch reads Linux's /proc")
 
@@ -74,11 +79,68 @@ sa2 stall: (the table was cut short)
 """
 
 
+PLAYER_LINE = ("sa2 stall: guest thread {thread} (host tid {tid}) is in the recorder's {wait}: the game waits for the "
+               "player to take its frames. A player paused or in the background (an Android app out of view, a "
+               "window pause-unfocused holds) looks like this, and frames go on when it reads again; a player that "
+               "stopped reading looks the same")
+
+
 def test_the_table_names_each_live_row_its_wait_counts_the_finished_and_names_the_file_read(probe):
     whole, rest = probe("format").stdout.split("--- cut to 420 bytes\n")
     assert whole == TABLE
-    cut, size = rest.split("--- ")
+    cut, size, player = rest.split("--- ")
     assert cut == CUT and size == f"{len(CUT)} bytes\n"
+    first, others = TABLE.split("\n", 1)
+    line = PLAYER_LINE.format(thread=0, tid=4242, wait="write of the stream FIFO")
+    assert player == f"waiting for the player\n{first}\n{line}\n{others}"
+
+
+def tables(stderr: str) -> list[str]:
+    return [line for line in stderr.splitlines() if line.startswith("sa2 stall: no frame for ")]
+
+
+@pytest.mark.parametrize("kind, wait, call", [
+    ("fifo", "write of the stream FIFO", " write("),
+    ("pace", "read of the pace pipe", " read("),
+])
+def test_a_writer_in_the_recorders_wait_on_the_player_is_said_to_wait_for_the_player(probe, tmp_path, kind, wait,
+                                                                                       call):
+    """The recorder's write of the stream FIFO (SA2_REC_TRACE's file) or its read of the pace pipe
+    (SA2_REC_PACE_FD's descriptor), where a paused player leaves the game: the table's second line
+    names the thread and the call, and says a paused player or an app in the background looks so."""
+    p = probe("player", kind, "1000", str(tmp_path), SA2_STALL_DUMP_MS="300")
+    got = json.loads(p.stdout)
+    lines = p.stderr.splitlines()
+    assert len(tables(p.stderr)) == 1, p.stderr
+    at = lines.index(tables(p.stderr)[0])
+    assert lines[at + 1] == PLAYER_LINE.format(thread=0, tid=got["writer_tid"], wait=wait)
+    [row] = [line for line in lines if line.startswith("sa2 stall:   0 ")]
+    assert call in row.split(" | ")[1], row
+    assert (got["wrote"], got["read"]) == ((100, -2) if kind == "fifo" else (-2, 1))
+
+
+def test_a_stall_elsewhere_is_not_said_to_wait_for_the_player(probe, tmp_path):
+    """A write into another pipe, with both settings naming others: no such line."""
+    other = tmp_path / "other.fifo"
+    os.mkfifo(other)
+    p = probe("watch", "1000", SA2_STALL_DUMP_MS="300", SA2_REC_TRACE=str(other), SA2_REC_PACE_FD="99")
+    assert len(tables(p.stderr)) == 1 and "waits for the player" not in p.stderr, p.stderr
+
+
+def test_one_table_a_stall_and_one_more_after_a_frame(probe):
+    p = probe("episodes", "1200", SA2_STALL_DUMP_MS="200")
+    got = json.loads(p.stdout)
+    found = tables(p.stderr)
+    assert len(found) == 2, p.stderr
+    assert " after frame 1 " in found[0] and " after frame 2 " in found[1]
+    assert got["wrote"] == 100 and got["wrote2"] == 100
+
+
+def test_a_stall_past_30_s_still_has_one_table(probe):
+    """The watch once wrote a second table at 30 s (SA2_STALL_LATER_S): an app in the background
+    for a minute got two. One table a stall, however long."""
+    p = probe("watch", "31000", SA2_STALL_DUMP_MS="500")
+    assert len(tables(p.stderr)) == 1, p.stderr
 
 
 def test_the_watch_says_once_where_the_token_holder_sleeps_and_the_nudge_restarts_its_write(probe):

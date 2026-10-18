@@ -6,11 +6,14 @@
  *
  *   zig cc -target x86_64-linux-musl -O2 -I runtime harness/stall_watch_probe.c \
  *          runtime/sa2_stall.c runtime/sa2_threads.c runtime/sa2_trap.c -o probe
- *   ./probe format       -> the table of a fixed snapshot on stdout, then the same cut to 420 bytes
+ *   ./probe format       -> the table of a fixed snapshot on stdout, then the same cut to 420 bytes,
+ *                           then the snapshot with its writer waiting for the player
  *   ./probe watch        -> one JSON object on stdout; the watch's table on stderr
+ *   ./probe player fifo|pace WAIT_MS DIR  -> the same, the writer in the recorder's wait on the player
+ *   ./probe episodes WAIT_MS              -> the same, over two stalls with a frame between them
  *
  * format  sa2_stall_format over two live rows, a finished one and a file read in progress, whole
- *         and cut short.
+ *         and cut short; then with the running row in the recorder's write of the stream FIFO.
  * watch   SA2_STALL_DUMP_MS from the environment. A host thread takes guest thread 0's row
  *         (sa2_sched_init), crosses one frame boundary, and then writes 100 bytes into a pipe
  *         already full, so it sleeps in pipe_write holding the guest token, as the recorder's
@@ -20,6 +23,14 @@
  *         the pipe. The JSON: the nudges the runtime took (2: the main thread's and the one it
  *         passed on), the writer's host tid, and what its write returned (100: restarted by
  *         SA_RESTART, not cut short by EINTR).
+ * player  The recorder's two waits on the player, as a paused player leaves the game in them: with
+ *         `fifo`, the writer's full pipe is a FIFO made at DIR/game.fifo and named by SA2_REC_TRACE;
+ *         with `pace`, the writer reads the read end of an empty pipe whose descriptor
+ *         SA2_REC_PACE_FD names. The main thread sets the setting, starts the watch, waits WAIT_MS
+ *         and lets the writer go (drains the FIFO, or writes the pace byte).
+ * episodes Two stalls: the writer sleeps in its write, the main thread drains the pipe after
+ *         WAIT_MS and fills it again, the writer crosses a second frame boundary and sleeps in a
+ *         second write, drained after WAIT_MS more. The watch's tables: one a stall.
  *
  * Documentation/scripts/tests/test_stall_watch.py builds it and holds the text and the run. */
 #define _GNU_SOURCE
@@ -31,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -123,6 +135,12 @@ static int format_case(void) {
     const size_t n = sa2_stall_format(&s, out, 420);
     fputs(out, stdout);
     printf("--- %zu bytes\n", n);
+    /* The running row in the recorder's write of the stream FIFO: the line after the first. */
+    a->player_wait = "write of the stream FIFO";
+    s.player_row = 0;
+    puts("--- waiting for the player");
+    sa2_stall_format(&s, out, sizeof out);
+    fputs(out, stdout);
     return 0;
 }
 
@@ -185,9 +203,130 @@ static int watch_case(int wait_ms) {
     return 0;
 }
 
+/* ----------------------------------------------------------------- player */
+
+static int g_pace[2];
+static volatile long g_read = -2;
+
+static void *pace_reader(void *arg) {
+    (void)arg;
+    g_writer_tid = (uint32_t)syscall(SYS_gettid);
+    sa2_sched_init();
+    sa2_sched_frame_boundary();
+    __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
+    char b;
+    g_read = (long)read(g_pace[0], &b, 1);     /* the pace pipe is empty: it sleeps */
+    return NULL;
+}
+
+/* A pipe (or the FIFO at `fifo`, opened both ways) whose write end is full: g_pipe. */
+static int full_pipe(const char *fifo) {
+    if (fifo) {
+        unlink(fifo);
+        if (mkfifo(fifo, 0600)) { perror("mkfifo"); return -1; }
+        g_pipe[0] = open(fifo, O_RDONLY | O_NONBLOCK);
+        g_pipe[1] = open(fifo, O_WRONLY);
+        if (g_pipe[0] < 0 || g_pipe[1] < 0) { perror("open fifo"); return -1; }
+        fcntl(g_pipe[0], F_SETFL, 0);
+    } else if (pipe(g_pipe)) {
+        perror("pipe");
+        return -1;
+    }
+    const int size = fcntl(g_pipe[1], F_SETPIPE_SZ, 4096);
+    char fill[65536];
+    memset(fill, 'f', sizeof fill);
+    fcntl(g_pipe[1], F_SETFL, O_NONBLOCK);
+    while (write(g_pipe[1], fill, sizeof fill) > 0) {}
+    fcntl(g_pipe[1], F_SETFL, 0);
+    return size;
+}
+
+static void drain(volatile long *until_not) {
+    char sink[65536];
+    fcntl(g_pipe[0], F_SETFL, O_NONBLOCK);
+    for (int i = 0; i < 1000 && *until_not == -2; i++) {
+        while (read(g_pipe[0], sink, sizeof sink) > 0) {}
+        usleep(1000);
+    }
+    while (read(g_pipe[0], sink, sizeof sink) > 0) {}
+    fcntl(g_pipe[0], F_SETFL, 0);
+}
+
+static int player_case(const char *kind, int wait_ms, const char *dir) {
+    char path[512], fd[16];
+    pthread_t t;
+    if (!strcmp(kind, "fifo")) {
+        snprintf(path, sizeof path, "%s/game.fifo", dir);
+        if (full_pipe(path) < 0) return 2;
+        setenv("SA2_REC_TRACE", path, 1);
+        sa2_stall_start();
+        pthread_create(&t, NULL, writer, NULL);
+    } else if (!strcmp(kind, "pace")) {
+        if (pipe(g_pace)) { perror("pipe"); return 2; }
+        snprintf(fd, sizeof fd, "%d", g_pace[0]);
+        setenv("SA2_REC_PACE_FD", fd, 1);
+        sa2_stall_start();
+        pthread_create(&t, NULL, pace_reader, NULL);
+    } else {
+        return 2;
+    }
+    while (!__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE)) usleep(1000);
+    struct timespec w = {wait_ms / 1000, (long)(wait_ms % 1000) * 1000000L};
+    nanosleep(&w, NULL);
+    if (!strcmp(kind, "fifo")) drain(&g_wrote);
+    else if (write(g_pace[1], "p", 1) != 1) return 2;
+    pthread_join(t, NULL);
+    printf("{\"writer_tid\": %u, \"wrote\": %ld, \"read\": %ld}\n", g_writer_tid, g_wrote, g_read);
+    return 0;
+}
+
+/* --------------------------------------------------------------- episodes */
+
+static volatile int g_again;
+static volatile long g_wrote2 = -2;
+
+static void *two_stalls(void *arg) {
+    (void)arg;
+    g_writer_tid = (uint32_t)syscall(SYS_gettid);
+    sa2_sched_init();
+    sa2_sched_frame_boundary();
+    __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
+    char buf[100];
+    memset(buf, 'w', sizeof buf);
+    g_wrote = (long)write(g_pipe[1], buf, sizeof buf);      /* the first stall */
+    while (!__atomic_load_n(&g_again, __ATOMIC_ACQUIRE)) usleep(1000);
+    sa2_sched_frame_boundary();                             /* frames go on: the stall ends */
+    g_wrote2 = (long)write(g_pipe[1], buf, sizeof buf);     /* the second stall */
+    return NULL;
+}
+
+static int episodes_case(int wait_ms) {
+    if (full_pipe(NULL) < 0) return 2;
+    sa2_stall_start();
+    pthread_t t;
+    pthread_create(&t, NULL, two_stalls, NULL);
+    while (!__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE)) usleep(1000);
+    struct timespec w = {wait_ms / 1000, (long)(wait_ms % 1000) * 1000000L};
+    nanosleep(&w, NULL);
+    drain(&g_wrote);
+    char fill[65536];                                        /* full again for the second write */
+    memset(fill, 'f', sizeof fill);
+    fcntl(g_pipe[1], F_SETFL, O_NONBLOCK);
+    while (write(g_pipe[1], fill, sizeof fill) > 0) {}
+    fcntl(g_pipe[1], F_SETFL, 0);
+    __atomic_store_n(&g_again, 1, __ATOMIC_RELEASE);
+    nanosleep(&w, NULL);
+    drain(&g_wrote2);
+    pthread_join(t, NULL);
+    printf("{\"writer_tid\": %u, \"wrote\": %ld, \"wrote2\": %ld}\n", g_writer_tid, g_wrote, g_wrote2);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc >= 2 && !strcmp(argv[1], "format")) return format_case();
     if (argc >= 2 && !strcmp(argv[1], "watch")) return watch_case(argc >= 3 ? atoi(argv[2]) : 1000);
-    fprintf(stderr, "usage: %s format | watch [WAIT_MS]\n", argv[0]);
+    if (argc == 5 && !strcmp(argv[1], "player")) return player_case(argv[2], atoi(argv[3]), argv[4]);
+    if (argc == 3 && !strcmp(argv[1], "episodes")) return episodes_case(atoi(argv[2]));
+    fprintf(stderr, "usage: %s format | watch [WAIT_MS] | player fifo|pace WAIT_MS DIR | episodes WAIT_MS\n", argv[0]);
     return 2;
 }

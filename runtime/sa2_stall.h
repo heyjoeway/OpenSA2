@@ -3,10 +3,19 @@
  * Subtitle: SA2_STALL_DUMP_MS=<ms> (a live session's play sets it: host/launch, host/android)
  * starts one host thread at the process's start that is not a guest thread, never takes the guest
  * token and takes no signal. From the first frame on, once frames (sa2_sched_frames) have not
- * moved for that long it writes the scheduler's table to stderr, once, and once more if the stall
- * reaches SA2_STALL_LATER_S seconds; a frame ends the stall. Unset, 0 or not a number: no thread.
- * Linux and Android only (the table's host columns are /proc's); elsewhere sa2_stall_start says
- * nothing and starts nothing.
+ * moved for that long it writes the scheduler's table to stderr, once for the stall however long
+ * it lasts; a frame ends the stall, and the next stall gets its own table. Unset, 0 or not a
+ * number: no thread. Linux and Android only (the table's host columns are /proc's); elsewhere
+ * sa2_stall_start says nothing and starts nothing.
+ *
+ * A stall is not always a fault. While the player takes no frames (it is paused, as Android pauses
+ * an app out of view or pause-unfocused holds a window out of focus, or it has stopped reading),
+ * the relay stops handing frames on, and the game waits in its recorder (host/sa2_present_rec.c)
+ * for it to read again: in its write of the stream FIFO (SA2_REC_TRACE) or its read of the pace
+ * pipe (SA2_REC_PACE_FD). The game cannot see the player's window, so it cannot tell a pause from
+ * a player that stopped; when a guest thread is in one of those two calls, the table says, on the
+ * line after its first, that the game waits for the player and that a paused player, or an app in
+ * the background, looks like this.
  *
  * The table (every line begins "sa2 stall: "): the frame count and the virtual clock, the guest
  * thread the token names (sa2_threads.c g_current), whether the guest lock is held (a guest thread
@@ -32,7 +41,6 @@
 #include <stdint.h>
 
 #define SA2_STALL_ROWS 64          /* rows the table shows; the scheduler has fewer */
-#define SA2_STALL_LATER_S 30       /* the second table, if the stall lasts */
 
 typedef struct {
     int         index;
@@ -53,6 +61,9 @@ typedef struct {
     char        call[96];          /* "write(5 game.fifo, 1120 bytes)", "" when in none it names */
     char        cpus[48];
     int         last_cpu;
+    /* The recorder's wait on the player that the host thread is in (above): "write of the stream
+     * FIFO" or "read of the pace pipe", filled by the watch; NULL for none. */
+    const char *player_wait;
 } sa2_stall_row;
 
 typedef struct {
@@ -63,6 +74,9 @@ typedef struct {
     uint64_t    nudges;
     int         rows;
     sa2_stall_row row[SA2_STALL_ROWS];
+    /* The row whose thread waits for the player (row[].player_wait), the token's holder first;
+     * -1 for none. */
+    int         player_row;
     /* The file layer's host call in progress (sa2_vfs_io_now). */
     int         io_active, io_write;
     uint32_t    io_tid;

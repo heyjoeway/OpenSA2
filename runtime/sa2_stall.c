@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -54,6 +55,16 @@ size_t sa2_stall_format(const sa2_stall_snapshot *s, char *out, size_t cap) {
         "names %s; the guest lock is %s; %" PRIu64 " nudges taken\n",
         s->no_frame_s, s->frames, s->virtual_us / 1000000u, s->virtual_us % 1000000u, cur,
         s->lock_held > 0 ? "held" : s->lock_held == 0 ? "free" : "not looked at", s->nudges);
+    if (s->player_row >= 0 && s->player_row < s->rows && s->player_row < SA2_STALL_ROWS &&
+        s->row[s->player_row].player_wait) {
+        const sa2_stall_row *w = &s->row[s->player_row];
+        put(out, cap, &len, &cut,
+            "sa2 stall: guest thread %d (host tid %u) is in the recorder's %s: the game waits for the player "
+            "to take its frames. A player paused or in the background (an Android app out of view, a window "
+            "pause-unfocused holds) looks like this, and frames go on when it reads again; a player that "
+            "stopped reading looks the same\n",
+            w->index, w->host_tid, w->player_wait);
+    }
     put(out, cap, &len, &cut,
         "sa2 stall: row host_tid start      state    susp wait             object     deadline_us where"
         "                last_caller calls blocks wakes | host: state wchan call cpus (last)\n");
@@ -143,6 +154,22 @@ static void fd_name(long fd, char *out, size_t n) {
 #define NR_FUTEX (-102)
 #endif
 
+/* The recorder's two waits on the player (sa2_stall.h): its read of the pace pipe, descriptor
+ * SA2_REC_PACE_FD, and its write of the stream FIFO, the file SA2_REC_TRACE names (the same file
+ * as the descriptor: device and inode). Read at the watch's start; -1 and NULL when unset. */
+static int g_pace_fd = -1;
+static const char *g_stream_path;
+
+static const char *player_wait(long nr, unsigned long long fd) {
+    if (nr == NR_READ && g_pace_fd >= 0 && fd == (unsigned long long)g_pace_fd) return "read of the pace pipe";
+    if (nr == NR_WRITE && g_stream_path && fd <= 0x7fffffffull) {
+        struct stat a, b;
+        if (fstat((int)fd, &a) == 0 && stat(g_stream_path, &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino)
+            return "write of the stream FIFO";
+    }
+    return NULL;
+}
+
 static void kernel_view(sa2_stall_row *r) {
     r->kstate = '?';
     r->last_cpu = -1;
@@ -190,6 +217,7 @@ static void kernel_view(sa2_stall_row *r) {
                 fd_name((long)a1, name, sizeof name);
                 snprintf(r->call, sizeof r->call, "%s(%llu %s, %llu bytes)", nr == NR_WRITE ? "write" : "read", a1,
                          name, a3);
+                r->player_wait = player_wait(nr, a1);
             } else if (nr == NR_FUTEX) {
                 snprintf(r->call, sizeof r->call, "futex");       /* a guest thread's wait on the token */
             } else {
@@ -212,7 +240,11 @@ static void dump(double no_frame_s) {
     s->frames = sa2_sched_frames();
     s->virtual_us = sa2_virtual_us();
     s->rows = sa2_sched_stall_rows(s->row, SA2_STALL_ROWS, &s->current, &s->lock_held, &s->nudges);
-    for (int i = 0; i < s->rows; i++) kernel_view(&s->row[i]);
+    s->player_row = -1;
+    for (int i = 0; i < s->rows; i++) {
+        kernel_view(&s->row[i]);
+        if (s->row[i].player_wait && (s->player_row < 0 || s->row[i].index == s->current)) s->player_row = i;
+    }
     int64_t since_ns = 0;
     s->io_active = sa2_vfs_io_now(&s->io_write, &s->io_tid, &s->io_path, &s->io_bytes, &since_ns);
     if (s->io_active) {
@@ -239,7 +271,7 @@ static void *watch(void *arg) {
     pthread_sigmask(SIG_BLOCK, &all, NULL);
     uint64_t last = sa2_sched_frames();
     double since = mono_s();
-    int dumps = 0;
+    int dumped = 0;                    /* this stall's table is out: none more until a frame */
     for (;;) {
         const struct timespec tick = {0, 250 * 1000 * 1000};
         nanosleep(&tick, NULL);
@@ -248,14 +280,14 @@ static void *watch(void *arg) {
         if (f != last) {
             last = f;
             since = now;
-            dumps = 0;
+            dumped = 0;
             continue;
         }
         if (!f) continue;              /* armed at the first frame */
         const double quiet = now - since;
-        if ((dumps == 0 && quiet >= g_after_s) || (dumps == 1 && quiet >= SA2_STALL_LATER_S && quiet >= 2 * g_after_s)) {
+        if (!dumped && quiet >= g_after_s) {
             dump(quiet);
-            dumps++;
+            dumped = 1;
         }
     }
     return NULL;
@@ -276,6 +308,15 @@ void sa2_stall_start(void) {
         return;
     }
     g_after_s = (double)ms / 1000.0;
+    const char *pf = getenv("SA2_REC_PACE_FD");       /* decimal digits only, as the recorder reads it */
+    if (pf && *pf) {
+        int n = 0;
+        const char *p = pf;
+        while (*p >= '0' && *p <= '9' && n <= 65535) n = n * 10 + (*p++ - '0');
+        if (!*p && n <= 65535) g_pace_fd = n;
+    }
+    const char *trace = getenv("SA2_REC_TRACE");
+    if (trace && *trace) g_stream_path = trace;
     pthread_attr_t at;
     pthread_attr_init(&at);
     pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);

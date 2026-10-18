@@ -9,6 +9,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -43,6 +44,7 @@ public class Sa2SettingsActivity extends Activity {
     private Button[] mOrientation, mAspect;
     private Switch mWidescreen, mHud;
     private Switch[] mTweaks;                  // one for each GameSettings.TWEAKS line, in its order
+    private Button mTweaksOff;                 // every tweak off at once (GameSettings.tweaksOff)
     private Button mResolution, mLayoutLandscape, mLayoutPortrait;
     private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel, mPlaceLabel, mPlaceNote;
     private SeekBar mSize, mOpacity, mPlace;
@@ -303,6 +305,16 @@ public class Sa2SettingsActivity extends Activity {
             if (i == 0) ((LinearLayout.LayoutParams) mTweaks[i].getLayoutParams()).topMargin = 0;
             note(tw, tweak.description);
         }
+        // Vanilla: every tweak off at once (the desktop's is vanilla-profile, runtime/sa2_tweaks.h).
+        mTweaksOff = action(tw, "Turn every tweak off", v -> new AlertDialog.Builder(this)
+                .setMessage("Turn every tweak off, so the game plays as it was made?")
+                .setPositiveButton("Turn off", (dlg, w) -> {
+                    Log.i("sa2recomp", "sa2 host tweaks: vanilla: every tweak turned off on the Tweaks card (were "
+                          + mS.tweaksOff() + ")");
+                    save();
+                })
+                .setNegativeButton("Cancel", null)
+                .show());
 
         Button reset = Ui.button(this, "Reset all settings", v -> new AlertDialog.Builder(this)
                 .setMessage("Put every game setting back to its default?")
@@ -388,6 +400,7 @@ public class Sa2SettingsActivity extends Activity {
         mResolution.setEnabled(fixed || wide);
         mHud.setChecked(mS.hud43);
         for (int i = 0; i < mTweaks.length; i++) mTweaks[i].setChecked(mS.tweaksOn.contains(GameSettings.TWEAKS[i].name));
+        mTweaksOff.setEnabled(!mS.tweaksOn.isEmpty());
         int[] pic = mS.picture(mLong, mShort);
         mPictureNote.setText(pic == null
                 ? "The game keeps its own size (" + GameSettings.CONFIG_W + "x" + GameSettings.CONFIG_H + ")."

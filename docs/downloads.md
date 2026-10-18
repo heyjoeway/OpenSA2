@@ -44,7 +44,7 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 - **HUD at 4:3 positions** keeps the score, time, and rings near the middle of a wide picture. It is on by default.
 - **Touch controls** sets the size and opacity of the on-screen controls. At 0% opacity the controls are hidden but still work. **Move the controls** lets you drag each control to a new place, and **Change what the touch buttons do** changes the game button each one sends.
 - **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
-- **Tweaks** are optional changes to the game, each off by default. Turn on **Remove cutscene black bars** to remove the black bars that most in-engine cutscenes draw at the sides of a wide picture. See [Tweaks](#tweaks) for the cutscenes that keep their bars.
+- **Tweaks** are optional changes to the game, each off by default. Turn on **Remove cutscene black bars** to remove the black bars that most in-engine cutscenes draw at the sides of a wide picture. See [Tweaks](#tweaks) for the cutscenes that keep their bars. **Turn every tweak off** turns all of them off at once.
 
 **Reset all settings** restores the defaults.
 
@@ -107,6 +107,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `speedrun-timer` | Windows and Linux only. Sends the in-game timer and the stage state to timers on the same computer: a 64-byte UDP datagram to 127.0.0.1:16838 on each change, and LiveSplit Server commands to 127.0.0.1:16834 when LiveSplit is running (start, game time, and a split at each goal). It only reads the game's memory and never changes the game. Its messages are in the session's `launcher.log`. |
 | `swap-audio` | The left channel plays from the right speaker and the right channel from the left, for headphones worn the other way around. With `mono-audio` also on, there is nothing to swap. |
 | `tex-filter` | Sharper textures: 16x anisotropic filtering where the GPU supports it, and a slight mip bias, on textures that have mipmaps, which covers most of the 3D world. Most of the HUD and menus look the same. It has a small GPU cost. The default `sdl3-gpu` player applies it; the Linux launcher's `--host dxvk-native` player ignores it and says so. |
+| `vanilla-profile` | Windows and Linux only. Turns off every other tweak named with it, so the game plays as it was made, for example for a speedrun. Your list stays in `game.env`, and removing `vanilla-profile` turns the other tweaks back on. On Android, use **Turn every tweak off** in the **Tweaks** card instead. |
 | `walker-cannon-fix` | Fixes a crash when a Chao Walker that has the Mech's cannon upgrade fires its cannon. Only a cheat gives a Chao Walker that upgrade, so without one this tweak changes nothing. |
 
 With `no-event-bars` on, five in-engine cutscenes keep their bars: the opening one (event 361) and events 21, 205, 206, and 360. These scenes are framed for 4:3. The opening draws its title cards, flashes, backdrops, and logo glow over the middle 4:3 part of the picture only, so without the bars those effects would stop at a hard edge. SA2 Render Fix keeps the bars for the same five cutscenes for this reason. Movies also keep their bars, because the video itself is 4:3.

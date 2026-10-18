@@ -322,6 +322,14 @@ final class GameSettings {
         return String.join(",", on);
     }
 
+    /** Turns every tweak off (the Tweaks card's "Turn every tweak off", the Android form of the
+     * desktop's vanilla-profile) and returns the SA2_TWEAKS value that was on, "" for none. */
+    String tweaksOff() {
+        String was = tweaks();
+        tweaksOn.clear();
+        return was;
+    }
+
     private static String fraction(int percent) {
         return String.format(Locale.US, "%.2f", percent / 100.0);
     }

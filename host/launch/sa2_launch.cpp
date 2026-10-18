@@ -112,6 +112,9 @@
 // game is given, the record keeps it (`tweaks`), and the game's own line saying which tweaks are
 // on starts the session's game.log ("sa2 tweaks: ..."), the player's its player.err
 // ("sa2 host tweaks (player): ...").
+// With vanilla-profile among the names, the game, the player and the launcher's reader get
+// SA2_TWEAKS=vanilla-profile alone, every other tweak off, and game.env keeps its list
+// (host/launch/tweaks/vanilla-profile.cpp).
 //
 // --player-arg ARG (play only, repeatable) appends ARG to the player's command line: a
 // diagnostic, as the player's own --synthetic-keys with its logs and --max-frames, which drives a
@@ -190,6 +193,7 @@
 #include "sha256.h"
 #include "tweaks.h"
 #include "tweaks/speedrun-timer.h"
+#include "tweaks/vanilla-profile.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -1544,11 +1548,17 @@ int launch(int argc, char** argv) {
     // (runtime/sa2_tweaks.c): the launcher's own environment, whose SA2_ variables the game never
     // sees, is not asked. The launcher's line is printed whenever the value is set, its "ignored"
     // reason too.
-    const sa2tw::Reading launcher_tweaks = sa2tw::read(tweak_value.c_str(), sa2tw::off(nullptr, [&](const char* k) {
+    const char* const tweaks_off = sa2tw::off(nullptr, [&](const char* k) {
         const std::string* v = genv.find(k);
         return v ? v->c_str() : nullptr;
-    }), "launcher");
-    sa2tw::g_on = launcher_tweaks.on;
+    });
+    std::string said;
+    const sa2tw::Reading launcher_tweaks = sa2tw::launcher_reading(tweak_value, said, tweaks_off);
+    if (!said.empty()) {   // vanilla-profile: every other tweak off, the launcher's own too
+        genv.set("SA2_TWEAKS", tweak_value);
+        tweaks += "; given as SA2_TWEAKS=" + tweak_value + " (vanilla-profile)";
+        say("%s", said);
+    }
     if (!launcher_tweaks.line.empty()) say("%s", launcher_tweaks.line);
     // A console made for this launch alone (Windows, a double-click) goes before the game's window
     // comes; a shell's, or redirected output, stays (sa2l::release_own_console).

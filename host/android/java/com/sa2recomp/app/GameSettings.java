@@ -83,6 +83,7 @@ final class GameSettings {
         new Tweak("no-loading-tips", "Skip loading tips", "Hides Omochao's tips and the Now Loading animation while the game loads. Most loads show a black screen instead; a load over a picture already on screen, such as a stage's title card, keeps that picture."),
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
+        new Tweak("radar-all-pieces", "Radar tracks all pieces", "In treasure hunts, every piece still to find shows on the radar how near it is, not only the first. Makes hunts easier."),
     };
 
     String orientation = LANDSCAPE;

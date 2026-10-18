@@ -101,6 +101,7 @@
     X(SA2_TWEAK_NO_LOADING_TIPS, "no-loading-tips", "loading-tips off", "no Omochao tips or Now Loading animation while loading: black, or the picture already on screen") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
+    X(SA2_TWEAK_RADAR_ALL_PIECES, "radar-all-pieces", "radar tracks all pieces", "the treasure-hunt radar shows how near every piece is, not only the first") \
     /* the end of the list */
 
 enum {

@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "tools" / "s4"))
 import address_taken as AT  # noqa: E402
 
 BASE = 0x00400000
-TEXT = (0x401000, 0x1000)
+CODE = [(0x401000, 0x1000)]       # the code sections: .text alone
 DATA = [(0x402000, 0x100)]
 F = 0x401000                      # the one map function
 G = 0x401800                      # a lifted extra's range [G, G + 0x40)
@@ -86,7 +86,7 @@ def run(relocs_filter=None):
     img, relocs = build()
     if relocs_filter:
         relocs = [r for r in relocs if relocs_filter(r)]
-    return AT.analyse(img, relocs, [(F, 0x30)], [(G, G + 0x40)], TEXT, DATA, base=BASE,
+    return AT.analyse(img, relocs, [(F, 0x30)], [(G, G + 0x40)], CODE, DATA, base=BASE,
                       modules=MODULES)
 
 

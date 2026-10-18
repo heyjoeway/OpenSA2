@@ -110,6 +110,7 @@
     X(SA2_TWEAK_METAL_BOUNCE_FIX, "metal-bounce-fix", "metal-bounce fixed", "Metal Sonic's bounce attack uses his own model, so it no longer crashes with an all-upgrades cheat") \
     X(SA2_TWEAK_NO_2P_SPECIALS, "no-2p-specials", "no 2P specials", "no special attacks in 2-player battles, from rings or after losing a life") \
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \
+    X(SA2_TWEAK_NO_LIVES_BONUS, "no-lives-bonus", "ring 1-ups off", "no extra life for every 100 rings; 1-up boxes still give one") \
     X(SA2_TWEAK_NO_LOADING_TIPS, "no-loading-tips", "loading-tips off", "no Omochao tips or Now Loading animation while loading: black, or the picture already on screen") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
     X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \

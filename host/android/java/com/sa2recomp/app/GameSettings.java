@@ -89,6 +89,7 @@ final class GameSettings {
         new Tweak("metal-bounce-fix", "Fix Metal Sonic bounce crash", "Gives Metal Sonic's bounce attack his own model, so it no longer crashes the game when a cheat gives him all upgrades. Changes nothing in normal play."),
         new Tweak("no-2p-specials", "No special attacks in 2P", "In 2-player battles, neither player gets special attacks, not from collecting rings and not after losing a life."),
         new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
+        new Tweak("no-lives-bonus", "No extra life at 100 rings", "Collecting 100 rings (or 200, 300...) no longer gives an extra life. 1-up boxes still do."),
         new Tweak("no-loading-tips", "Skip loading tips", "Hides Omochao's tips and the Now Loading animation while the game loads. Most loads show a black screen instead; a load over a picture already on screen, such as a stage's title card, keeps that picture."),
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),

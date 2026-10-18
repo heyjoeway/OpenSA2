@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #if !defined(_WIN32)
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <ucontext.h>
 #endif
@@ -170,6 +171,15 @@ static void on_fault(int sig, siginfo_t *si, void *uc) {
         int k = 0;
         do { d[k++] = (char)('0' + t % 10); t /= 10; } while (t && k < 20);
         while (k) msg[n++] = d[--k];
+        /* And its name: the runtime's own threads are named (the stall watch is "sa2-stall"), and a
+         * guest thread carries the process's. */
+        char comm[17] = {0};
+        if (prctl(PR_GET_NAME, comm, 0, 0, 0) == 0 && comm[0]) {
+            msg[n++] = ' ';
+            msg[n++] = '(';
+            for (int c = 0; c < 16 && comm[c]; c++) msg[n++] = comm[c];
+            msg[n++] = ')';
+        }
         ssize_t ignored = write(2, msg, n);     /* before the scan, which can fault */
         (void)ignored;
         /* The words on the host stack that follow a call instruction in the

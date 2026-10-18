@@ -2,7 +2,7 @@
  *
  * Subtitle: SA2_STALL_DUMP_MS=<ms> (a live session's play sets it: host/launch, host/android)
  * starts one host thread at the process's start that is not a guest thread, never takes the guest
- * token and takes no signal. From the first frame on, once frames (sa2_sched_frames) have not
+ * token and takes no signal but its own faults' (sa2_stall_stop). From the first frame on, once frames (sa2_sched_frames) have not
  * moved for that long it writes the scheduler's table to stderr, once for the stall however long
  * it lasts; a frame ends the stall, and the next stall gets its own table. Unset, 0 or not a
  * number: no thread. Linux and Android only (the table's host columns are /proc's); elsewhere
@@ -92,6 +92,25 @@ size_t sa2_stall_format(const sa2_stall_snapshot *s, char *out, size_t cap);
 /* Reads SA2_STALL_DUMP_MS and starts the watch's thread (above). Once; sa2_imports.c calls it
  * after sa2_threads_config_from_env. */
 void sa2_stall_start(void);
+
+/* Ends the watch's thread and waits for it: woken at once, it finishes a table it is writing and
+ * returns. The game's driver calls it when the guest's run has ended (harness/crt_probe.c), and
+ * sa2_stall_start registers it with atexit, so no exit() leaves the thread running while the
+ * process ends. Why (2026-10-18): on an x86-64 Android emulator the arm64 game runs under
+ * ndk_translation, which tears its own state down while the process exits. A thread that runs
+ * translated code then faults, and the translator's signal handler aborts on a mutex its exit had
+ * destroyed (FindRecoveryCode, "pthread_mutex_lock called on a destroyed mutex"). The watch woke
+ * every 250 ms, so a Back exit hit the fault only when a wake fell inside that teardown: 1 of 16
+ * Back exits on build 10015, and 1 of 5 of the triage's alpha.4 sessions. The guest's threads wait
+ * on condition variables and never wake then. With a 1 ms tick on the emulator: every signal
+ * blocked on the watch's thread, as it was, gave status -11 with no tombstone, no abort line and
+ * every record closed at 13 of 13 Back exits (a thread that faults with the signal blocked
+ * ends the whole process, and no handler runs); the fault signals left open gave the translator's abort on
+ * thread sa2-stall, with a tombstone, at 5 of 5; the stop gave no abort at 6 of 6. The watch now
+ * leaves the fault signals unblocked, so a fault on its thread is reported by the runtime's handler
+ * (sa2_trap.c) or the system's, like any other. Called from the main thread only; without a
+ * running watch it does nothing. */
+void sa2_stall_stop(void);
 
 /* The scheduler's part of the table (runtime/sa2_threads.c): every used row into out[max],
  * copied without the guest lock, with the kernel's columns left empty; *current the guest thread

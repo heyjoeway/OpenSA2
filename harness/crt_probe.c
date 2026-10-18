@@ -103,6 +103,7 @@
 #include "../runtime/sa2_module.h"
 #include "../runtime/sa2_threads.h"
 #include "../runtime/sa2_window.h"
+#include "../runtime/sa2_stall.h"
 #include "../runtime/sa2_trap.h"
 
 /* The device's closed world (runtime/sa2_d3d9.c; the user's ruling of 2026-10-09, item 1)
@@ -1031,6 +1032,9 @@ int main(int argc, char **argv) {
 
     sa2_call_result_t res;
     const int rc = sa2_call(va, &st, timeout, &res);
+    /* The guest's run has ended: no frame comes after it, so the stall watch has nothing left to
+     * watch, and its thread is ended before the process's exit starts (sa2_stall.h). */
+    sa2_stall_stop();
     /* The guest has stopped. Every import call from here on is this harness's
      * own control probe, and SA2_IMPORT_BUDGET exists to stop the *guest* at
      * the same call in every run, not to refuse the checks that run after it.

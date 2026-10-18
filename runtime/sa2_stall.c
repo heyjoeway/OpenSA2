@@ -11,6 +11,7 @@
 #if defined(__linux__)
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -263,18 +264,32 @@ static void dump(double no_frame_s) {
     }
 }
 
+/* The watch's own descriptors: a byte on the write end ends it at once (sa2_stall_stop). */
+static int       g_wake[2] = {-1, -1};
+static pthread_t g_thread;
+static int       g_running;            /* started and not yet joined; the main thread's */
+
+/* The signals the watch leaves unblocked: the ones a fault of its own raises. Blocked, any of them
+ * ends the process at once with no handler run, so a fault here would be a bare "signal 11" with
+ * no line from the runtime (sa2_trap.c on_fault) and, on Android, no tombstone. */
+static const int k_fault_signals[] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGTRAP, SIGSYS, SIGABRT};
+
 static void *watch(void *arg) {
     (void)arg;
-    /* No signal lands here: SIGTERM's and SIGURG's handlers belong to the guest's threads. */
-    sigset_t all;
-    sigfillset(&all);
-    pthread_sigmask(SIG_BLOCK, &all, NULL);
+    /* No other signal lands here: SIGTERM's and SIGURG's handlers belong to the guest's threads. */
+    sigset_t mask;
+    sigfillset(&mask);
+    for (size_t i = 0; i < sizeof k_fault_signals / sizeof k_fault_signals[0]; i++)
+        sigdelset(&mask, k_fault_signals[i]);
+    pthread_sigmask(SIG_SETMASK, &mask, NULL);     /* whatever its creator blocked */
     uint64_t last = sa2_sched_frames();
     double since = mono_s();
     int dumped = 0;                    /* this stall's table is out: none more until a frame */
     for (;;) {
-        const struct timespec tick = {0, 250 * 1000 * 1000};
-        nanosleep(&tick, NULL);
+        struct pollfd stop = {g_wake[0], POLLIN, 0};
+        const int r = poll(&stop, 1, 250);
+        if (r > 0) break;              /* sa2_stall_stop */
+        if (r < 0 && errno != EINTR) break;
         const uint64_t f = sa2_sched_frames();
         const double now = mono_s();
         if (f != last) {
@@ -291,6 +306,17 @@ static void *watch(void *arg) {
         }
     }
     return NULL;
+}
+
+void sa2_stall_stop(void) {
+    if (!g_running) return;
+    g_running = 0;
+    const char byte = 1;
+    ssize_t k;
+    do k = write(g_wake[1], &byte, 1); while (k < 0 && errno == EINTR);
+    if (k == 1) pthread_join(g_thread, NULL);
+    else fprintf(stderr, "sa2 stall: the stall watch could not be told to stop (%s); it runs to the end\n",
+                 strerror(errno));
 }
 
 void sa2_stall_start(void) {
@@ -317,22 +343,31 @@ void sa2_stall_start(void) {
     }
     const char *trace = getenv("SA2_REC_TRACE");
     if (trace && *trace) g_stream_path = trace;
+    if (pipe2(g_wake, O_CLOEXEC)) {
+        fprintf(stderr, "sa2 stall: the stall watch's stop pipe could not be made: %s; no stall watch\n",
+                strerror(errno));
+        return;
+    }
     pthread_attr_t at;
     pthread_attr_init(&at);
-    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
     pthread_attr_setstacksize(&at, 256 * 1024);
-    pthread_t t;
-    const int rc = pthread_create(&t, &at, watch, NULL);
+    const int rc = pthread_create(&g_thread, &at, watch, NULL);
     pthread_attr_destroy(&at);
     if (rc) {
         fprintf(stderr, "sa2 stall: the stall watch's thread could not start: %s\n", strerror(rc));
         return;
     }
-    pthread_setname_np(t, "sa2-stall");
+    g_running = 1;
+    pthread_setname_np(g_thread, "sa2-stall");
+    /* Whatever ends the process by exit(), the watch has ended first (sa2_stall.h). */
+    if (atexit(sa2_stall_stop))
+        fprintf(stderr, "sa2 stall: atexit refused the stall watch's stop; it is stopped only where the game's "
+                "run ends\n");
 }
 
 #else
 
 void sa2_stall_start(void) {}
+void sa2_stall_stop(void) {}
 
 #endif

@@ -132,7 +132,11 @@ final class CrashReport {
                                            + endedBy + ")", status, false, true, false);
                     }
                     // A game that answers the session's SIGTERM quits with 0 (the runtime makes it WM_QUIT);
-                    // any other status is the game's own failure, even when the renderer ended first.
+                    // any other status is the game's own failure, even when the renderer ended first. That
+                    // holds after the game closed its records too (the session's "; the game had closed its
+                    // records"). The stall watch caused that signal on Android emulators, and it ends before
+                    // the exit now (runtime/sa2_stall.h): a build that writes the note cannot have that cause,
+                    // so the signal is another fault, to be reported.
                     if (status != 0 && status != -15) {
                         return new Outcome(false, gameExitText(status), status, false, false, false);
                     }

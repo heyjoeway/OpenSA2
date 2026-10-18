@@ -28,12 +28,23 @@
  *         with `pace`, the writer reads the read end of an empty pipe whose descriptor
  *         SA2_REC_PACE_FD names. The main thread sets the setting, starts the watch, waits WAIT_MS
  *         and lets the writer go (drains the FIFO, or writes the pace byte).
+ * stop    SA2_STALL_DUMP_MS from the environment. The watch starts; the JSON says how many threads named
+ *         "sa2-stall" there are, which signals its thread blocks (SigBlk: the fault signals not, SIGTERM
+ *         and SIGURG yes), how long sa2_stall_stop took (woken, not a 250 ms tick), and how many such
+ *         threads are left after it (none).
+ * exit    The same setting. An atexit handler registered before the watch starts counts its threads as
+ *         exit() ends the process: none, since the watch's own atexit stop ran first.
+ * fault   The same setting, the runtime's fault handlers installed (sa2_trap_install_handlers). After
+ *         one frame and none more the watch writes its table and faults inside it, on its own thread:
+ *         the runtime's handler names the thread ("(sa2-stall)") and exits 3, where a blocked
+ *         SIGSEGV killed the process by signal 11 with no line.
  * episodes Two stalls: the writer sleeps in its write, the main thread drains the pipe after
  *         WAIT_MS and fills it again, the writer crosses a second frame boundary and sleeps in a
  *         second write, drained after WAIT_MS more. The watch's tables: one a stall.
  *
  * Documentation/scripts/tests/test_stall_watch.py builds it and holds the text and the run. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -94,9 +105,12 @@ int sa2_call(uint32_t va, sa2_cpu_state_t *st, uint32_t timeout_s, sa2_call_resu
     r->status = SA2_TRAP_NONE;
     return 0;
 }
-/* The file layer: nothing in progress. */
+/* The file layer: nothing in progress. Under the `fault` mode, the watch's table faults here, on the
+ * watch's own thread, as a read of freed or unmapped memory would. */
+static volatile int g_fault_in_table;
 int sa2_vfs_io_now(int *write, uint32_t *tid, const char **path, uint64_t *bytes, int64_t *since_ns) {
     (void)write; (void)tid; (void)path; (void)bytes; (void)since_ns;
+    if (g_fault_in_table) return *(volatile int *)(uintptr_t)8;
     return 0;
 }
 
@@ -322,11 +336,108 @@ static int episodes_case(int wait_ms) {
     return 0;
 }
 
+/* ------------------------------------------------------------------- stop */
+
+/* The host threads named "sa2-stall" (/proc/self/task/<tid>/comm); the first one's tid in *tid. */
+static int watch_threads(long *tid) {
+    int n = 0;
+    char path[300], comm[32];
+    DIR *d = opendir("/proc/self/task");
+    if (!d) return -1;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        snprintf(path, sizeof path, "/proc/self/task/%s/comm", e->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        if (fgets(comm, sizeof comm, f) && !strncmp(comm, "sa2-stall", 9)) {
+            if (!n && tid) *tid = strtol(e->d_name, NULL, 10);
+            n++;
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return n;
+}
+
+/* Bit `sig` of the SigBlk mask /proc gives for host thread `tid`. */
+static int blocked(long tid, int sig) {
+    char path[96], line[256];
+    snprintf(path, sizeof path, "/proc/self/task/%ld/status", tid);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    unsigned long long m = 0;
+    int found = 0;
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, "SigBlk:", 7)) { m = strtoull(line + 7, NULL, 16); found = 1; }
+    fclose(f);
+    return found ? (int)((m >> (sig - 1)) & 1u) : -1;
+}
+
+static double now_s(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
+static int stop_case(void) {
+    sa2_stall_start();
+    long tid = 0;
+    int before = 0;
+    for (int i = 0; i < 200 && !(before = watch_threads(&tid)); i++) usleep(1000);
+    usleep(20 * 1000);                     /* its mask is set as it starts */
+    const int segv = blocked(tid, SIGSEGV), bus = blocked(tid, SIGBUS), fpe = blocked(tid, SIGFPE),
+              ill = blocked(tid, SIGILL), abrt = blocked(tid, SIGABRT), term = blocked(tid, SIGTERM),
+              urg = blocked(tid, SIGURG);
+    const double t0 = now_s();
+    sa2_stall_stop();
+    const double stop_ms = (now_s() - t0) * 1000.0;
+    const int after = watch_threads(NULL);
+    sa2_stall_stop();                      /* a second stop does nothing */
+    printf("{\"threads_before\": %d, \"threads_after\": %d, \"stop_ms\": %.1f, \"blocked\": {\"SIGSEGV\": %d, "
+           "\"SIGBUS\": %d, \"SIGFPE\": %d, \"SIGILL\": %d, \"SIGABRT\": %d, \"SIGTERM\": %d, \"SIGURG\": %d}}\n",
+           before, after, stop_ms, segv, bus, fpe, ill, abrt, term, urg);
+    return 0;
+}
+
+/* exit() with the watch running: an atexit handler registered before the watch's own runs after it
+ * (atexit runs them last first), and says whether the watch's thread was still there. */
+static void count_at_exit(void) {
+    printf("{\"threads_at_exit\": %d}\n", watch_threads(NULL));
+    fflush(stdout);
+}
+
+static int exit_case(void) {
+    atexit(count_at_exit);
+    sa2_stall_start();
+    for (int i = 0; i < 200 && !watch_threads(NULL); i++) usleep(1000);
+    printf("{\"threads_running\": %d}\n", watch_threads(NULL));
+    fflush(stdout);
+    exit(0);
+}
+
+/* A fault on the watch's thread: one frame, then no more, so after SA2_STALL_DUMP_MS the watch writes
+ * its table and faults inside it (sa2_vfs_io_now above). The runtime's handler reports it. */
+static int fault_case(void) {
+    sa2_trap_install_handlers();
+    sa2_sched_init();
+    sa2_sched_frame_boundary();
+    g_fault_in_table = 1;
+    sa2_stall_start();
+    sleep(10);
+    printf("{\"fault\": \"none in 10 s\"}\n");
+    return 1;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "stop")) return stop_case();
+    if (argc == 2 && !strcmp(argv[1], "exit")) return exit_case();
+    if (argc == 2 && !strcmp(argv[1], "fault")) return fault_case();
     if (argc >= 2 && !strcmp(argv[1], "format")) return format_case();
     if (argc >= 2 && !strcmp(argv[1], "watch")) return watch_case(argc >= 3 ? atoi(argv[2]) : 1000);
     if (argc == 5 && !strcmp(argv[1], "player")) return player_case(argv[2], atoi(argv[3]), argv[4]);
     if (argc == 3 && !strcmp(argv[1], "episodes")) return episodes_case(atoi(argv[2]));
-    fprintf(stderr, "usage: %s format | watch [WAIT_MS] | player fifo|pace WAIT_MS DIR | episodes WAIT_MS\n", argv[0]);
+    fprintf(stderr, "usage: %s format | watch [WAIT_MS] | player fifo|pace WAIT_MS DIR | episodes WAIT_MS | stop | exit "
+            "| fault\n", argv[0]);
     return 2;
 }

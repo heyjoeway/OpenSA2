@@ -18,7 +18,11 @@ backgrounding printed a table each time, and a second after 30 s, with nothing t
 player's pause); no table and no thread without SA2_STALL_DUMP_MS, and a refusal line for a value
 that is not a count; the nudge taken by the main thread and passed on to the token's holder, whose
 write SA_RESTART restarts rather than cuts short; and SA2_GUEST_HOST_CPUS's lines, said only after
-the call and only when the thread does not run where it was asked.
+the call and only when the thread does not run where it was asked. And the watch's end (2026-10-18,
+some Android-emulator Back exits, 1 of 16 on build 10015, ended by SIGSEGV after every record was
+closed): sa2_stall_stop wakes and joins its thread at once, exit() runs that stop before it ends
+the process, and a fault on the watch's thread is the runtime's report ("(sa2-stall)", exit 3), not
+a bare signal 11, since the watch no longer blocks the fault signals.
 
 Linux only: the watch's host columns are /proc's.
 """
@@ -57,9 +61,9 @@ def probe(tmp_path_factory):
     assert built.returncode == 0, built.stderr
     clean = {k: v for k, v in os.environ.items() if k not in SETTINGS}
 
-    def run(*args: str, **settings) -> subprocess.CompletedProcess:
+    def run(*args: str, expect: int = 0, **settings) -> subprocess.CompletedProcess:
         p = subprocess.run([str(exe), *args], capture_output=True, text=True, timeout=60, env=dict(clean, **settings))
-        assert p.returncode == 0, p.stderr
+        assert p.returncode == expect, (p.returncode, p.stderr)
         return p
     return run
 
@@ -188,3 +192,23 @@ def test_the_cpu_line_comes_after_the_call_and_says_when_it_did_not_hold(probe):
     narrowed = probe("watch", "50", SA2_GUEST_HOST_CPUS="0,1000").stderr.splitlines()
     assert narrowed[0].endswith(" asked for CPUs 0,1000 and runs on CPUs 0"), narrowed
     assert narrowed[1].endswith("guest thread 0 runs on a different set (above)")
+
+
+def test_the_stop_ends_the_watch_at_once_and_its_thread_leaves_the_fault_signals_open(probe):
+    got = json.loads(probe("stop", SA2_STALL_DUMP_MS="3000").stdout)
+    assert got["threads_before"] == 1 and got["threads_after"] == 0
+    assert got["stop_ms"] < 100, got        # woken, not left to the end of a 250 ms tick
+    assert got["blocked"] == {"SIGSEGV": 0, "SIGBUS": 0, "SIGFPE": 0, "SIGILL": 0, "SIGABRT": 0,
+                              "SIGTERM": 1, "SIGURG": 1}
+
+
+def test_exit_ends_the_watch_before_the_process_ends(probe):
+    assert probe("exit", SA2_STALL_DUMP_MS="3000").stdout.splitlines() == [
+        '{"threads_running": 1}', '{"threads_at_exit": 0}']
+
+
+def test_a_fault_on_the_watchs_thread_is_the_runtimes_report_not_a_bare_signal(probe):
+    got = probe("fault", expect=3, SA2_STALL_DUMP_MS="300")
+    lines = got.stderr.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("sa2 runtime: fault outside any sa2_call at host 0x0000000000000008 "), lines
+    assert " (sa2-stall) callers" in lines[0] and got.stdout == ""

@@ -137,6 +137,9 @@ public:
     // The samples rendered since the last clear_block(), interleaved L R, clamped (or limited).
     const std::vector<float>& block() const { return block_; }
     void clear_block() { block_.clear(); }
+    // The same block, to change in place before it is written and queued: a host tweak's
+    // (player.cpp audio_block, host/player/tweaks/mono-audio.cpp).
+    std::vector<float>& block_to_change() { return block_; }
 
     bool started() const { return started_; }
     uint64_t origin_us() const { return origin_us_; }

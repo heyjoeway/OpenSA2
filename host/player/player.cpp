@@ -342,6 +342,7 @@
 #include "tweaks/deadzone.h"
 #include "tweaks/frametime-overlay.h"
 #include "tweaks/hold-toggle.h"
+#include "tweaks/mono-audio.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -5049,6 +5050,7 @@ bool Player::setup_audio() {
 // unpaced replay runs faster than the sound can play). The queue's depth is noted
 // before each block goes in: its least is how close the device came to running dry.
 void Player::audio_block() {
+    sa2tw::mono_audio(*mixer_);
     const std::vector<float>& blk = mixer_->block();
     if (wav_open_ && !blk.empty() && !wav_.write(blk.data(), blk.size() / 2)) {
         io_failure("writing " + o_.audio_wav + " failed");

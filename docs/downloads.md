@@ -91,6 +91,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `hold-toggle` | Makes B a toggle on a controller or the touch controls: one press holds B down and the next press lets it go, for a mech's lock-on or the spin-dash charge without holding the button. START, switching away from the game's window, or unplugging the controller also lets it go. In menus, a held B stays held until you press B or START again. |
 | `infinite-lives` | Dying costs no life, so the lives never run out and there is no game over. 1-ups still add lives, and your save keeps the count you actually have. |
 | `metal-bounce-fix` | Gives Metal Sonic's bounce attack a model he has, so the attack no longer crashes the game. The crash happens only when a cheat gives Metal Sonic all upgrades, so this changes nothing in normal play. |
+| `mono-audio` | Both speakers play the left and right channels mixed together, for one earbud or for hearing in one ear. |
 | `no-2p-specials` | In 2-player battles, neither player earns special attacks, from collecting rings or after losing a life. 1-player games and save data are unchanged. |
 | `no-event-bars` | Removes the black bars that most in-engine cutscenes draw at the sides of a screen wider than 4:3. The scene then fills the width of the screen. |
 | `no-lives-bonus` | Collecting 100 rings (or 200, 300, and so on) no longer gives an extra life or plays the 1-up jingle. 1-up boxes and other extra lives still count, and your save keeps the lives you earned. |

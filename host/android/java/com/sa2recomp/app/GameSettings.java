@@ -99,6 +99,7 @@ final class GameSettings {
         new Tweak("hold-toggle", "Tap to hold B", "A tap of B holds it down and the next tap lets go, for a mech's lock-on and the spin-dash charge. START lets go too."),
         new Tweak("infinite-lives", "Infinite lives", "Dying doesn't cost a life, so you never get a game over. 1-ups still add lives, and your save keeps the count you have."),
         new Tweak("metal-bounce-fix", "Fix Metal Sonic bounce crash", "Gives Metal Sonic's bounce attack his own model, so it no longer crashes the game when a cheat gives him all upgrades. Changes nothing in normal play."),
+        new Tweak("mono-audio", "Mono audio", "Plays the left and right channels mixed together from both speakers, for one earbud or one ear."),
         new Tweak("no-2p-specials", "No special attacks in 2P", "In 2-player battles, neither player gets special attacks, not from collecting rings and not after losing a life."),
         new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
         new Tweak("no-lives-bonus", "No extra life at 100 rings", "Collecting 100 rings (or 200, 300...) no longer gives an extra life. 1-up boxes still do."),

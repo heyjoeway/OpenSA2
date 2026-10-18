@@ -138,7 +138,7 @@ public:
     const std::vector<float>& block() const { return block_; }
     void clear_block() { block_.clear(); }
     // The same block, to change in place before it is written and queued: a host tweak's
-    // (player.cpp audio_block, host/player/tweaks/mono-audio.cpp).
+    // (player.cpp audio_block, host/player/tweaks/mono-audio.cpp and swap-audio.cpp).
     std::vector<float>& block_to_change() { return block_; }
 
     bool started() const { return started_; }

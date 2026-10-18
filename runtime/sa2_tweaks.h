@@ -217,6 +217,7 @@ enum {
     X(SA2_TWEAK_PAUSE_UNFOCUSED, "pause-unfocused", "held while unfocused", "the game and its sound pause while the player's window is out of focus (in a paced session, the default)", "player") \
     X(SA2_TWEAK_SLOW_MODE, "slow-mode", "game at 0.75 speed", "the game at three quarters of its speed, its sound slowed with it (and lower in pitch)", "player") \
     X(SA2_TWEAK_SPEEDRUN_TIMER, "speedrun-timer", "speedrun timer published", "the in-game timer and stage state sent to localhost for LiveSplit and other timers, read-only", "launcher") \
+    X(SA2_TWEAK_SWAP_AUDIO, "swap-audio", "swap audio", "left and right speakers swapped", "player") \
     /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */

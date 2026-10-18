@@ -345,6 +345,7 @@
 #include "tweaks/mono-audio.h"
 #include "tweaks/pause-unfocused.h"
 #include "tweaks/slow-mode.h"
+#include "tweaks/swap-audio.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -5062,6 +5063,7 @@ bool Player::setup_audio() {
 // before each block goes in: its least is how close the device came to running dry.
 void Player::audio_block() {
     sa2tw::mono_audio(*mixer_);
+    sa2tw::swap_audio(*mixer_);
     const std::vector<float>& blk = mixer_->block();
     if (wav_open_ && !blk.empty() && !wav_.write(blk.data(), blk.size() / 2)) {
         io_failure("writing " + o_.audio_wav + " failed");

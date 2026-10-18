@@ -14,6 +14,9 @@
 // the clamp has already held in [-1, 1]. A sound the game panned to one side plays at half its level
 // in each speaker; one in the middle (L = R) is unchanged.
 //
+// Swapping the channels is a tweak of its own, swap-audio (swap-audio.cpp), called right after this
+// one; with both on, the swap has nothing to change and says so.
+//
 // Its line: at the mixer's first block with samples in it, once a session, "sa2 host tweaks: mono
 // audio: ...". What it leaves alone, said there: the report's "audio" levels
 // (ds, xa and mix peaks and RMS), which the mixer measures before the fold. A play session with no

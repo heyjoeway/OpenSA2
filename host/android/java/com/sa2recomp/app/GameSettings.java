@@ -112,6 +112,7 @@ final class GameSettings {
         new Tweak("rival-upgrades", "Rival upgrades", "Shadow gets the Bounce Bracelet and Magic Gloves once Sonic has them, Rouge breathes underwater once Knuckles has the Air Necklace, and Mech Tails gets the Protective Armor once Eggman has it. Your save is not changed."),
         new Tweak("skip-intro", "Skip intro", "Starts the game at the title screen, without the company logos and the opening cutscene. The opening still plays if you leave the title screen idle."),
         new Tweak("slow-mode", "Slow mode", "Plays the game at three quarters of its speed. The sound slows with it and plays lower in pitch."),
+        new Tweak("swap-audio", "Swap left/right audio", "Plays the left channel from the right speaker and the right channel from the left, for headphones worn the other way round. With mono audio on there is nothing to swap."),
         new Tweak("walker-cannon-fix", "Fix the Chao Walker cannon crash", "Stops the crash when a Chao Walker has the cannon upgrade, which only a cheat can give it. Changes nothing else."),
     };
 

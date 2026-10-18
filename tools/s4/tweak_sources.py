@@ -3,6 +3,9 @@
 Subtitle: runtime/sa2_tweaks.h's SA2_TWEAK_LIST, runtime/tweaks/*.c by glob, and the one
 `TWEAK_WRAPS:` line in each file's header comment that names the lifted functions it wraps
 (runtime/sa2_tweaks.h, "Add a tweak"). A tweak adds its own file and no line to any tool.
+`patches` reads SA2_TWEAK_PATCH_LIST, the code-patch tweaks among the list's: they have no runtime
+file (tools/s8/variants/variants.py generates their wraps from tools/s8/variants/tweaks/<name>.json,
+SPECS here), and a link takes them with --variants.
 
 tools/s4/link_s4.py adds `sources` to its RUNTIME_C and `wraps` to its PRODUCTION_WRAPS when it
 is imported, after its literals, so the Windows and Android links (which take link_s4's lists)
@@ -25,8 +28,13 @@ HEADER = "sa2_tweaks.h"
 FOLDER = "tweaks"
 WRAPS_LINE = re.compile(r"^[ \t/*]*TWEAK_WRAPS:(.*?)(?:\*/.*)?$", re.M)
 LIFTED = re.compile(r"sub_[0-9a-f]+")
-# X(bit, name, report, summary) in SA2_TWEAK_LIST.
+# X(bit, name, report, summary) in SA2_TWEAK_LIST; X(bit) in SA2_TWEAK_PATCH_LIST.
 ROW = re.compile(r'X\(\s*(SA2_TWEAK_\w+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)')
+PATCH_ROW = re.compile(r'X\(\s*(SA2_TWEAK_\w+)\s*\)')
+# The code-patch tweaks' specs, relative to the checkout (runtime/sa2_tweaks.h, "Add a code-patch
+# tweak"), and the variant tool's test fixtures, which are no tweak.
+SPECS = "tools/s8/variants/tweaks"
+FIXTURES = "tools/s8/variants/fixtures"
 
 
 def rows(runtime: Path) -> list[dict]:
@@ -36,6 +44,22 @@ def rows(runtime: Path) -> list[dict]:
     if not m:
         raise SystemExit(f"{runtime / HEADER} has no SA2_TWEAK_LIST to read")
     return [dict(zip(("bit", "name", "report", "summary"), r)) for r in ROW.findall(m.group(1))]
+
+
+def patches(runtime: Path) -> list[dict]:
+    """The rows of SA2_TWEAK_LIST that SA2_TWEAK_PATCH_LIST names, the code-patch tweaks, in its
+    order; refused by name when it names a bit the list has not."""
+    text = (runtime / HEADER).read_text()
+    m = re.search(r"#define SA2_TWEAK_PATCH_LIST\(X\)(.*?)\n\s*\n", text, re.S)
+    if not m:
+        raise SystemExit(f"{runtime / HEADER} has no SA2_TWEAK_PATCH_LIST to read")
+    by_bit = {r["bit"]: r for r in rows(runtime)}
+    bits = PATCH_ROW.findall(m.group(1))
+    stray = [b for b in bits if b not in by_bit]
+    if stray:
+        raise SystemExit(f"{runtime / HEADER}: SA2_TWEAK_PATCH_LIST names {stray}, which SA2_TWEAK_LIST "
+                         "has no line for")
+    return [by_bit[b] for b in bits]
 
 
 def files(runtime: Path) -> list[tuple[str, list[str]]]:

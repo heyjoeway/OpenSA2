@@ -9,11 +9,16 @@ the lifted body does: EAX = 1 when ECX is in the game's table of 4:3 events, els
 that pops the return address (ESP + 4). Each call puts a caller's return address at guest [ESP]
 first, as the lifted CALL does, so a case reads what each caller would see in EAX.
 
-The list's own tests hold every tweak in SA2_TWEAK_LIST to its runtime/tweaks/<name>.c, its line
+The list's own tests hold every tweak in SA2_TWEAK_LIST to its runtime/tweaks/<name>.c, or, for a
+code-patch tweak (SA2_TWEAK_PATCH_LIST), to its spec tools/s8/variants/tweaks/<name>.json, its line
 in the Android settings (GameSettings.TWEAKS) and its line in the release's README, and the
-reverse; each tweak file's TWEAK_WRAPS line to the wraps the compiled file defines; and every link
-tool's lists to the files (tools/s4/tweak_sources.py), so a tweak added in one place and not the
-others fails here by name.
+reverse; each tweak file's TWEAK_WRAPS line to the wraps the compiled file defines; the variant
+tool's fixtures to no tweak's name; and every link tool's lists to the files
+(tools/s4/tweak_sources.py), so a tweak added in one place and not the others fails here by name.
+
+The reader's code-patch side is compiled from a copy of runtime/sa2_tweaks.h with one code-patch
+tweak registered (none is yet), linked with and without a stand-in for the file
+tools/s8/variants/variants.py generates; test_variants.py links the generated file itself.
 """
 from __future__ import annotations
 
@@ -32,6 +37,9 @@ sys.path.insert(0, str(ROOT / "tools" / "s3" / "whole_image"))
 sys.path.insert(0, str(ROOT / "tools" / "spike"))
 import link_s4 as LS  # noqa: E402
 import tweak_sources as TS  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tools" / "s8" / "variants"))
+import variants as V  # noqa: E402
 
 ZIG = ROOT / "private" / "predecessor-tools" / "zig" / "zig-x86_64-linux-0.15.2" / "zig"
 RUNTIME = ROOT / "runtime"
@@ -129,6 +137,15 @@ def names() -> list[str]:
     return [r["name"] for r in TS.rows(RUNTIME)]
 
 
+def patch_names() -> list[str]:
+    return [r["name"] for r in TS.patches(RUNTIME)]
+
+
+def plain_names() -> list[str]:
+    """The tweaks with a runtime file: every game has them."""
+    return [n for n in names() if n not in patch_names()]
+
+
 # ------------------------------------------------------------------ the reader and the report
 
 # The intro (361) and a stage's (21) in-engine events, both framed for 4:3, a Dark story event
@@ -158,7 +175,7 @@ def test_a_name_that_is_no_tweak_is_named_and_ignored(exe, value, on):
     unknown = value.split(",")[-1]
     assert err.splitlines()[0] == (
         f"sa2 tweaks: {'event-bars off' if on else 'none on'} (SA2_TWEAKS={value}; no tweak is named "
-        f"\"{unknown}\", so it is ignored; the tweaks: {', '.join(names())})")
+        f"\"{unknown}\", so it is ignored; the tweaks: {', '.join(plain_names())})")
 
 
 @pytest.mark.parametrize("replay", ["SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"])
@@ -225,11 +242,105 @@ def test_the_list_is_in_name_order_and_each_name_is_one_spelling():
 
 def test_the_compiled_reader_holds_the_headers_list(exe):
     _, err = run(exe, SA2_TWEAKS="?")
-    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join(names())})")
+    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join(plain_names())})")
 
 
-def test_every_tweak_has_its_file_and_every_file_its_tweak():
-    assert [Path(s).stem for s in TS.sources(RUNTIME)] == names()
+def test_every_tweak_has_its_file_or_its_spec_and_each_its_tweak():
+    """A tweak has a runtime file, or it is a code-patch tweak and has a spec; never both."""
+    specs = sorted((ROOT / TS.SPECS).glob("*.json"))
+    assert [Path(s).stem for s in TS.sources(RUNTIME)] == plain_names()
+    assert [p.stem for p in specs] == patch_names()
+    assert sorted(plain_names() + patch_names()) == names()
+
+
+def test_each_code_patch_spec_is_its_tweak_and_each_fixture_no_tweak():
+    """A spec's name is its file's and its report the list's (variants.py refuses a build
+    otherwise); a fixture's name is no tweak's, so no game links two tweaks of one name."""
+    rows = {r["name"]: r for r in TS.patches(RUNTIME)}
+    for path in sorted((ROOT / TS.SPECS).glob("*.json")):
+        spec = V.read_spec(path)
+        assert spec.shipped and spec.name == path.stem and spec.report == rows[spec.name]["report"], path
+    fixtures = [V.read_spec(p) for p in sorted((ROOT / TS.FIXTURES).glob("*.json"))]
+    assert fixtures, "the variant tool has no fixture"
+    for f in fixtures:
+        assert not f.shipped and f.name not in names() and f.name.startswith("test-"), f.spec
+    assert V.registrations(RUNTIME) == (frozenset(plain_names()),
+                                        {r["name"]: r["report"] for r in TS.patches(RUNTIME)})
+
+
+def registered_patch_runtime(d: Path) -> Path:
+    """runtime/sa2_tweaks.c and a copy of runtime/sa2_tweaks.h with one more tweak, zz-patch (bit
+    after the list's others), registered as a code-patch tweak, in `d`."""
+    rt = d / "rt"
+    rt.mkdir()
+    (rt / "sa2_tweaks.c").write_text((RUNTIME / "sa2_tweaks.c").read_text())
+    h = (RUNTIME / "sa2_tweaks.h").read_text()
+    end = "    /* the end of the list */"
+    at = h.index(end, h.index("#define SA2_TWEAK_LIST(X)"))
+    h = h[:at] + '    X(SA2_TWEAK_ZZ_PATCH, "zz-patch", "zz on", "a code-patch tweak") \\\n' + h[at:]
+    at = h.index(end, h.index("#define SA2_TWEAK_PATCH_LIST(X)"))
+    h = h[:at] + "    X(SA2_TWEAK_ZZ_PATCH) \\\n" + h[at:]
+    (rt / "sa2_tweaks.h").write_text(h)
+    assert [r["name"] for r in TS.patches(rt)] == patch_names() + ["zz-patch"]
+    return rt
+
+
+# Prints sa2_tweak_on(SA2_TWEAK_ZZ_PATCH) and sa2_tweak_patch_on(0..2).
+PATCH_DRIVER = r"""
+#include <stdio.h>
+#include "sa2_tweaks.h"
+int main(void) {
+    printf("%d %d %d %d\n", sa2_tweak_on(SA2_TWEAK_ZZ_PATCH), sa2_tweak_patch_on(0), sa2_tweak_patch_on(1),
+           sa2_tweak_patch_on(2));
+    return 0;
+}
+"""
+# What variants.py generates for a game with zz-patch and a fixture, test-fx (their wraps aside).
+PATCH_LINKED = r"""
+#include <stddef.h>
+#include "sa2_tweaks.h"
+static const sa2_tweak_patch g_patches[2] = {{"test-fx", "fixture on"}, {"zz-patch", "zz on"}};
+const sa2_tweak_patch *sa2_tweak_patches_linked(unsigned *count) { *count = 2u; return g_patches; }
+"""
+
+
+@pytest.fixture(scope="module")
+def patch_exes(zig, tmp_path_factory) -> dict:
+    d = tmp_path_factory.mktemp("patch")
+    rt = registered_patch_runtime(d)
+    (d / "driver.c").write_text(PATCH_DRIVER)
+    (d / "linked.c").write_text(PATCH_LINKED)
+    out = {}
+    for name, extra in (("without", []), ("with", [str(d / "linked.c")])):
+        out[name] = d / name
+        done = subprocess.run([str(zig), "cc", *CC[:-2], "-I", str(rt), str(d / "driver.c"), str(rt / "sa2_tweaks.c"),
+                               *extra, "-o", str(out[name])], capture_output=True, text=True, env=zig_env(d))
+        assert done.returncode == 0, done.stderr
+    return out
+
+
+def test_a_code_patch_tweak_the_game_was_built_without_is_named_and_left_off(patch_exes):
+    others = ", ".join(plain_names())
+    assert run(patch_exes["without"]) == (["0 0 0 0"], "")
+    assert run(patch_exes["without"], SA2_TWEAKS="zz-patch") == (["0 0 0 0"], (
+        'sa2 tweaks: none on (SA2_TWEAKS=zz-patch; this game was built without the code-patch tweak '
+        '"zz-patch", so it is ignored)\n'))
+    out, err = run(patch_exes["without"], SA2_TWEAKS="no-event-bars,zz-patch,zz-patch,test-fx")
+    assert err == ('sa2 tweaks: event-bars off (SA2_TWEAKS=no-event-bars,zz-patch,zz-patch,test-fx; this game '
+                   'was built without the code-patch tweak "zz-patch", so it is ignored; no tweak is named '
+                   f'"test-fx", so it is ignored; the tweaks: {others})\n')
+
+
+def test_a_linked_code_patch_tweak_keeps_its_list_bit_and_a_fixture_takes_one_after(patch_exes):
+    assert run(patch_exes["with"]) == (["0 0 0 0"], "")
+    assert run(patch_exes["with"], SA2_TWEAKS="zz-patch") == (["1 0 1 0"], "sa2 tweaks: zz on (SA2_TWEAKS=zz-patch)\n")
+    assert run(patch_exes["with"], SA2_TWEAKS="test-fx") == (["0 1 0 0"], "sa2 tweaks: fixture on (SA2_TWEAKS=test-fx)\n")
+    # Reported in bit order: the list's tweaks, zz-patch last among them, then the fixture.
+    assert run(patch_exes["with"], SA2_TWEAKS="test-fx,zz-patch") == (
+        ["1 1 1 0"], "sa2 tweaks: zz on, fixture on (SA2_TWEAKS=test-fx,zz-patch)\n")
+    _, err = run(patch_exes["with"], SA2_TWEAKS="?")
+    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join(plain_names() + ['zz-patch', 'test-fx'])})")
+    assert run(patch_exes["with"], SA2_TWEAKS="zz-patch,test-fx", SA2_REPLAY_TICKS="/dev/null")[0] == ["0 0 0 0"]
 
 
 def test_every_tweak_has_its_android_switch_and_every_switch_its_tweak():
@@ -241,7 +352,7 @@ def test_every_tweak_is_in_the_release_readme():
                                                   ROOT / "tools" / "s7" / "release_build.py")
     rb = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rb)
-    readme = rb.player_readme("x86_64-linux")
+    readme = rb.player_readme("x86_64-linux", linked=tuple(patch_names()))
     listed = re.findall(r"^    SA2_TWEAKS=(\S+) +(.+)$", readme, re.M)
     assert listed == [(r["name"], r["summary"]) for r in TS.rows(RUNTIME)]
 

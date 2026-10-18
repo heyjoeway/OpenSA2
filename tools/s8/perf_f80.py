@@ -227,7 +227,7 @@ def arm64_link(a) -> int:
     AL.SHIMS = str(SHIMS[mode].relative_to(ROOT))       # arm64_link compiles src / SHIMS
     ns = argparse.Namespace(cmd="link", out=a.out, objects=a.objects, triple=a.triple,
                             src=str(ROOT), gen=str(ROOT / "private" / "generated"),
-                            replay=a.replay, jobs=a.jobs, reference=False)
+                            replay=a.replay, jobs=a.jobs, reference=False, variants=a.variants)
     return AL.link(ns)
 
 
@@ -254,6 +254,8 @@ def main(argv=None) -> int:
     k.add_argument("--triple", default="aarch64-linux-musl")
     k.add_argument("--replay", action="append", default=[])
     k.add_argument("--jobs", type=int, default=4)
+    k.add_argument("--variants", default=None,
+                   help="tools/s8/variants/variants.py's output for --objects (arm64_link.py --variants)")
     a = ap.parse_args(argv)
     if a.cmd == "deps":
         print(json.dumps(deps(a.mode, a.memfast), indent=1))

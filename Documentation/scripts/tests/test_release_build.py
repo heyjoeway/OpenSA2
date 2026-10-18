@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -88,8 +89,9 @@ def rb(tmp_path, monkeypatch):
     monkeypatch.setattr(RB, "WIN_OBJECTS", (native_win,))
     calls: list[dict] = []
 
-    def step_game(src, work, out, f80=None, f80_note=None):
-        calls.append({"target": "x86_64-linux", "objects": f80, "f80": f80_note})
+    def step_game(src, work, out, f80=None, f80_note=None, variants=None):
+        calls.append({"target": "x86_64-linux", "objects": f80, "f80": f80_note,
+                      **({"variants": variants} if variants is not None else {})})
         return {}
 
     def step_game_windows(src, work, out, objects, f80_note=None):
@@ -259,6 +261,58 @@ def test_contradictory_f80_flags_are_refused(rb, args, refusal):
         rb["main"](*args)
     assert refusal in str(e.value)
     assert rb["calls"] == []
+
+
+def test_variants_go_to_the_linux_game_step_and_are_refused_for_windows(rb, tmp_path):
+    d = f80_build_at(RB.F80_OBJECTS["x86_64-linux"], TRIPLES["x86_64-linux"])
+    v = tmp_path / "variants"
+    assert rb["main"]("--variants", str(v)) == 0
+    [call] = rb["calls"]
+    assert (call["objects"], call["variants"]) == (d.resolve(), v)
+    with pytest.raises(SystemExit, match="the Linux game only"):
+        rb["main"]("--target", "x86_64-windows", "--variants", str(v))
+    with pytest.raises(SystemExit, match="native-x87 game"):
+        RB.variants_for(ROOT, v, None, [])
+
+
+def registered_patch_tree(tmp_path: Path) -> Path:
+    """A source tree whose runtime/sa2_tweaks.h is this checkout's with one more tweak, zz-patch,
+    registered as a code-patch tweak (SA2_TWEAK_LIST and SA2_TWEAK_PATCH_LIST), and the
+    tools/s4/tweak_sources.py release_build reads it with."""
+    src = tmp_path / "src"
+    (src / "runtime").mkdir(parents=True)
+    (src / "tools" / "s4").mkdir(parents=True)
+    shutil.copy(ROOT / "tools" / "s4" / "tweak_sources.py", src / "tools" / "s4")
+    h = (ROOT / "runtime" / "sa2_tweaks.h").read_text()
+    end = "    /* the end of the list */"
+    at = h.index(end, h.index("#define SA2_TWEAK_LIST(X)"))
+    h = h[:at] + '    X(SA2_TWEAK_ZZ_PATCH, "zz-patch", "zz on", "a code-patch tweak") \\\n' + h[at:]
+    at = h.index(end, h.index("#define SA2_TWEAK_PATCH_LIST(X)"))
+    h = h[:at] + "    X(SA2_TWEAK_ZZ_PATCH) \\\n" + h[at:]
+    (src / "runtime" / "sa2_tweaks.h").write_text(h)
+    return src
+
+
+def test_the_readme_lists_a_code_patch_tweak_only_when_the_game_links_it(tmp_path):
+    src = registered_patch_tree(tmp_path)
+    ts = load_module(src / "tools" / "s4" / "tweak_sources.py", "tweak_sources_release_test")
+    assert [r["name"] for r in ts.patches(src / "runtime")][-1:] == ["zz-patch"]
+    others = [(r["name"], r["summary"]) for r in ts.rows(ROOT / "runtime")
+              if r["name"] not in {p["name"] for p in ts.patches(ROOT / "runtime")}]
+
+    def listed(linked=()):
+        text = RB.player_readme("x86_64-linux", RB.NATIVE_MODE, src, linked)
+        return re.findall(r"^    SA2_TWEAKS=(\S+) +(.+)$", text, re.M)
+    assert others and listed() == others
+    assert listed(("zz-patch", "test-x")) == others + [("zz-patch", "a code-patch tweak")]
+    notes = {"game": {"variants": {"tweaks": [
+        {"name": "zz-patch", "spec": "tools/s8/variants/tweaks/zz-patch.json", "shipped": True},
+        {"name": "test-x", "spec": "tools/s8/variants/fixtures/test-x.json", "shipped": False}]}}}
+    assert RB.variant_tweaks(notes) == ("zz-patch", "test-x")
+    assert RB.unlinked_patches(src, {}) == ["zz-patch"] and RB.unlinked_patches(src, notes["game"]) == []
+    assert RB.variant_globs(notes) == ("tools/s8/variants/variants.py", "tools/s8/variants/tweaks/zz-patch.json",
+                                       "tools/s8/variants/fixtures/test-x.json")
+    assert RB.variant_globs({"game": {}}) == ()
 
 
 def test_the_readme_and_the_zip_say_which_build_the_release_holds(tmp_path):

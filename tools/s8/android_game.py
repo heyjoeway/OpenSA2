@@ -42,6 +42,14 @@ Variants (`link --variant`):
          lib/arm64-v8a/libsa2game.so and the app execs it with the launcher's settings.
   boot   the boot replay's build (the tick probe alone, no overlay), for tick_replay's comparison.
 
+Code-patch tweaks (`link --variants DIR`, not to be confused with `--variant`): DIR is what
+tools/s8/variants/variants.py `build --objects <the link's objects>` wrote. Its C is compiled after
+the hooks, its variant objects are linked after the extras and its wraps are added, once `linked`
+has checked DIR was built for these objects; link.rec names it (`variants`), and the code-patch
+tweaks runtime/sa2_tweaks.h registers that the library does not link (`patches_unlinked`, also
+said on stderr). `--work DIR` moves the
+link's objects and link directory out of the shared private/generated/s8/android/work.
+
 Subcommands:
   compile     the lifted image for aarch64-linux-android -fPIC into --objects (default
               private/generated/s8/android/objects): map, arms and extra populations as
@@ -381,10 +389,27 @@ def link_game(args: argparse.Namespace) -> int:
     src = Path(args.src).resolve()
     objects = Path(args.objects or F80_MODES[args.f80]).resolve()
     out = Path(args.out).resolve() if args.out else S8 / args.variant
-    work = WORK / args.variant
+    work = Path(os.path.abspath(args.work)) if getattr(args, "work", None) else WORK / args.variant
     work.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
     plan = plan_for(args.variant, src, work)
+    patches = None
+    if getattr(args, "variants", None):
+        # Code-patch tweaks (tools/s8/variants/variants.py `build --objects <these objects>`):
+        # their C after the hooks, their objects after the extras, their wraps after the plan's.
+        RB = release_modules()
+        patches = RB.load(src, "tools/s8/variants/variants.py", "variants").linked(Path(args.variants), objects)
+        import link_s4 as L4v  # noqa: PLC0415
+        clash = sorted(set(patches["wraps"]) & set(list(L4v.PRODUCTION_WRAPS) + list(plan["wraps"])))
+        if clash:
+            raise SystemExit(f"--variants wraps {clash}, which this link already wraps")
+        plan = dict(plan, extra=list(plan["extra"]) + [patches["c"]],
+                    wraps=list(plan["wraps"]) + patches["wraps"])
+    # The code-patch tweaks runtime/sa2_tweaks.h registers that this library does not link: the
+    # settings screen still offers each, and the game names it as one it was built without.
+    unlinked = release_modules().unlinked_patches(src, {"variants": patches["note"]} if patches else {})
+    if unlinked:
+        print(f"code-patch tweaks this library does not link: {', '.join(unlinked)}", file=sys.stderr)
     import link_s4 as L4  # noqa: PLC0415
     summary = json.loads((objects / "summary.json").read_text())
     if not summary.get("pic") or summary.get("target") != TRIPLE:
@@ -442,6 +467,7 @@ def link_game(args: argparse.Namespace) -> int:
               "-Wl,--build-id=sha1", "-Wl,-z,max-page-size=16384"]
              + [f"-Wl,-wrap={w}" for w in wrapped]
              + [str(o) for _, _, o in jobs] + [str(x) for x in lifted["extras"]]
+             + [str(x) for x in (patches["objects"] if patches else [])]
              + [str(shims)] + lifted["whole"] + ["-o", str(tmp)])
     rsp.write_text("\n".join(words) + "\n")
     t1 = time.time()
@@ -452,6 +478,7 @@ def link_game(args: argparse.Namespace) -> int:
            "ndk_clang": subprocess.run([clang, "--version"], capture_output=True,
                                        text=True).stdout.splitlines()[0],
            "hooks": plan["hooks"], "wraps": plan["wraps"], "wrapped": wrapped,
+           "variants": patches["note"] if patches else None, "patches_unlinked": unlinked,
            "f80_mode": args.f80,
            "main": rel(plan["main"]),
            "exe_overlay": ({"table": rel(plan["overlay"]), "sha256": sha256(plan["overlay"])}
@@ -876,6 +903,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="default private/generated/s8/android/<variant> (the game variant's is "
                          "the deliverable, private/generated/s8/android/game/libsa2game.so)")
     lk.add_argument("--jobs", type=int, default=4)
+    lk.add_argument("--work", default=None,
+                    help="where the objects and the link directory go (default "
+                         "private/generated/s8/android/work/<variant>)")
+    lk.add_argument("--variants", default=None,
+                    help="a directory tools/s8/variants/variants.py built for --objects: its "
+                         "code-patch tweaks are linked in (their C, variant objects and wraps)")
     sg = sub.add_parser("stage", help="push the installation and the binaries to the device")
     sg.add_argument("--install", default=str(ROOT / "private" / "install"),
                     help="the installation to copy (read only; default private/install, the "

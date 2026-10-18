@@ -71,6 +71,8 @@ A tweak is an optional change to the game's behavior that a player turns on with
 
 `Documentation/scripts/tests/test_tweaks.py` checks that the list, the files, and the Android lines agree. The header comment in `runtime/sa2_tweaks.h` gives the rules that every tweak follows.
 
+A Mod Loader patch that changes the game's code bytes cannot be applied as it is, because OpenSA2 never runs the game's original code. Such a patch becomes a code-patch tweak: a spec in `tools/s8/variants/tweaks/<name>.json` takes the place of the runtime file, and `tools/s8/variants/variants.py` translates each function that the patch reaches again from the patched bytes. `tools/s8/variants/README.md` describes the tool, its checks, and its limits.
+
 ## Understand the full build prerequisites
 
 The game build is a developer workflow, with a Linux build host used for desktop and Android targets. The existing scripts expect a local toolchain and generated files under the ignored `private/` directory.

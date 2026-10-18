@@ -130,6 +130,23 @@ is built as for the native-x87 game. The game's notes record the build (`f80`: m
 summary's, the pass's and the shims' sha256; no `f80` for the native-x87 game), the manifest's
 sources add the pass and shims sources (F80_SOURCE_GLOBS), and README.txt says which build the
 release holds (`player_readme`).
+
+Code-patch tweaks (`--variants DIR`, the Linux game only)
+-------------------------------------------------------
+A Mod Loader patch to the game's code bytes does nothing here, since the lifted game never runs
+those bytes: tools/s8/variants/variants.py `build --objects <the game's f80 build> --out DIR` lifts
+each function such a patch reaches again from the patched bytes, as a variant, and writes the C
+that names the patch's tweak to runtime/sa2_tweaks.c and wraps each such function
+(runtime/sa2_tweaks.h, "Add a code-patch tweak"). `--variants DIR` links that C, the variant
+objects and the wraps into the game, after `variants_for` checks that DIR was built for the f80
+build this game links and that no file moved since; the game's notes record it (`variants`), and
+the manifest's sources add the tool and the specs it built from (`variant_globs`). With no tweak
+named in SA2_TWEAKS, and in every replay, each wrap only calls the lifted original.
+
+README.txt lists every tweak in runtime/sa2_tweaks.h but the code-patch tweaks the game does not
+link (`player_readme`), and the build names those (`unlinked_patches`): a Windows game, a Linux
+game built without --variants, or variants built without that tweak's spec. When DIR links a test
+fixture (tools/s8/variants/fixtures/), the build says so, and README.txt leaves it out.
 """
 from __future__ import annotations
 
@@ -193,6 +210,9 @@ PERF_F80_MODES = ("exact", "double")
 F80_SOURCE_GLOBS = ("tools/s8/perf_f80.py", "tools/s8/f80_double.py", "tools/s7/f80_legalize.py",
                     "tools/s8/f80_shims_double.c", "tools/s7/f80_shims.c")
 PERF_F80 = ROOT / "tools" / "s8" / "perf_f80.py"
+# A game linked with code-patch tweaks (--variants) adds the tool that made them, and the specs it
+# built them from (variant_globs).
+VARIANT_TOOL = "tools/s8/variants/variants.py"
 STEPS = ("tables", "game", "players", "install", "launch", "assemble")
 TAG = "next+allarms"
 GAME = "sa2-game"
@@ -645,11 +665,26 @@ def f80_linkdir(root: Path, work: Path, staged_extras: list[Path]) -> tuple[Path
     return linkroot, [extra[o.name] for o in staged_extras] + [root / F80_SHIMS]
 
 
+def variants_for(src: Path, variants: Path, objects: Path | None, wraps: list[str]) -> dict:
+    """tools/s8/variants/variants.py `linked` for a built variants directory (module docstring,
+    "Code-patch tweaks"): its C, objects and wraps, refused by name when they were built for
+    other lifted objects than `objects`, or when a wrap is one the link already has."""
+    if objects is None:
+        raise SystemExit("release_build: --variants are built for an f80 build's lifted objects; the "
+                         "native-x87 game (--f80 native) links the staged objects, which they are not")
+    v = load(src, "tools/s8/variants/variants.py", "variants").linked(variants, objects)
+    clash = sorted(set(v["wraps"]) & set(wraps))
+    if clash:
+        raise SystemExit(f"release_build: --variants wraps {clash}, which this link already wraps")
+    return v
+
+
 def step_game(src: Path, work: Path, out: Path, f80: Path | None = None,
-              f80_note: dict | None = None) -> dict:
+              f80_note: dict | None = None, variants: Path | None = None) -> dict:
     """The game, linked as play_live links its boot session, with the overlay table and the
     launch observer in the tick probe's place; with `f80`, from that f80 build's lifted image
-    (`f80_note` its f80_build check, made here when not given); without, the native-x87 game."""
+    (`f80_note` its f80_build check, made here when not given); without, the native-x87 game.
+    With `variants`, the code-patch tweaks built there too (variants_for)."""
     print("== game", flush=True)
     m = source_modules(src)
     tr, pr, rr, l4 = m["TR"], m["PR"], m["RR"], m["L4"]
@@ -674,6 +709,14 @@ def step_game(src: Path, work: Path, out: Path, f80: Path | None = None,
     hooks = [obs, src / pr.RECORDER]
     wraps = [tr.WRAP] + list(pr.WRAPS)
     extra = extra + hooks
+    patches = None
+    if variants is not None:
+        patches = variants_for(src, variants, f80, list(l4.PRODUCTION_WRAPS) + wraps)
+        extra, objects, wraps = (extra + [patches["c"]], objects + patches["objects"],
+                                 wraps + patches["wraps"])
+        named = [t["name"] + ("" if t.get("shipped") else " (a test fixture, in no tweak list)")
+                 for t in patches["note"]["tweaks"]]
+        print(f"  variants: {', '.join(named) or 'no code-patch tweak'} ({rel(variants)})", flush=True)
     state = {"name": GAME, "tag": TAG, "hooks": [rel(h) for h in hooks], "wraps": wraps}
     t0 = time.time()
     # rebuild: every object compiled afresh (link_s4's freshness test is mtimes alone).
@@ -702,6 +745,8 @@ def step_game(src: Path, work: Path, out: Path, f80: Path | None = None,
             "observer_sha256": sha256(obs), "probe_args": list(rr.PROBE_ARGS)}
     if f80 is not None:
         note["f80"] = f80_note
+    if patches is not None:
+        note["variants"] = patches["note"]
     return note
 
 
@@ -766,6 +811,29 @@ def f80_globs(notes: dict) -> tuple:
     return F80_SOURCE_GLOBS if (notes.get("game") or {}).get("f80") else ()
 
 
+def variant_globs(notes: dict) -> tuple:
+    """When the game the notes describe links code-patch tweaks, the tool and the specs (within the
+    checkout) it built them from; else ()."""
+    v = (notes.get("game") or {}).get("variants")
+    if not v:
+        return ()
+    return (VARIANT_TOOL,) + tuple(t["spec"] for t in v.get("tweaks", []) if not Path(t["spec"]).is_absolute())
+
+
+def variant_tweaks(notes: dict) -> tuple:
+    """The names of the code-patch tweaks the game the notes describe links (fixtures among them)."""
+    v = (notes.get("game") or {}).get("variants") or {}
+    return tuple(t["name"] for t in v.get("tweaks", []))
+
+
+def unlinked_patches(src: Path, game: dict) -> list[str]:
+    """The code-patch tweaks `src`'s runtime/sa2_tweaks.h registers that the game (its notes,
+    `game`) does not link."""
+    have = set(variant_tweaks({"game": game}))
+    rows = load(src, "tools/s4/tweak_sources.py", "release_tweak_sources").patches(src / "runtime")
+    return [r["name"] for r in rows if r["name"] not in have]
+
+
 def game_f80_mode(notes: dict) -> str:
     """The f80 mode of the game the notes describe: its f80 build's, else NATIVE_MODE."""
     return ((notes.get("game") or {}).get("f80") or {}).get("mode") or NATIVE_MODE
@@ -781,15 +849,18 @@ README_BUILD = {
 }
 
 
-def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT) -> str:
+def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT, linked: tuple = ()) -> str:
     """The player's README.txt at the release's top: how to start, what the first start does,
     controllers, saves and where the logs are, the tweaks (each one's summary in `src`'s
-    runtime/sa2_tweaks.h SA2_TWEAK_LIST), and which build of the game it is (`f80_mode`,
-    game_f80_mode's). Written by the assemble step, so it is in the manifest."""
+    runtime/sa2_tweaks.h SA2_TWEAK_LIST, but the code-patch tweaks not in `linked`, the ones the
+    game links: variant_tweaks), and which build of the game it is (`f80_mode`, game_f80_mode's).
+    Written by the assemble step, so it is in the manifest."""
     win = target == "x86_64-windows"
-    tweaks = load(src, "tools/s4/tweak_sources.py", "release_tweak_sources").rows(src / "runtime")
+    ts = load(src, "tools/s4/tweak_sources.py", "release_tweak_sources")
+    left_out = {r["name"] for r in ts.patches(src / "runtime")} - set(linked)
+    tweaks = [r for r in ts.rows(src / "runtime") if r["name"] not in left_out]
     if not tweaks:
-        raise SystemExit(f"release_build: {src / 'runtime' / 'sa2_tweaks.h'} lists no tweak")
+        raise SystemExit(f"release_build: {src / 'runtime' / 'sa2_tweaks.h'} lists no tweak this game has")
     pad = max(len(t["name"]) for t in tweaks)
     build = README_BUILD.get(f80_mode, [f"  The game here is the {f80_mode} f80 build (tools/s8/perf_f80.py)."])
     run = "bin\\sa2recomp.exe (double-click it)" if win else "bin/sa2recomp"
@@ -833,7 +904,11 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT) ->
 
 def step_assemble(src: Path, work: Path, out: Path, notes: dict) -> None:
     print("== assemble", flush=True)
-    (out / README).write_text(player_readme("x86_64-linux", game_f80_mode(notes), src))
+    unlinked = unlinked_patches(src, notes.get("game") or {})
+    if unlinked:
+        print(f"  code-patch tweaks the game does not link: {', '.join(unlinked)} (README.txt leaves them "
+              "out; the game names them if SA2_TWEAKS does)", flush=True)
+    (out / README).write_text(player_readme("x86_64-linux", game_f80_mode(notes), src, variant_tweaks(notes)))
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != MANIFEST)
     missing = [n for n in [f"bin/{GAME}", f"bin/{LAUNCHER}", f"bin/{INSTALLER}", ENV_FILE,
                            "share/dxvk.conf"] + [f"bin/{n}" for n in PLAYERS.values()]
@@ -845,7 +920,7 @@ def step_assemble(src: Path, work: Path, out: Path, notes: dict) -> None:
               "exe_overlay_table_sha256": sha256(work / "overlay" / "sa2_exe_overlay_table.c")}
     head = {"schema": SCHEMA, "generated_by": "tools/s7/release_build.py", "target": "x86_64-linux",
             "written": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "sources": sources(src, SOURCE_GLOBS + f80_globs(notes)),
+            "sources": sources(src, SOURCE_GLOBS + f80_globs(notes) + variant_globs(notes)),
             "observer_sha256": sha256(work / "game" / OBSERVER) if (work / "game" / OBSERVER).is_file() else None,
             "host_libraries": list(HOST_LIBS), **tables, **notes}
     # No path of the build machine's: the checkout's are written relative to it, the rest from ~.
@@ -999,6 +1074,10 @@ def step_launch_windows(src: Path, work: Path, out: Path) -> None:
 
 def step_assemble_windows(src: Path, work: Path, out: Path, notes: dict) -> None:
     print("== assemble (x86_64-windows)", flush=True)
+    unlinked = unlinked_patches(src, {})
+    if unlinked:
+        print(f"  code-patch tweaks the Windows game does not link (tools/s7/win_link.py takes no "
+              f"variants yet): {', '.join(unlinked)}; README.txt leaves them out", flush=True)
     (out / README).write_text(player_readme("x86_64-windows", game_f80_mode(notes), src), newline="\r\n")
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != MANIFEST)
     missing = [n for n in [f"bin/{GAME}.exe", f"bin/{LAUNCHER}.exe", f"bin/{INSTALLER}.exe",
@@ -1039,13 +1118,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="another tools/s8/perf_f80.py build for the target's triple "
                          "(x86_64-linux-musl or x86_64-windows-gnu) in place of the default double "
                          "build: its lifted objects and f80 shims")
+    ap.add_argument("--variants", type=Path, default=None,
+                    help="(x86_64-linux) a directory tools/s8/variants/variants.py built for the "
+                         "game's lifted objects: its code-patch tweaks are linked into the game "
+                         "(module docstring, \"Code-patch tweaks\")")
     ap.add_argument("--only", default=",".join(STEPS))
     a = ap.parse_args(argv)
     f80_dir, f80_mode = f80_choice(a.target, a.f80, a.f80_objects, a.win_objects)
     windows = a.target == "x86_64-windows"
+    if a.variants is not None and windows:
+        raise SystemExit("release_build: --variants is linked into the Linux game only; the Windows "
+                         "game's link (tools/s7/win_link.py) does not take them yet")
     a.out = a.out or (WIN_OUT if windows else OUT)
     a.work = a.work or (WIN_WORK if windows else WORK)
-    src, out, work = a.src.resolve(), a.out.resolve(), a.work.resolve()
+    # Absolute, not resolved: in a worktree whose private/ is a link to the main checkout's, a
+    # resolved --out leaves GEN (this checkout's private/generated) and link_s4's records.
+    src, out, work = a.src.resolve(), Path(os.path.abspath(a.out)), Path(os.path.abspath(a.work))
     steps = [s for s in a.only.split(",") if s]
     bad = [s for s in steps if s not in STEPS]
     if bad:
@@ -1087,7 +1175,7 @@ def main(argv: list[str] | None = None) -> int:
     if "tables" in steps:
         step_tables(src, work)
     if "game" in steps:
-        notes["game"] = step_game(src, work, out, f80_dir, f80_note)
+        notes["game"] = step_game(src, work, out, f80_dir, f80_note, a.variants)
     if "players" in steps:
         notes["players"] = step_players(src, work, out)
     if "install" in steps:

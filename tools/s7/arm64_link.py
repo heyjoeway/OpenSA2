@@ -37,6 +37,12 @@ runtime/cpu_state.h exports sa2_f80_from_f64, sa2_f80_to_f64 and sa2_f80_to_f32 
 sa2_f80 type, and the first aarch64 link of the shims beside the runtime failed on those three
 names as duplicate symbols (2026-10-11), so tools/s7/f80_legalize.py's calls were renamed.
 
+`--variants DIR` adds code-patch tweaks: tools/s8/variants/variants.py `build --objects <these
+objects> --out DIR` lifted the functions their patches reach again from the patched bytes and
+wrote the C that wraps them; the link compiles that C after the hooks, links the variant objects
+after the extras and adds the wraps, once `linked` has checked DIR was built for --objects. The
+link record names it (`variants`).
+
 Nothing is written outside --out. The link record and the build census are JSON written under
 names that do not end in `.json` (`.rec`): tools/s4/m7_inputs.py counts every *.json under
 private/generated as a possible game-run record.
@@ -235,9 +241,10 @@ def compile_one(job: tuple) -> dict:
 
 
 def compile_base(src: Path, gen: Path, out: Path, triple: str, plan: dict, lists: dict,
-                 jobs: int) -> tuple[list[Path], dict]:
-    """Compile the runtime, the generated C, the hooks and the main for `triple` into
-    out/obj/<replay>/, as link_s4's phase_compile names them; (objects in link order, log)."""
+                 jobs: int, more_c: list[Path] | None = None) -> tuple[list[Path], dict]:
+    """Compile the runtime, the generated C, the hooks (then `more_c`, the code-patch tweaks' C)
+    and the main for `triple` into out/obj/<replay>/, as link_s4's phase_compile names them;
+    (objects in link order, log)."""
     tag = plan["tag"]
     objdir = out / "obj" / plan["name"]
     objdir.mkdir(parents=True, exist_ok=True)
@@ -251,7 +258,7 @@ def compile_base(src: Path, gen: Path, out: Path, triple: str, plan: dict, lists
     state = json.loads((gen / EXTRA_STATE.format(tag=tag)).read_text())
     if state.get("objects"):
         extra_c.append(gen / EXTRA_C.format(tag=tag))
-    extra_c += [src / h for h in plan["hooks"]]
+    extra_c += [src / h for h in plan["hooks"]] + list(more_c or [])
     sources = [(s, src / "runtime" / s, cflags) for s in lists["RUNTIME_C"]]
     sources += [(s, src / "runtime" / s, cxxflags) for s in lists["RUNTIME_CXX"]]
     sources.append(("function_table_whole.c", table, cflags))
@@ -349,6 +356,17 @@ def build_shims(src: Path, out: Path, triple: str) -> dict:
             "source_sha256": sha256(source), "defines": list(SHIM_DEFINES), "command": cmd[1:]}
 
 
+def variants_for(src: Path, variants: Path, objects: Path) -> dict:
+    """tools/s8/variants/variants.py `linked` (of `src`) for a built variants directory: its C,
+    objects and wraps, refused by name when they were built for other lifted objects."""
+    import importlib.util  # noqa: PLC0415
+    spec = importlib.util.spec_from_file_location("variants", src / "tools/s8/variants/variants.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["variants"] = mod               # dataclasses resolve their module by name
+    spec.loader.exec_module(mod)
+    return mod.linked(variants, objects)
+
+
 def link(args: argparse.Namespace) -> int:
     src = Path(args.src).resolve()
     gen = Path(args.gen).resolve()
@@ -360,6 +378,12 @@ def link(args: argparse.Namespace) -> int:
     if args.reference and not x86(triple):
         raise SystemExit("--reference links the x86-64 objects: pass an x86 --triple")
     shims = None if args.reference else build_shims(src, out, triple)
+    patches = None
+    if getattr(args, "variants", None):
+        if args.reference:
+            raise SystemExit("--variants are built for a cross build's objects; --reference links "
+                             "the x86-64 link's own")
+        patches = variants_for(src, Path(args.variants), objects)
     names = args.replay or [e["name"] for e in json.loads(
         (ROOT / "Documentation" / "replays.json").read_text())["replays"]]
     status = 0
@@ -368,8 +392,14 @@ def link(args: argparse.Namespace) -> int:
         lifted = (reference_objects(gen, plan["tag"]) if args.reference else
                   lifted_objects(objects, gen, plan["tag"], out / "linkdir"))
         linkdir = lifted.get("dir") or out / "linkdir"
-        base, compiled = compile_base(src, gen, out, triple, plan, lists, args.jobs)
+        base, compiled = compile_base(src, gen, out, triple, plan, lists, args.jobs,
+                                      [patches["c"]] if patches else None)
         wrapped = list(lists["PRODUCTION_WRAPS"]) + plan["wraps"]
+        if patches:
+            clash = sorted(set(patches["wraps"]) & set(wrapped))
+            if clash:
+                raise SystemExit(f"--variants wraps {clash}, which the {name} link already wraps")
+            wrapped += patches["wraps"]
         binary = out / "bin" / name / "sa2_main"
         binary.parent.mkdir(parents=True, exist_ok=True)
         if binary.exists():
@@ -377,6 +407,7 @@ def link(args: argparse.Namespace) -> int:
         cmd = ([str(ZIG), "c++", "-target", triple, lists["OPT"]]
                + [f"-Wl,-wrap={w}" for w in wrapped]
                + [str(o) for o in base] + [str(x) for x in lifted["extras"]]
+               + [str(x) for x in (patches["objects"] if patches else [])]
                + ([str(ROOT / shims["object"])] if shims else []) + lifted["whole"]
                + ["-o", str(binary)])
         t0 = time.time()
@@ -388,6 +419,7 @@ def link(args: argparse.Namespace) -> int:
                                                   "PRODUCTION_WRAPS")},
                "fp_flags": [] if x86(triple) else list(FP_FLAGS),
                "compile": compiled, "shims": shims, "wrapped": wrapped,
+               "variants": patches["note"] if patches else None,
                "reference": bool(args.reference),
                "lifted": {"log": lifted["log"], "log_sha256": lifted["log_sha256"],
                           "dir": rel(linkdir),
@@ -491,6 +523,9 @@ def main(argv: list[str] | None = None) -> int:
     lk.add_argument("--gen", default=str(GEN), help="where the generated link inputs are")
     lk.add_argument("--replay", action="append", default=[], help="default: every registered")
     lk.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 4))
+    lk.add_argument("--variants", default=None,
+                    help="a directory tools/s8/variants/variants.py built for --objects: its "
+                         "code-patch tweaks are linked in (their C, variant objects and wraps)")
     lk.add_argument("--reference", action="store_true",
                     help="link the x86-64 link's own objects (with --triple x86_64-linux-musl), "
                          "the cross-target comparison's reference")

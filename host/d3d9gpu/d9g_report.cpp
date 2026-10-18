@@ -163,6 +163,7 @@ FaultSet parse_faults(const char* s) {
         else if (n == "present-scribble") f.bits |= F_PRESENT_SCRIBBLE;
         else if (n == "clear-noop") f.bits |= F_CLEAR_NOOP;
         else if (n == "geometry-noop") f.bits |= F_GEOMETRY_NOOP;
+        else if (n == "surface-lost") f.bits |= F_SURFACE_LOST;
         else if (const uint32_t m = map_fault_bit(n)) f.map_bits |= m;   // the state check's mapping faults
         else if (!n.empty()) f.error += (f.error.empty() ? "unknown fault " : ", ") + n;
     };
@@ -308,13 +309,16 @@ std::string Report::json() const {
               (x87_before == x87_after && mxcsr_before == mxcsr_after && claim_x87_before == claim_x87_after &&
                claim_mxcsr_before == claim_mxcsr_after) ? "true" : "false");
     s += strf("  \"present\": {\"mode\": %s, \"interval\": %s, \"swapchain_mode\": %s, \"presents\": %llu, "
-              "\"presented\": %llu, \"frames_without_swapchain_texture\": %llu, \"failures\": %llu, "
+              "\"presented\": %llu, \"frames_without_swapchain_texture\": %llu, \"surface_lost\": %llu, \"failures\": %llu, "
               "\"swapchain_size\": [%u, %u], \"scribbles\": %llu, \"basis\": \"frames are read back (GetRenderTargetData) "
               "before Present; SDL_gpu gives no swapchain texture while the window is hidden, occluded or minimised, "
-              "which is counted here and changes no frame\"},\n",
+              "which is counted here and changes no frame; surface_lost counts those of them whose window had no "
+              "surface (Android destroys it in the background) or whose acquire failed: drawn and submitted, not shown, "
+              "answered D3D_OK as DXVK answers them\"},\n",
               jstr(present_mode).c_str(), jstr(present_interval).c_str(), jstr(swapchain_mode).c_str(),
               (unsigned long long)presents, (unsigned long long)presented, (unsigned long long)no_swapchain_texture,
-              (unsigned long long)present_failures, swapchain_w, swapchain_h, (unsigned long long)scribbles);
+              (unsigned long long)present_surface_lost, (unsigned long long)present_failures, swapchain_w, swapchain_h,
+              (unsigned long long)scribbles);
     s += strf("  \"draws\": {\"drawn\": %llu, \"total\": %llu, \"fault_uncounted\": %llu, "
               "\"accepted\": %llu, \"unmapped_count\": %llu, \"backend_failed_count\": %llu, \"suppressed_count\": %llu, "
               "\"encoded\": %s, \"unmapped\": %s, \"backend_failed\": %s, \"fault_suppressed\": %s, "
@@ -333,13 +337,14 @@ std::string Report::json() const {
     s += strf("], \"after_last_present\": %llu},\n", (unsigned long long)frame_draws);
     s += strf("  \"clears\": {\"calls\": %llu, \"zero_count_with_rects\": %llu, \"refused\": %llu, \"empty_region\": %llu, "
               "\"regions\": %llu, \"full_colour\": %llu, \"full_depth_stencil\": %llu, \"partial_colour\": %llu, "
-              "\"partial_depth_stencil\": %llu, \"images_skipped\": %llu, \"past_edge\": %llu, \"fault_noop\": %llu},\n",
+              "\"partial_depth_stencil\": %llu, \"images_skipped\": %llu, \"past_edge\": %llu, \"fault_noop\": %llu, "
+              "\"host_failures\": %llu},\n",
               (unsigned long long)clear_calls, (unsigned long long)clear_zero_count_rects,
               (unsigned long long)clear_refused, (unsigned long long)clear_empty, (unsigned long long)clear_regions,
               (unsigned long long)clear_full_colour, (unsigned long long)clear_full_depth,
               (unsigned long long)clear_partial_colour, (unsigned long long)clear_partial_depth,
               (unsigned long long)clear_skipped_images, (unsigned long long)clear_past_edge,
-              (unsigned long long)clear_fault_noop);
+              (unsigned long long)clear_fault_noop, (unsigned long long)clear_host_failures);
     s += strf("  \"uploads\": {\"texture_levels\": %llu, \"texture_bytes\": %llu, \"zero_init_bytes\": %llu, "
               "\"buffer_bytes\": %llu, \"up_vertex_bytes\": %llu, \"up_index_bytes\": %llu, \"up_frame_peak_bytes\": %llu, "
               "\"up_arena_uploads\": %llu, \"fan_cache_vertices\": %llu, \"fan_cache_uploads\": %llu, "

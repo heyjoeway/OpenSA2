@@ -122,6 +122,15 @@ public:
         for (auto& [key, object] : shaders_) SDL_ReleaseGPUShader(dev_, object->shader);
         if (ring_) SDL_ReleaseGPUTransferBuffer(dev_, ring_);
         if (down_) SDL_ReleaseGPUTransferBuffer(dev_, down_);
+        if (surface_gone_) {
+            // SDL_ReleaseWindowFromGPUDevice, and SDL_DestroyGPUDevice through it, would destroy the
+            // window's stale VkSurfaceKHR a second time (AfterAcquire::surface_gone): 0.1.0-alpha.3.1
+            // crashed there on Android, in libvulkan's DestroySurfaceKHR, when the app's icon was
+            // tapped during a session in the background. The device is left to the process's end.
+            std::fprintf(stderr, "d3d9gpu: the GPU device is left undestroyed: SDL would destroy the window's "
+                         "stale surface a second time\n");
+            return;
+        }
         if (win_) SDL_ReleaseWindowFromGPUDevice(dev_, win_);
         SDL_DestroyGPUDevice(dev_);
     }
@@ -709,17 +718,64 @@ public:
         auto it = tex_.find(bb);
         if (it == tex_.end()) { err_ = "present of an unknown texture"; return false; }
         if (!end_render() || !end_copy()) return false;
+        presents_++;
         if (win_) {
             SDL_GPUCommandBuffer* cb = cmd();
             if (!cb) return false;
+            // A frame the window has no surface for is drawn and submitted without the blit, and
+            // Present succeeds (AfterAcquire, DXVK's rule): the command buffer holds the frame's
+            // draws and uploads, which later frames need.
+            const auto lost = [&](std::string why) {
+                out->no_swapchain_texture = out->surface_lost = true;
+                out->surface_lost_reason = std::move(why);
+                return submit(false);
+            };
+            if (surface_gone_)
+                return lost("SDL could not make the window's surface again earlier in this session, and its "
+                            "swapchain is not acquired again (AfterAcquire::surface_gone)");
+#ifdef __ANDROID__
+            // Android destroys the window's surface while the app is in the background; SDL clears
+            // the window's ANativeWindow property then (SDL_android.c onNativeSurfaceDestroyed) and
+            // sets it once the new surface exists (onNativeSurfaceCreated). Without one, SDL's acquire
+            // would try to remake the surface and fail, leaving it gone (surface_gone): no acquire is
+            // made until the window has a surface again. SDL's acquire on the old swapchain then finds
+            // it lost and remakes the surface and the swapchain at the acquire after it.
+            if (!SDL_GetPointerProperty(SDL_GetWindowProperties(win_), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr))
+                return lost("Android has destroyed the window's surface: the app is in the background, or closing");
+#endif
             SDL_GPUTexture* sw = nullptr;
             Uint32 w = 0, h = 0;
             SDL_ClearError();
-            const bool acquired = SDL_WaitAndAcquireGPUSwapchainTexture(cb, win_, &sw, &w, &h);
+            bool acquired;
+            if ((report().fault.bits & F_SURFACE_LOST) && presents_ >= 2 && presents_ <= 4) {
+                // The negative control's fault: the acquire answers as it does on a lost surface.
+                acquired = false;
+                SDL_SetError("fault surface-lost: SDL_WaitAndAcquireGPUSwapchainTexture not called");
+            } else {
+                acquired = SDL_WaitAndAcquireGPUSwapchainTexture(cb, win_, &sw, &w, &h);
+            }
             swapchain_acquired_ = sw != nullptr;
-            if (!check_encoding_error("SDL_WaitAndAcquireGPUSwapchainTexture")) return false;
-            if (!acquired) {
-                err_ = "SDL_WaitAndAcquireGPUSwapchainTexture failed";
+            const char* sdl_error = SDL_GetError();
+            switch (after_acquire(acquired, sw != nullptr, sdl_error)) {
+            case AfterAcquire::blit:
+            case AfterAcquire::no_texture:
+                break;
+            case AfterAcquire::surface_lost: {
+                std::string why = std::string("SDL_WaitAndAcquireGPUSwapchainTexture: ") +
+                                  (sdl_error && *sdl_error ? sdl_error : "failed with no error");
+                SDL_ClearError();
+                return lost(std::move(why));
+            }
+            case AfterAcquire::surface_gone: {
+                surface_gone_ = true;
+                std::string why = std::string("SDL_WaitAndAcquireGPUSwapchainTexture: ") + sdl_error +
+                                  " (SDL 3.4.16 keeps the destroyed surface: no swapchain is acquired again)";
+                SDL_ClearError();
+                return lost(std::move(why));
+            }
+            case AfterAcquire::encoding_error:
+                if (!check_encoding_error("SDL_WaitAndAcquireGPUSwapchainTexture")) return false;
+                err_ = "SDL_WaitAndAcquireGPUSwapchainTexture failed with a swapchain texture";
                 discard_failed_commands();
                 return false;
             }
@@ -1414,6 +1470,8 @@ private:
     std::array<SDL_GPUFence*, 2> pending_{};
     uint32_t pending_count_ = 0;
     bool poisoned_ = false, swapchain_acquired_ = false;
+    bool surface_gone_ = false;      // AfterAcquire::surface_gone: no swapchain acquire is made again
+    uint64_t presents_ = 0;          // present() calls (the surface-lost fault's frames)
     SDL_GPUCopyPass* copy_ = nullptr;
     // The open draw pass (open_pass, flush_pass): its attachments, and its draws' commands with
     // their variable parts in the three arenas (a command's span of one, [at, at + n)).

@@ -44,6 +44,7 @@ enum Fault : uint32_t {
     F_PRESENT_SCRIBBLE = 8,   // after each Present the back buffer is filled non-black
     F_GEOMETRY_NOOP = 32,    // omit geometry for the completed-pixel control
     F_CLEAR_NOOP = 16,        // Clear clears nothing and answers as it would
+    F_SURFACE_LOST = 64,      // the 2nd to 4th Present find the window's surface lost (d9g_gpu_sdl.cpp)
 };
 struct FaultSet {
     uint32_t bits = 0;
@@ -84,6 +85,7 @@ struct Report {
     std::string present_interval;           // IMMEDIATE | ONE
     std::string swapchain_mode;             // the SDL present mode chosen, "none" without a window
     uint64_t presents = 0, presented = 0, no_swapchain_texture = 0, present_failures = 0;
+    uint64_t present_surface_lost = 0;      // PresentInfo::surface_lost: drawn and submitted, not shown
     uint32_t swapchain_w = 0, swapchain_h = 0;
     uint64_t scribbles = 0;
     // draws
@@ -97,6 +99,7 @@ struct Report {
     uint64_t clear_calls = 0, clear_zero_count_rects = 0, clear_refused = 0, clear_empty = 0;
     uint64_t clear_full_colour = 0, clear_full_depth = 0, clear_partial_colour = 0, clear_partial_depth = 0;
     uint64_t clear_skipped_images = 0, clear_past_edge = 0, clear_fault_noop = 0, clear_regions = 0;
+    uint64_t clear_host_failures = 0;       // Clears a host GPU failure left undone, answered D3D_OK
     // uploads and readbacks
     uint64_t texture_level_uploads = 0, texture_upload_bytes = 0, zero_init_bytes = 0;
     uint64_t buffer_upload_bytes = 0, up_vertex_bytes = 0, up_index_bytes = 0, up_frame_peak = 0;
@@ -564,7 +567,10 @@ private:
     std::shared_ptr<const shader::Translated> translate_shader(const std::vector<uint32_t>& tokens, std::string* why);
     void dump_shader_bytecode(const std::vector<uint32_t>& tokens);
     HRESULT clear_impl(DWORD count, const D3DRECT* rects, DWORD flags, D3DCOLOR colour, float z, DWORD stencil);
-    bool clear_subresource(Surface* s, const ImageClear& ic, const ClearValue& v, bool depth);
+    // One subresource's clear: done (or skipped), not implemented here (by name: the guest is answered
+    // D3DERR_INVALIDCALL), or left undone by a host GPU failure (the guest is answered D3D_OK, as DXVK).
+    enum class ClearDone : uint8_t { done, not_implemented, host_failed };
+    ClearDone clear_subresource(Surface* s, const ImageClear& ic, const ClearValue& v, bool depth);
     // `type`: TexType::cube makes six faces of w x h (w == h), TexType::volume `depth` slices; both
     // with is_texture (NormalizeTextureProperties' D3DRTYPE_CUBETEXTURE and D3DRTYPE_VOLUMETEXTURE rules).
     HRESULT make_texture_image(uint32_t w, uint32_t h, uint32_t levels, uint32_t usage, uint32_t fmt, uint32_t pool,
@@ -651,6 +657,7 @@ private:
     std::map<DWORD, bool> light_enabled_;
     float clip_[6][4] = {};
     bool in_scene_ = false, swvp_ = false;
+    uint64_t surface_lost_run_ = 0;  // consecutive Presents without the window's surface (PresentInfo::surface_lost)
     VertexDecl* decl_ = nullptr;
     std::map<DWORD, VertexDecl*> fvf_decls_;   // SetFVF's declarations, the device's own
     VertexShader* vs_ = nullptr;

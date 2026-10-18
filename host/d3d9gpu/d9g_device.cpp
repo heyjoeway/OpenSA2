@@ -484,6 +484,20 @@ HRESULT STDMETHODCALLTYPE Device::Present(const RECT* src, const RECT* dst, HWND
     if (pi.presented) r.presented++;
     if (pi.no_swapchain_texture) r.no_swapchain_texture++;
     if (pi.sw_w) { r.swapchain_w = pi.sw_w; r.swapchain_h = pi.sw_h; }
+    // A frame without the window's surface (PresentInfo::surface_lost) was drawn and submitted, and is
+    // answered D3D_OK, as DXVK answers it (d3d9_swapchain.cpp:107-200): counted, and said on stderr
+    // where a run of them starts and where the surface is back.
+    if (pi.surface_lost) {
+        r.present_surface_lost++;
+        if (!surface_lost_run_++)
+            std::fprintf(stderr, "d3d9gpu: Present %llu: the window has no surface (%s): frames are drawn and submitted, "
+                         "not shown, until SDL makes it again\n", (unsigned long long)r.presents,
+                         pi.surface_lost_reason.c_str());
+    } else if (surface_lost_run_ && pi.presented) {
+        std::fprintf(stderr, "d3d9gpu: Present %llu: the window's surface is back after %llu frames without it\n",
+                     (unsigned long long)r.presents, (unsigned long long)surface_lost_run_);
+        surface_lost_run_ = 0;
+    }
     if (!ok) {
         r.present_failures++;
         std::fprintf(stderr, "d3d9gpu: Present failed: %s\n", gpu_->error().c_str());
@@ -753,23 +767,24 @@ HRESULT STDMETHODCALLTYPE Device::Clear(DWORD count, const D3DRECT* rects, DWORD
 // copies the region into a scratch texture of the same format, clears it there the
 // same way and copies it back (no shader and no SDL patch; exact for unorm8 colour and
 // for D24 at Z 0.0 and 1.0, the copies moving both depth-stencil aspects).
-bool Device::clear_subresource(Surface* s, const ImageClear& ic, const ClearValue& v, bool depth) {
+Device::ClearDone Device::clear_subresource(Surface* s, const ImageClear& ic, const ClearValue& v, bool depth) {
     Image& img = *s->image();
     Report& r = report();
-    if (ic.kind == ClearKind::skip) { r.clear_skipped_images++; return true; }
+    if (ic.kind == ClearKind::skip) { r.clear_skipped_images++; return ClearDone::done; }
     if (!img.gpu) {
         not_implemented_value("Clear of a surface with no GPU image");
-        return false;
+        return ClearDone::not_implemented;
     }
+    const auto host = [](bool ok) { return ok ? ClearDone::done : ClearDone::host_failed; };
     if (ic.kind == ClearKind::full) {
         (depth ? r.clear_full_depth : r.clear_full_colour)++;
-        return gpu_->clear_layer(img.gpu, s->face(), s->level(), v);
+        return host(gpu_->clear_layer(img.gpu, s->face(), s->level(), v));
     }
     (depth ? r.clear_partial_depth : r.clear_partial_colour)++;
     if (ic.past_edge) {
         r.clear_past_edge++;
         not_implemented_value("a partial Clear running past its image's edge (DXVK's clamps only the extent)");
-        return false;
+        return ClearDone::not_implemented;
     }
     const GFmt g = img.fi->gpu == GFmt::d24s8 ? gpu_->depth_format() : img.fi->gpu;
     const std::array<uint32_t, 3> key{uint32_t(g), ic.box.w, ic.box.h};
@@ -778,12 +793,12 @@ bool Device::clear_subresource(Surface* s, const ImageClear& ic, const ClearValu
         TexDesc d;
         d.w = ic.box.w; d.h = ic.box.h; d.levels = 1; d.fmt = g; d.target = true; d.sampled = false;
         scratch = create_gpu_texture(d);
-        if (!scratch) return false;
+        if (!scratch) return ClearDone::host_failed;
     }
     const uint32_t x = uint32_t(ic.box.x), y = uint32_t(ic.box.y);
-    return gpu_->copy_layers(img.gpu, s->face(), s->level(), x, y, scratch, 0, 0, 0, 0, ic.box.w, ic.box.h) &&
-           gpu_->clear(scratch, 0, v) &&
-           gpu_->copy_layers(scratch, 0, 0, 0, 0, img.gpu, s->face(), s->level(), x, y, ic.box.w, ic.box.h);
+    return host(gpu_->copy_layers(img.gpu, s->face(), s->level(), x, y, scratch, 0, 0, 0, 0, ic.box.w, ic.box.h) &&
+                gpu_->clear(scratch, 0, v) &&
+                gpu_->copy_layers(scratch, 0, 0, 0, 0, img.gpu, s->face(), s->level(), x, y, ic.box.w, ic.box.h));
 }
 
 // Clear (:1894-2075), in DXVK's order.
@@ -812,18 +827,33 @@ HRESULT Device::clear_impl(DWORD count, const D3DRECT* rects, DWORD flags, D3DCO
     depth_v.s = stencil;
     colour_v.colour = true;
     decode_d3dcolor((r.fault.bits & F_CLEAR_COLOUR) ? (colour ^ 0x00010101u) : colour, colour_v.rgba);
-    bool ok = true;
+    bool refused = false, host_failed = false;
+    const auto note = [&](ClearDone c) {
+        refused |= c == ClearDone::not_implemented;
+        host_failed |= c == ClearDone::host_failed;
+    };
     for (const ClearBox& box : regions) {
         r.clear_regions++;
         // ClearViewRect (:2013-2036): the depth-stencil first, then render targets 0..3.
         if (depth_v.depth || depth_v.stencil)
-            ok &= clear_subresource(ds_, clear_image(box, ds_->width(), ds_->height()), depth_v, true);
+            note(clear_subresource(ds_, clear_image(box, ds_->width(), ds_->height()), depth_v, true));
         if (flags & D3DCLEAR_TARGET)
             for (Surface* t : rt_)
-                if (t) ok &= clear_subresource(t, clear_image(box, t->width(), t->height()), colour_v, false);
+                if (t) note(clear_subresource(t, clear_image(box, t->width(), t->height()), colour_v, false));
     }
-    if (!ok) std::fprintf(stderr, "d3d9gpu: Clear failed: %s\n", gpu_->error().c_str());
-    return ok ? D3D_OK : D3DERR_INVALIDCALL;
+    // DXVK's Clear answers D3DERR_INVALIDCALL only at :1909 (above); what its context then does with the
+    // clear never reaches the answer. A host GPU failure is the host's: named on stderr (the first 20)
+    // and in the report (clears.host_failures, the failure), and the guest is answered D3D_OK. A case
+    // this device does not implement is refused by name (not_implemented_value), as before.
+    if (host_failed) {
+        r.clear_host_failures++;
+        backend_failure("Clear", gpu_->error());
+        if (r.clear_host_failures <= 20)
+            std::fprintf(stderr, "d3d9gpu: Clear: host failure, answered D3D_OK as DXVK answers it%s: %s\n",
+                         r.clear_host_failures == 20 ? " (later ones are counted in the report only)" : "",
+                         gpu_->error().c_str());
+    }
+    return refused ? D3DERR_INVALIDCALL : D3D_OK;
 }
 
 // ------------------------------------------------------------------ state

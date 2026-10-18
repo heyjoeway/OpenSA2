@@ -199,9 +199,43 @@ inline FitRect fit_rect(uint32_t bw, uint32_t bh, uint32_t w, uint32_t h, float 
 
 struct PresentInfo {
     bool presented = false;            // the back buffer reached a swapchain texture
-    bool no_swapchain_texture = false; // SDL gave none (hidden, occluded, minimised)
+    bool no_swapchain_texture = false; // SDL gave none (hidden, occluded, minimised; or surface_lost)
+    // The window had no surface to show the frame on: Android destroyed it (the app went to the
+    // background), or SDL's acquire failed (AfterAcquire::surface_lost, surface_gone). The frame was
+    // drawn and submitted, not shown, and Present answers D3D_OK; SDL makes the surface again at a
+    // later acquire, as DXVK's presenter does (dxvk_presenter.cpp:539-560). surface_lost_reason says
+    // why, for the device's log.
+    bool surface_lost = false;
+    std::string surface_lost_reason;
     uint32_t sw_w = 0, sw_h = 0;
 };
+
+// Present's step after SDL_WaitAndAcquireGPUSwapchainTexture (d9g_gpu_sdl.cpp present): `acquired`
+// its answer, `texture` whether it gave a swapchain texture, `sdl_error` SDL_GetError() after it.
+// DXVK's Present answers D3D_OK whatever the acquire does: PresentImage skips the blit when
+// acquireNextImage fails (d3d9_swapchain.cpp:860-), and the presenter remakes a lost surface at a
+// later acquire (dxvk_presenter.cpp:539-560). So an acquire that gave no texture never poisons the
+// command buffer, which holds the frame's draws and uploads and is submitted without the blit.
+enum class AfterAcquire : uint8_t {
+    blit,            // a texture and no error: the back buffer is blitted to it
+    no_texture,      // no texture and no error: SDL's hidden or minimised window, or a swapchain it
+                     // is remaking (or has found lost, to remake at the next acquire)
+    surface_lost,    // no texture and a failure (SDL's error, or the answer false): the surface lost
+                     // or not remade yet; SDL tries again at the next acquire
+    surface_gone,    // SDL could not remake the window's surface: SDL 3.4.16 destroys the old
+                     // VkSurfaceKHR before it makes the new one and keeps the destroyed handle when that
+                     // fails (SDL_gpu_vulkan.c:10215-10229, its error text below), so its next acquire
+                     // would destroy it a second time; no acquire is made again
+    encoding_error,  // a texture with an error, or false with a texture (outside SDL's contract): the
+                     // command buffer is poisoned, as every other SDL error poisons it
+};
+inline AfterAcquire after_acquire(bool acquired, bool texture, const char* sdl_error) {
+    const bool error = sdl_error && *sdl_error;
+    if (texture) return acquired && !error ? AfterAcquire::blit : AfterAcquire::encoding_error;
+    if (acquired && !error) return AfterAcquire::no_texture;
+    if (error && std::string(sdl_error) == "Failed to recreate Vulkan surface!") return AfterAcquire::surface_gone;
+    return AfterAcquire::surface_lost;
+}
 
 struct GpuCounters {
     uint64_t command_buffers = 0, submits = 0, waits = 0, ring_cycles = 0, dedicated_transfers = 0;
@@ -288,6 +322,10 @@ std::unique_ptr<Gpu> make_cpu_gpu(bool clamp_to_border = false, bool clip_and_cl
 bool cpu_gpu_bytes(Gpu* g, uint32_t tex, uint32_t level, std::string* out, uint32_t layer = 0);
 // The CPU model's description of a texture (its type, depth and layers as created), false for none.
 bool cpu_gpu_desc(Gpu* g, uint32_t tex, TexDesc* out);
+// Test-only host faults in the CPU model: its next `lost_presents` Presents find the window's surface
+// lost (PresentInfo::surface_lost, the frame submitted, true), and its next `failed_clears` clears fail
+// as a host GPU failure does (false, error() naming it). False for a backend that is not the model.
+bool cpu_gpu_inject(Gpu* g, uint32_t lost_presents, uint32_t failed_clears);
 // Test-only completed request values, never a rasterization result.
 const std::vector<draw::Values>* cpu_gpu_draws(Gpu* g);
 

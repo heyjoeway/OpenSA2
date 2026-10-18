@@ -548,6 +548,86 @@ void test_clears() {
     d->Release();
 }
 
+// Present's step after SDL's swapchain acquire (d9g_gpu.h after_acquire, d9g_gpu_sdl.cpp present):
+// only a texture with an error poisons; an acquire with no texture skips the blit.
+void test_acquire_steps() {
+    using d9g::AfterAcquire;
+    using d9g::after_acquire;
+    CHECK(after_acquire(true, true, "") == AfterAcquire::blit);
+    CHECK(after_acquire(true, true, nullptr) == AfterAcquire::blit);
+    CHECK(after_acquire(true, false, "") == AfterAcquire::no_texture);           // hidden, minimised, remaking
+    CHECK(after_acquire(false, false, "") == AfterAcquire::surface_lost);
+    CHECK(after_acquire(false, false, "vkAcquireNextImageKHR VK_ERROR_DEVICE_LOST") == AfterAcquire::surface_lost);
+    CHECK(after_acquire(true, false, "Device does not support requested present_mode!") == AfterAcquire::surface_lost);
+    CHECK(after_acquire(false, false, "Failed to recreate Vulkan surface!") == AfterAcquire::surface_gone);
+    CHECK(after_acquire(true, true, "SDL_BlitGPUTexture: oops") == AfterAcquire::encoding_error);
+    CHECK(after_acquire(false, true, "") == AfterAcquire::encoding_error);       // outside SDL's contract
+    CHECK(d9g::parse_faults("surface-lost").bits == d9g::F_SURFACE_LOST && d9g::parse_faults("surface-lost").error.empty());
+}
+
+// Android destroys the window's surface in the background: the Presents that find it lost answer
+// D3D_OK, and every frame after them draws as before (the CPU model's injected loss).
+void test_surface_loss() {
+    d9g::Device* d = make_device();
+    const D3DVERTEXELEMENT9 e[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, D3DDECL_END()};
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    CHECK(d->CreateVertexDeclaration(e, &decl) == D3D_OK && d->SetVertexDeclaration(decl) == D3D_OK);
+    float v[16] = {};
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET, 0xFF102030u, 1.0f, 0) == D3D_OK);
+    CHECK(d->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK);
+    CHECK(d9g::cpu_gpu_inject(d->gpu(), 3, 0));
+    const uint32_t colours[6] = {0xFF200000u, 0xFF002000u, 0xFF000020u, 0xFF404040u, 0xFF505050u, 0xFF606060u};
+    std::vector<IDirect3DTexture9*> textures;
+    for (uint32_t f = 0; f < 6; f++) {            // three frames without the surface, three after it is back
+        CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, colours[f], 1.0f, 0) == D3D_OK);
+        CHECK(d->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, 16) == D3D_OK);
+        IDirect3DTexture9* t = nullptr;
+        CHECK(d->CreateTexture(256, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr) == D3D_OK && t);
+        if (t) textures.push_back(t);
+        CHECK(bb_pixel(d, 640, 360) == colours[f]);
+        CHECK(d->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK);
+    }
+    const d9g::Report& r = d9g::report();
+    CHECK(r.presents == 7 && r.present_surface_lost == 3 && r.no_swapchain_texture == 3 && r.present_failures == 0);
+    CHECK((r.per_frame == std::vector<std::array<uint64_t, 3>>{{1, 1, 0}, {2, 7, 1}}));
+    CHECK(r.ans[d9g::I_DEVICE][17].calls == 7 && r.ans[d9g::I_DEVICE][17].failed == 0);    // Present
+    CHECK(r.ans[d9g::I_DEVICE][43].calls == 7 && r.ans[d9g::I_DEVICE][43].failed == 0);    // Clear
+    CHECK(r.ans[d9g::I_DEVICE][23].calls == 6 && r.ans[d9g::I_DEVICE][23].failed == 0);    // CreateTexture
+    CHECK(r.json().find("\"surface_lost\": 3,") != std::string::npos);
+    for (IDirect3DTexture9* t : textures) t->Release();
+    decl->Release();
+    CHECK(d->Release() == 0);
+}
+
+// A host GPU failure inside Clear is the host's: the guest is answered D3D_OK (DXVK's Clear answers
+// D3DERR_INVALIDCALL only for depth or stencil with no depth-stencil), and the report names it.
+void test_clear_host_failure() {
+    d9g::Device* d = make_device();
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET, 0xFF336699u, 1.0f, 0) == D3D_OK);
+    CHECK(d9g::cpu_gpu_inject(d->gpu(), 0, 1));
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET, 0xFF000000u, 1.0f, 0) == D3D_OK);           // a full clear's pass fails
+    CHECK(bb_pixel(d, 0, 0) == 0xFF336699u);                                                 // left undone
+    d9g::Report& r = d9g::report();
+    CHECK(r.clear_host_failures == 1 && r.failure == "Clear: injected host failure (cpu_gpu_inject)");
+    CHECK(std::find(r.draw_failures.begin(), r.draw_failures.end(), r.failure) != r.draw_failures.end());
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET, 0xFF00FF00u, 1.0f, 0) == D3D_OK);           // the next one clears
+    CHECK(bb_pixel(d, 0, 0) == 0xFF00FF00u && r.clear_host_failures == 1);
+    const D3DVIEWPORT9 vp{100, 50, 300, 200, 0.0f, 1.0f};
+    d->SetViewport(&vp);
+    CHECK(d9g::cpu_gpu_inject(d->gpu(), 0, 1));
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xFFFF0000u, 1.0f, 0) == D3D_OK);   // partial
+    CHECK(r.clear_host_failures == 2);
+    CHECK(bb_pixel(d, 150, 100) == 0xFFFF0000u);   // the depth-stencil's clear failed first, the colour's ran
+    // A refusal stays one: depth with no depth-stencil (DXVK :1909), and a case not implemented here.
+    d->SetDepthStencilSurface(nullptr);
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0) == D3DERR_INVALIDCALL);
+    d->SetRenderState(D3DRS_SRGBWRITEENABLE, TRUE);
+    CHECK(d->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0) == D3DERR_INVALIDCALL);
+    CHECK(r.ans[d9g::I_DEVICE][43].calls == 6 && r.ans[d9g::I_DEVICE][43].failed == 2 && r.clear_host_failures == 2);
+    CHECK(r.json().find("\"host_failures\": 2}") != std::string::npos);
+    d->Release();
+}
+
 void test_locks() {
     d9g::Device* d = make_device();
     IDirect3DTexture9* t = nullptr;
@@ -3068,6 +3148,9 @@ int main(int argc, char** argv) {
     test_answers();
     test_scene_fault();
     test_clears();
+    test_acquire_steps();
+    test_surface_loss();
+    test_clear_host_failure();
     test_locks();
     test_decoded_dxt();
     test_draws_and_frames();

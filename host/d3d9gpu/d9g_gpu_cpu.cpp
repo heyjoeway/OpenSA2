@@ -115,6 +115,7 @@ public:
         return true;
     }
     bool clear_layer(uint32_t id, uint32_t layer, uint32_t level, const ClearValue& v) override {
+        if (failed_clears_) { failed_clears_--; err_ = "injected host failure (cpu_gpu_inject)"; return false; }
         auto it = tex_.find(id);
         if (it == tex_.end() || block(it->second.d.fmt) || it->second.d.type == TexType::volume || level >= it->second.d.levels ||
             layer >= layers(it->second.d)) {
@@ -171,8 +172,17 @@ public:
     }
     bool present(uint32_t, PresentInfo* out) override {
         *out = PresentInfo{};
+        if (lost_presents_) {
+            lost_presents_--;
+            out->no_swapchain_texture = out->surface_lost = true;
+            out->surface_lost_reason = "injected surface loss (cpu_gpu_inject)";
+        }
         c_.submits++;
         return true;
+    }
+    void inject(uint32_t lost_presents, uint32_t failed_clears) {
+        lost_presents_ = lost_presents;
+        failed_clears_ = failed_clears;
     }
     bool finish() override { return true; }
     bool attach_window(SDL_Window*, bool, std::string* mode) override { *mode = "none"; return true; }
@@ -207,6 +217,7 @@ private:
     std::unordered_map<uint32_t, Tex> tex_;
     std::unordered_map<uint32_t, std::vector<uint8_t>> buf_;
     uint32_t next_ = 1;
+    uint32_t lost_presents_ = 0, failed_clears_ = 0;   // cpu_gpu_inject
     bool bc_ = true;
     GpuInfo info_;
     GpuCounters c_;
@@ -228,6 +239,12 @@ bool cpu_gpu_bytes(Gpu* g, uint32_t tex, uint32_t level, std::string* out, uint3
 bool cpu_gpu_desc(Gpu* g, uint32_t tex, TexDesc* out) {
     auto* c = dynamic_cast<CpuGpu*>(g);
     return c && c->desc_of(tex, out);
+}
+
+bool cpu_gpu_inject(Gpu* g, uint32_t lost_presents, uint32_t failed_clears) {
+    auto* c = dynamic_cast<CpuGpu*>(g);
+    if (c) c->inject(lost_presents, failed_clears);
+    return c != nullptr;
 }
 
 const std::vector<draw::Values>* cpu_gpu_draws(Gpu* g) {

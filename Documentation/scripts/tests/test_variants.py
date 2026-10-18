@@ -305,7 +305,7 @@ def lifted(tmp_path_factory):
             "text": (text0, text1), "variant": d / "obj" / "variant.o"}
 
 
-WIDE = 45                                # the list's tweaks in the wide build; `t` takes bit 45
+WIDE = 60                                # the list's tweaks in the wide build; `t` takes bit 60
 
 
 def wide_names() -> list[str]:
@@ -370,22 +370,25 @@ def test_a_fixture_past_bit_32_runs_its_variant_and_no_other_bit_does(lifted):
     assert out == "eax 2 esp 18004 ret 404242\n"
     assert err.splitlines() == ["sa2 tweaks: test tweak (SA2_TWEAKS=t)",
                                 "sa2 tweaks: test tweak: the patched lift of 0x00401000 runs"]
-    # Bit 45 cut to 32 bits is bit 13; bits 32 and 33 are the first a 32-bit mask lacks. None of
-    # them, nor every other tweak at once, runs the variant. Once the checkout's list has more than
-    # 32 tweaks those bits are real ones: a code-patch tweak, which this build does not link, is one
-    # it was built without, so with it alone none is on; any other is on with its list report.
+    # Bit WIDE cut to 32 bits is bit WIDE - 32; bits 32 and 33 are the first a 32-bit mask lacks.
+    # None of them, nor every other tweak at once, runs the variant. Once the checkout's list has
+    # more than 32 tweaks those bits are real ones: a code-patch tweak, which this build does not
+    # link, is one it was built without, so with it alone none is on; any other is on with its list
+    # report.
     unlinked = {r["name"] for r in TS.patches(ROOT / "runtime")}
     said = {r["name"]: r["report"] for r in TS.rows(ROOT / "runtime")}
     for on in (names[WIDE - 32], names[32], names[33], ",".join(names)):
         out, err = run(lifted["wide"], SA2_TWEAKS=on)
         assert out == "eax 1 esp 18004 ret 404242\n", on
         assert "the patched lift" not in err and ("none on" in err) == (on in unlinked), (on, err)
-    _, err = run(lifted["wide"], SA2_TWEAKS=f"{names[33]},{names[44]},t")
+    # The last padding tweak, which is past the checkout's list, reports "<name> on".
+    pad = names[WIDE - 1]
+    _, err = run(lifted["wide"], SA2_TWEAKS=f"{names[33]},{pad},t")
     first = [] if names[33] in unlinked else [said.get(names[33], names[33] + " on")]
     absent = (f'; this game was built without the code-patch tweak "{names[33]}", so it is ignored'
               if names[33] in unlinked else "")
-    assert err.splitlines()[0] == (f"sa2 tweaks: {', '.join(first + [names[44] + ' on', 'test tweak'])} "
-                                   f"(SA2_TWEAKS={names[33]},{names[44]},t{absent})")
+    assert err.splitlines()[0] == (f"sa2 tweaks: {', '.join(first + [pad + ' on', 'test tweak'])} "
+                                   f"(SA2_TWEAKS={names[33]},{pad},t{absent})")
     _, err = run(lifted["wide"], SA2_TWEAKS="?")
     hosts = [r["name"] for r in TS.host_rows(ROOT / "runtime")]
     assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join([n for n in names if n not in unlinked] + ['t'])}"

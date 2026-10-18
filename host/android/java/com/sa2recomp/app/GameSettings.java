@@ -102,6 +102,7 @@ final class GameSettings {
         new Tweak("gold-beetle-stays", "Gold Beetles stay", "A Gold Beetle no longer flies away after a moment; it stays until you destroy it. The extra points count in your saved scores and ranks."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),
         new Tweak("hide-radar", "Hide the emerald radar", "Treasure hunts (Knuckles and Rouge) show no emerald radar and no \"!\" over a piece, and play no radar beep, so you find the pieces by eye and with the hint monitors."),
+        new Tweak("hide-upgrade-models", "Hide upgrade models", "Upgrades like the Bounce Bracelet and Shovel Claws are not shown on the characters. Walkers keep their guns, because shots fire from them. Upgrades still work, and cutscenes still show them."),
         new Tweak("hold-toggle", "Tap to hold B", "A tap of B holds it down and the next tap lets go, for a mech's lock-on and the spin-dash charge. START lets go too."),
         new Tweak("infinite-lives", "Infinite lives", "Dying doesn't cost a life, so you never get a game over. 1-ups still add lives, and your save keeps the count you have."),
         new Tweak("metal-bounce-fix", "Fix Metal Sonic bounce crash", "Gives Metal Sonic's bounce attack his own model, so it no longer crashes the game when a cheat gives him all upgrades. Changes nothing in normal play."),

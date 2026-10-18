@@ -182,6 +182,7 @@
     X(SA2_TWEAK_GOLD_BEETLE_STAYS, "gold-beetle-stays", "gold beetle stays", "a Gold Beetle never flies away; it stays until you destroy it (raises scores)") \
     X(SA2_TWEAK_HIDE_HUD, "hide-hud", "hud hidden", "no score, time, rings and lives counters, and no kart race HUD; button prompts and the radar stay") \
     X(SA2_TWEAK_HIDE_RADAR, "hide-radar", "radar hidden", "no emerald radar, radar beep or radar '!' in the treasure hunts") \
+    X(SA2_TWEAK_HIDE_UPGRADE_MODELS, "hide-upgrade-models", "upgrade models hidden", "the upgrades a character has found are not drawn on it in play, but a walker keeps its guns; they still work") \
     X(SA2_TWEAK_INFINITE_LIVES, "infinite-lives", "lives held", "dying costs no life, so the lives never run out and there is no game over") \
     X(SA2_TWEAK_METAL_BOUNCE_FIX, "metal-bounce-fix", "metal-bounce fixed", "Metal Sonic's bounce attack uses his own model, so it no longer crashes with an all-upgrades cheat") \
     X(SA2_TWEAK_NO_2P_SPECIALS, "no-2p-specials", "no 2P specials", "no special attacks in 2-player battles, from rings or after losing a life") \

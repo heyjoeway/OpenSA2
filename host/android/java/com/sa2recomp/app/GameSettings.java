@@ -82,6 +82,7 @@ final class GameSettings {
         new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
         new Tweak("no-loading-tips", "Skip loading tips", "Hides Omochao's tips and the Now Loading animation while the game loads. Most loads show a black screen instead; a load over a picture already on screen, such as a stage's title card, keeps that picture."),
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
+        new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
     };
 
     String orientation = LANDSCAPE;

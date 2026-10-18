@@ -100,6 +100,7 @@
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \
     X(SA2_TWEAK_NO_LOADING_TIPS, "no-loading-tips", "loading-tips off", "no Omochao tips or Now Loading animation while loading: black, or the picture already on screen") \
     X(SA2_TWEAK_NO_POWERUP_MUSIC, "no-powerup-music", "powerup-music off", "no speed-up or invincibility jingle; the stage music keeps playing") \
+    X(SA2_TWEAK_QUIET_OMOCHAO, "quiet-omochao", "omochao quiet", "no Omochao in the stages: the hint robot neither appears nor gives hints") \
     /* the end of the list */
 
 enum {

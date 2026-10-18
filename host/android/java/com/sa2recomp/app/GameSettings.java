@@ -94,6 +94,7 @@ final class GameSettings {
         new Tweak("drives-to-minimals", "Chaos Drives become animals", "Destroyed enemies leave a small animal instead of a Chaos Drive. Changes what you can collect for your Chao."),
         new Tweak("event-bars-all", "Black bars on every cutscene", "Draws black bars at the sides of every cutscene on a wide picture, so each one looks as it does on a 4:3 screen. Movies are unchanged. Not together with Remove cutscene black bars: with both on, neither applies."),
         new Tweak("fast-stage-load", "Faster stage loading", "Starts a stage as soon as it has loaded, without waiting for the loading screen to finish. Chao World loads as usual."),
+        new Tweak("forgiving-restarts", "Forgiving restarts", "Restarting from the pause menu keeps your rings and costs no life, and a miss keeps your score. Rings kept through a restart still give extra lives, and your save keeps the lives you have and the rings you finish with. Scores, ranks and missions you finish with it on are saved as usual."),
         new Tweak("frametime-overlay", "Frame-time overlay", "Shows a small box at the top left with the frame rate, the frame time and the frames shown late."),
         new Tweak("gold-beetle-stays", "Gold Beetles stay", "A Gold Beetle no longer flies away after a moment; it stays until you destroy it. The extra points count in your saved scores and ranks."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),

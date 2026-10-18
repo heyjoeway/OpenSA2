@@ -338,6 +338,7 @@
 #include "texcodec.h"
 #include "touch_overlay.h"
 #include "tweaks.h"
+#include "tweaks/camera-invert.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -4679,6 +4680,7 @@ void Player::send_pads() {
         if (touch_platform_) t.connected = true;
         set.slot[0] = shared_slot(set.slot[0], t);
     }
+    sa2tw::camera_invert(&set);
     ++pad_sets_;
     input_->send_pads(set);
 }

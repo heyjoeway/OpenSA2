@@ -297,14 +297,16 @@ def test_the_readme_lists_a_code_patch_tweak_only_when_the_game_links_it(tmp_pat
     src = registered_patch_tree(tmp_path)
     ts = load_module(src / "tools" / "s4" / "tweak_sources.py", "tweak_sources_release_test")
     assert [r["name"] for r in ts.patches(src / "runtime")][-1:] == ["zz-patch"]
-    others = [(r["name"], r["summary"]) for r in ts.rows(ROOT / "runtime")
-              if r["name"] not in {p["name"] for p in ts.patches(ROOT / "runtime")}]
+    # Every tweak the desktop has, in name order: the game's but the code-patch ones, and the host's
+    # but the Android app's (runtime/sa2_tweaks.h, "Add a host tweak").
+    others = [(r["name"], r["summary"]) for r in ts.every_row(ROOT / "runtime")
+              if r["name"] not in {p["name"] for p in ts.patches(ROOT / "runtime")} and r.get("home") != "app"]
 
     def listed(linked=()):
         text = RB.player_readme("x86_64-linux", RB.NATIVE_MODE, src, linked)
         return re.findall(r"^    SA2_TWEAKS=(\S+) +(.+)$", text, re.M)
     assert others and listed() == others
-    assert listed(("zz-patch", "test-x")) == others + [("zz-patch", "a code-patch tweak")]
+    assert listed(("zz-patch", "test-x")) == sorted(others + [("zz-patch", "a code-patch tweak")])
     notes = {"game": {"variants": {"tweaks": [
         {"name": "zz-patch", "spec": "tools/s8/variants/tweaks/zz-patch.json", "shipped": True},
         {"name": "test-x", "spec": "tools/s8/variants/fixtures/test-x.json", "shipped": False}]}}}
@@ -335,3 +337,23 @@ def test_the_readme_and_the_zip_say_which_build_the_release_holds(tmp_path):
         rel.mkdir()
         (rel / "release.manifest").write_text("# " + json.dumps({"target": "x86_64-windows", **notes}) + "\n")
         assert RZ.f80_mode(rel) == mode
+
+
+def test_a_host_tweak_that_sorts_first_heads_share_game_env_in_the_readme(tmp_path):
+    # Host tweaks such as camera-invert sort before no-event-bars: the README lists every desktop
+    # tweak in name order under share/game.env, so the first line there is whichever sorts first
+    # (00-host here, before every real name, 2p-layout-in-1p's included), and an app tweak (home
+    # "app") is not listed at all.
+    src = registered_patch_tree(tmp_path)
+    h = (src / "runtime" / "sa2_tweaks.h").read_text()
+    end = "    /* the end of the list */"
+    at = h.index(end, h.index("#define SA2_TWEAK_HOST_LIST(X)"))
+    h = (h[:at] + '    X(SA2_TWEAK_00_HOST, "00-host", "00 on", "a player tweak", "player") \\\n'
+         '    X(SA2_TWEAK_01_APP, "01-app", "01 on", "an app tweak", "app") \\\n' + h[at:])
+    (src / "runtime" / "sa2_tweaks.h").write_text(h)
+    for target, env in (("x86_64-windows", "share\\game.env"), ("x86_64-linux", "share/game.env")):
+        text = RB.player_readme(target, RB.NATIVE_MODE, src)
+        assert f"  {env}:\n    SA2_TWEAKS=00-host " in text
+        assert f"  {env}:\n    SA2_TWEAKS=" in text and "\n    SA2_TWEAKS=no-event-bars " in text
+        assert f"  {env}:\n    SA2_TWEAKS=no-event-bars " not in text
+        assert "01-app" not in text

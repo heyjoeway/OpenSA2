@@ -14,10 +14,14 @@ LOCAL = Path(__file__).parents[3]
 SOURCE_ROOT = Path(os.environ.get('SA2_LATENCY_PLAYER_SOURCE_ROOT', str(LOCAL)))
 SDL_ROOT = Path(os.environ.get('SA2_LATENCY_PLAYER_SDL_ROOT', str(REPO / 'private/s5-tools/src/SDL3-3.4.16/include')))
 
-def child(command, cwd, folder):
+def child(command, cwd, folder, env=None):
+    """Run `command` with this process's environment less its SA2_ settings (a shell's SA2_TWEAKS or
+    SA2_REPLAY_TICKS would reach the extracted main), plus `env`."""
     folder.mkdir(parents=True, exist_ok=False)
-    (folder / 'command.json').write_text(json.dumps({'command': command, 'cwd': str(cwd)}, indent=2)+'\n')
-    result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=30)
+    (folder / 'command.json').write_text(json.dumps({'command': command, 'cwd': str(cwd), 'env': env or {}}, indent=2)+'\n')
+    environ = {k: v for k, v in os.environ.items() if not k.startswith('SA2_')}
+    environ.update(env or {})
+    result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=30, env=environ)
     (folder / 'stdout.log').write_bytes(result.stdout)
     (folder / 'stderr.log').write_bytes(result.stderr)
     (folder / 'exit.json').write_text(json.dumps({'exit_code':result.returncode,
@@ -33,6 +37,7 @@ def binary(tmp_path_factory):
     command=['/usr/bin/g++','-std=c++17','-O0','-g','-Wall','-Wextra','-Wno-unused-parameter',
         '-I'+str(SDL_ROOT),'-I'+str(SOURCE_ROOT/'host/player'),str(generated),
         str(SOURCE_ROOT/'host/player/input.cpp'),str(SOURCE_ROOT/'host/player/sha256.cpp'),
+        str(SOURCE_ROOT/'host/player/tweaks.cpp'),
         '-Wl,--wrap=clock_gettime','-Wl,--wrap=fclose','-Wl,--wrap=fflush','-Wl,--wrap=write','-Wl,--wrap=fopen',
         '-o',str(folder/'driver')]
     result=child(command,folder,folder/'compile')
@@ -41,10 +46,10 @@ def binary(tmp_path_factory):
 
 @pytest.fixture
 def run(binary,tmp_path):
-    def invoke(case,extra=(),script=None,expected_exit=0):
+    def invoke(case,extra=(),script=None,expected_exit=0,env=None):
         out=tmp_path/'fixture';out.mkdir()
         if script is not None:(out/'script.tsv').write_text(script)
-        result=child([str(binary),case,str(out),*extra],tmp_path,tmp_path/'child')
+        result=child([str(binary),case,str(out),*extra],tmp_path,tmp_path/'child',env)
         assert result.returncode==expected_exit, result.stderr.decode()+result.stdout.decode()
         observed=json.loads((out/'observed.json').read_text()) if (out/'observed.json').exists() else None
         return out,observed,result
@@ -135,6 +140,8 @@ def test_present_samples_surround_host_return(run,case,rows_count,errors,failure
         assert got==[dict(frame='1',virtual_us='16666',call_s='200.000000001',returned_s='200.000000123')]
         trace=(out/'trace.txt').read_text().splitlines()
         assert trace[trace.index('present')-1:trace.index('present')+3]==['clock','present','clock','pace_presented']
+        # The window's picture is placed (Player::place_picture, authored here) before the present's clock.
+        assert trace[trace.index('present')-2:trace.index('present')]==['place_picture','clock']
     trace=(out/'trace.txt').read_text().splitlines()
     assert trace.count('host_failure')==failures
     if case=='frame-overflow':assert 'present' not in trace
@@ -227,6 +234,26 @@ def test_live_bound_exception_only_checked_synthetic_mode(run,extra,expected):
 def test_existing_interactive_input_guards_remain(run,args):
     run('parser',extra=args,expected_exit=2)
 
+
+# main's host-tweak lines (host/player/tweaks.h) run as extracted, with the real tweaks.cpp: a play
+# session reads SA2_TWEAKS, and a synthetic run, a session outside play and a replay ignore it, by name.
+PLAY_ARGS=BASE_ARGS+['--end-fd','5']
+@pytest.mark.parametrize('args,env,line',[
+    (PLAY_ARGS,{},None),
+    (PLAY_ARGS,{'SA2_TWEAKS':''},None),
+    (PLAY_ARGS,{'SA2_TWEAKS':'no-event-bars'},'sa2 host tweaks (player): none on (SA2_TWEAKS=no-event-bars)'),
+    (PLAY_ARGS,{'SA2_TWEAKS':'no-event-bars','SA2_REPLAY_TICKS':'x'},
+        'sa2 host tweaks (player): SA2_TWEAKS=no-event-bars ignored in a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)'),
+    (PLAY_ARGS,{'SA2_TWEAKS':'no-event-bars','SA2_REPLAY_WORDS':''},
+        'sa2 host tweaks (player): SA2_TWEAKS=no-event-bars ignored in a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)'),
+    (BASE_ARGS+['--synthetic-keys','script.tsv','--max-frames','1'],{'SA2_TWEAKS':'no-event-bars'},
+        'sa2 host tweaks (player): SA2_TWEAKS=no-event-bars ignored in a synthetic-input run (--synthetic-keys or --synthetic-input)'),
+    (['--interactive','--video-fd','3','--cancel-fd','4','--end-fd','5'],{'SA2_TWEAKS':'no-event-bars'},
+        'sa2 host tweaks (player): SA2_TWEAKS=no-event-bars ignored outside play (play is --interactive with --input-path)')])
+def test_main_reads_host_tweaks_in_play_alone(run,args,env,line):
+    _,_,result=run('parser',extra=args,env=env)
+    lines=[l for l in result.stderr.decode().splitlines() if l.startswith('sa2 host tweaks')]
+    assert lines==([line] if line else [])
 
 def test_ready_requires_each_actual_start_and_header_field(run):
     out,doc,_=run('readiness-fields')
@@ -343,7 +370,7 @@ def build(source, template, out):
     (out/'driver.cpp').write_text(result)
     (out/'EXTRACTION.json').write_text(json.dumps({'source':str(source),'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
         'spans':bindings,'mechanical_transforms':['run() prefix renamed run_prefix(), ends before pace/mixer and returns 0',
-            'main() renamed parser_main()', 'report entry and publisher bracket authored JSON payload; full report serializer not compiled',
+            'main() renamed parser_main()', 'Player::place_picture authored (a trace entry): the window is a stand-in', 'report entry and publisher bracket authored JSON payload; full report serializer not compiled',
             'guard and finish spans inserted in authored callback methods'], 'driver_sha256':hashlib.sha256(result.encode()).hexdigest()},indent=2)+'\n')
     return out/'driver.cpp'
 
@@ -376,6 +403,7 @@ DRIVER = r'''
 #include "input.h"
 #include "prof.h"
 #include "sha256.h"
+#include "tweaks.h"
 namespace fs=std::filesystem;
 #define SA2_PLAYER_GPU 0
 using HRESULT=int32_t;
@@ -488,6 +516,7 @@ struct Player {
     void note_error(const std::string&){trace.push_back("host_failure");}
     bool device_failure(const std::string&){return false;}
     void readback_frame(uint64_t,const Sa2Record*){trace.push_back("readback");}
+    void place_picture(){trace.push_back("place_picture");}
     void audio_block(){}
     void pace_until(double){trace.push_back("pace_wait");}
     void read_dxvk_log(){trace.push_back("dxvk_read");}

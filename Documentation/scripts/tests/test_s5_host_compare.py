@@ -575,6 +575,10 @@ def test_public_pipeline_has_only_complete_producing_sources(specimen):
         'host/player/touch_overlay.h',
         'host/player/touch_overlay_shaders.py',
         'host/player/touch_overlay_spirv.h',
+        'host/player/tweaks.cpp',
+        'host/player/tweaks.h',
+        # Every player tweak's files: host/d3d9gpu/build.sh's record starts from the folder.
+        *sorted(f'host/player/tweaks/{p.name}' for p in (ROOT / 'host/player/tweaks').glob('*') if p.is_file()),
         'host/sa2_stream.h',
         'tools/pins.json',
         'tools/s5/compare_hosts.py',

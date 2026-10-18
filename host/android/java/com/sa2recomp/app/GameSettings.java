@@ -34,11 +34,15 @@ import java.util.Set;
  * way down by default, the middle of the screen's upper half), so the touch controls below it get
  * the rest of the screen.
  *
- * The tweaks. Each is a change to the game's own behaviour, off by default, sent as one name in
- * SA2_TWEAKS (runtime/sa2_tweaks.h, which lists them; the game ignores the setting in a replay).
- * TWEAKS holds one line for each: the settings screen's Tweaks card makes a switch of every line,
- * kept in the preferences as "tweak_<name>", and sessionSettings sends the names of those turned
- * on, in TWEAKS's order. A new tweak is one line there (runtime/sa2_tweaks.h, "Add a tweak").
+ * The tweaks. Each is a change to the game's own behaviour, or the host's, off by default, sent as
+ * one name in SA2_TWEAKS (runtime/sa2_tweaks.h, which lists them all: SA2_TWEAK_LIST the game's,
+ * SA2_TWEAK_HOST_LIST the host's; the game and the player ignore the setting in a replay). TWEAKS
+ * holds one line for each, a game tweak or a host tweak whose home is the player or this app, and
+ * a switch is a switch either way: the settings screen's Tweaks card makes one of every line, kept
+ * in the preferences as "tweak_<name>", and sessionSettings sends the names of those turned on, in
+ * TWEAKS's order, to the game and the player alike. A host tweak whose home is this app has its
+ * helper, Tweak<Name>.java, which asks tweaksOn. A new tweak is one line there
+ * (runtime/sa2_tweaks.h, "Add a tweak", "Add a host tweak").
  */
 final class GameSettings {
     static final String PREFS = "game_settings";
@@ -75,7 +79,8 @@ final class GameSettings {
         }
     }
 
-    /** Every tweak, one line each, in runtime/sa2_tweaks.h's order (name order). */
+    /** Every tweak, one line each, game and host alike (but a host tweak of the desktop launcher's), in
+     * name order, the order of runtime/sa2_tweaks.h's two lists together. */
     static final Tweak[] TWEAKS = {
         new Tweak("2p-layout-in-1p", "Two-player stage layouts", "13 one-player stages use their leftover two-player object layout: other rings, items and enemies. Hard Mode, Pumpkin Hill and Iron Gate keep their own. These layouts leave out most upgrades and Chao key boxes, and some switches and animals, so a mission may not be finishable. Clears, ranks and emblems still save; an upgrade the layout leaves out cannot be collected or saved."),
         new Tweak("all-events-skippable", "Skip any cutscene", "Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch."),

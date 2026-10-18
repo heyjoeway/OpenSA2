@@ -647,6 +647,8 @@ class Builder:
         for t in self.player_units():
             extra = ["-DSDL_MAIN_HANDLED", "-Dmain=sa2_player_main"] if t == "player" else []
             units.append((self.cxx, [*pflags, *extra], portable_source(f"host/player/{t}.cpp", gen), o / f"{t}.o"))
+        # Each host tweak of the player's (runtime/sa2_tweaks.h, "Add a host tweak"), by glob.
+        units += [(self.cxx, pflags, s, o / f"tweak_{s.stem}.o") for s in sorted((P / "tweaks").glob("*.cpp"))]
         units.append((self.cxx, [*self.d9g_flags(), f"-I{H / 'test'}", "-DSA2_CLEAR_MATRIX_STATIC"],
                       H / "test/clear_matrix.cpp", o / "clear_matrix.o"))
         # The app's session, with the launcher's relay and POSIX layer and the installer's config.

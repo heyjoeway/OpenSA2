@@ -23,12 +23,23 @@ here, not at link time, when one half is taken without the other.
 The reader's code-patch side is compiled from a copy of runtime/sa2_tweaks.h with one code-patch
 tweak registered (none is yet), linked with and without a stand-in for the file
 tools/s8/variants/variants.py generates; test_variants.py links the generated file itself.
+
+The host side (runtime/sa2_tweaks.h, "Add a host tweak"): the host list (SA2_TWEAK_HOST_LIST) is
+held with the game's to one name order and one spelling, each host tweak to its own file in its
+home and each file in the homes to its tweak, to the Android switches (but a launcher's) and to the
+release's README (but an app's). The game's reader and the host's (host/player/tweaks.cpp, built
+with the system g++ as host/player/build.sh builds it) are compiled from a copy of the header with
+one host tweak of each home registered (none is yet): the game names each as the host's and turns
+nothing on; the host's reader turns on its home's alone, names the others' by home, says nothing of
+a game tweak's name, and is off, saying why, out of play and in a replay. Every build of the player
+and the launcher compiles the reader and the homes' files.
 """
 from __future__ import annotations
 
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -153,6 +164,15 @@ def plain_names() -> list[str]:
     return [n for n in names() if n not in patch_names()]
 
 
+def host_names() -> list[str]:
+    return [r["name"] for r in TS.host_rows(RUNTIME)]
+
+
+def the_tweaks(game: list[str], hosts: list[str]) -> str:
+    """The end of the game's line when it names a name that is no tweak: the tweaks there are."""
+    return f"the tweaks: {', '.join(game)}" + (f"; the host tweaks: {', '.join(hosts)}" if hosts else "")
+
+
 # ------------------------------------------------------------------ the reader and the report
 
 # The intro (361) and a stage's (21) in-engine events, both framed for 4:3, a Dark story event
@@ -182,7 +202,7 @@ def test_a_name_that_is_no_tweak_is_named_and_ignored(exe, value, on):
     unknown = value.split(",")[-1]
     assert err.splitlines()[0] == (
         f"sa2 tweaks: {'event-bars off' if on else 'none on'} (SA2_TWEAKS={value}; no tweak is named "
-        f"\"{unknown}\", so it is ignored; the tweaks: {', '.join(plain_names())})")
+        f"\"{unknown}\", so it is ignored; {the_tweaks(plain_names(), host_names())})")
 
 
 @pytest.mark.parametrize("replay", ["SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"])
@@ -239,17 +259,22 @@ def android_tweaks() -> list[str]:
 
 
 def test_the_list_is_in_name_order_and_each_name_is_one_spelling():
-    rows = TS.rows(RUNTIME)
+    """The game's list and the host's, each in name order, and a name in one of them only."""
+    rows, hosts = TS.rows(RUNTIME), TS.host_rows(RUNTIME)
     assert rows and names() == sorted(names()) and len(set(names())) == len(rows)
-    for r in rows:
+    assert host_names() == sorted(host_names()) and len(set(host_names())) == len(hosts)
+    assert not set(names()) & set(host_names())
+    assert [r["name"] for r in TS.every_row(RUNTIME)] == sorted(names() + host_names())
+    for r in rows + hosts:
         assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", r["name"]), r
         assert r["bit"] == "SA2_TWEAK_" + r["name"].upper().replace("-", "_"), r
         assert r["report"] and r["summary"], r
+    assert all(r["home"] in TS.HOMES for r in hosts)
 
 
 def test_the_compiled_reader_holds_the_headers_list(exe):
     _, err = run(exe, SA2_TWEAKS="?")
-    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join(plain_names())})")
+    assert err.rstrip("\n").endswith(f"; {the_tweaks(plain_names(), host_names())})")
 
 
 def test_every_tweak_has_its_file_or_its_spec_and_each_its_tweak():
@@ -327,7 +352,6 @@ def patch_exes(zig, tmp_path_factory) -> dict:
 
 
 def test_a_code_patch_tweak_the_game_was_built_without_is_named_and_left_off(patch_exes):
-    others = ", ".join(plain_names())
     assert run(patch_exes["without"]) == (["0 0 0 0"], "")
     assert run(patch_exes["without"], SA2_TWEAKS="zz-patch") == (["0 0 0 0"], (
         'sa2 tweaks: none on (SA2_TWEAKS=zz-patch; this game was built without the code-patch tweak '
@@ -335,7 +359,7 @@ def test_a_code_patch_tweak_the_game_was_built_without_is_named_and_left_off(pat
     out, err = run(patch_exes["without"], SA2_TWEAKS="no-event-bars,zz-patch,zz-patch,test-fx")
     assert err == ('sa2 tweaks: event-bars off (SA2_TWEAKS=no-event-bars,zz-patch,zz-patch,test-fx; this game '
                    'was built without the code-patch tweak "zz-patch", so it is ignored; no tweak is named '
-                   f'"test-fx", so it is ignored; the tweaks: {others})\n')
+                   f'"test-fx", so it is ignored; {the_tweaks(plain_names(), host_names())})\n')
 
 
 def test_a_linked_code_patch_tweak_keeps_its_list_bit_and_a_fixture_takes_one_after(patch_exes):
@@ -346,22 +370,26 @@ def test_a_linked_code_patch_tweak_keeps_its_list_bit_and_a_fixture_takes_one_af
     assert run(patch_exes["with"], SA2_TWEAKS="test-fx,zz-patch") == (
         ["1 1 1 0"], "sa2 tweaks: zz on, fixture on (SA2_TWEAKS=test-fx,zz-patch)\n")
     _, err = run(patch_exes["with"], SA2_TWEAKS="?")
-    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join(plain_names() + ['zz-patch', 'test-fx'])})")
+    assert err.rstrip("\n").endswith(f"; {the_tweaks(plain_names() + ['zz-patch', 'test-fx'], host_names())})")
     assert run(patch_exes["with"], SA2_TWEAKS="zz-patch,test-fx", SA2_REPLAY_TICKS="/dev/null")[0] == ["0 0 0 0"]
 
 
 def test_every_tweak_has_its_android_switch_and_every_switch_its_tweak():
-    assert android_tweaks() == names()
+    """One switch for each tweak, the game's and the host's, in name order, but a host tweak of the
+    desktop launcher's, which does nothing on Android."""
+    assert android_tweaks() == [r["name"] for r in TS.every_row(RUNTIME) if r.get("home") != "launcher"]
 
 
 def test_every_tweak_is_in_the_release_readme():
+    """The game's and the host's in name order, but a host tweak of the Android app's."""
     spec = importlib.util.spec_from_file_location("release_build_tweaks_under_test",
                                                   ROOT / "tools" / "s7" / "release_build.py")
     rb = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rb)
     readme = rb.player_readme("x86_64-linux", linked=tuple(patch_names()))
     listed = re.findall(r"^    SA2_TWEAKS=(\S+) +(.+)$", readme, re.M)
-    assert listed == [(r["name"], r["summary"]) for r in TS.rows(RUNTIME)]
+    assert rb.DESKTOP_HOMES == ("player", "launcher")
+    assert listed == [(r["name"], r["summary"]) for r in TS.every_row(RUNTIME) if r.get("home") != "app"]
 
 
 @pytest.mark.parametrize("source", TS.sources(RUNTIME))
@@ -436,6 +464,8 @@ def test_the_runtime_digests_and_the_release_sources_count_the_tweak_files():
     for globs in (TR.RUNTIME_GLOBS, RR.RUNTIME_GLOBS, rb.SOURCE_GLOBS):
         assert "runtime/tweaks/*.c" in globs
     assert "tools/s4/tweak_sources.py" in rb.SOURCE_GLOBS
+    assert {"host/player/tweaks/*.cpp", "host/player/tweaks/*.h", "host/launch/tweaks/*.cpp",
+            "host/launch/tweaks/*.h", "runtime/*.h"} <= set(rb.SOURCE_GLOBS)
     assert {f"runtime/{s}" for s in TS.sources(RUNTIME)} <= set(rb.sources(ROOT))
 
 
@@ -586,3 +616,307 @@ NO_TWEAK = "/* sa2_harness_gamemode_after( is said here only */\n"
 def test_half_of_a_wrap_move_is_named(tmp_path, stage_wraps, spawn, tweak, production, refusals):
     root, runners = hooks_tree(tmp_path, stage_wraps, spawn, tweak)
     assert runtime_wrap_clashes(root, production, runners) == refusals
+
+
+# ------------------------------------------------------------------ the host tweaks
+
+PLAYER = ROOT / "host" / "player"
+CXX = ["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter"]
+# One host tweak of each home, and a second of the player's, in name order, after the list's own:
+# the driver prints the mask from zz-app's bit, so they are 1, 2, 4 and 8 there.
+HOST_LINES = ('    X(SA2_TWEAK_ZZ_APP, "zz-app", "app on", "an app tweak", "app") \\\n'
+              '    X(SA2_TWEAK_ZZ_LAUNCH, "zz-launch", "launch on", "a launcher tweak", "launcher") \\\n'
+              '    X(SA2_TWEAK_ZZ_PLAYER, "zz-player", "player on", "a player tweak", "player") \\\n'
+              '    X(SA2_TWEAK_ZZ_SCALE, "zz-scale", "scale on", "a second player tweak", "player") \\\n')
+ZZ = ["zz-app", "zz-launch", "zz-player", "zz-scale"]
+
+
+def test_every_host_tweak_has_its_file_in_its_home_and_every_file_its_tweak():
+    """A host tweak's own file is where its home says (host/player/tweaks/<name>.cpp,
+    host/launch/tweaks/<name>.cpp, host/android/.../Tweak<Name>.java), and asks for its bit there;
+    every file in the homes is a host tweak's (a player's or launcher's <name>.h beside its .cpp);
+    no host tweak has a runtime file or a spec."""
+    hosts = TS.host_rows(RUNTIME)
+    owned = set()
+    for r in hosts:
+        own = TS.host_file(r)
+        assert (ROOT / own).is_file(), f"{r['name']} (home {r['home']}) has no {own}"
+        text = (ROOT / own).read_text()
+        assert (r["bit"] if r["home"] != "app" else f'"{r["name"]}"') in text, f"{own} does not name its tweak"
+        owned |= {own, own[:-len(".cpp")] + ".h"} if own.endswith(".cpp") else {own}
+    assert [f for f in TS.host_files(ROOT) if f not in owned] == []
+    assert not {Path(s).stem for s in TS.sources(RUNTIME)} & set(host_names())
+    assert not {p.stem for p in (ROOT / TS.SPECS).glob("*.json")} & set(host_names())
+
+
+def test_the_homes_and_their_files(tmp_path):
+    rows = [{"name": "no-event-bars", "home": h} for h in ("player", "launcher", "app")]
+    assert [TS.host_file(r) for r in rows] == [
+        "host/player/tweaks/no-event-bars.cpp", "host/launch/tweaks/no-event-bars.cpp",
+        "host/android/java/com/sa2recomp/app/TweakNoEventBars.java"]
+    assert TS.java_class("2p-layout-in-1p") == "Tweak2pLayoutIn1p"
+    for rel in ("host/player/tweaks/a.cpp", "host/player/tweaks/a.h", "host/launch/tweaks/b.cpp",
+                "host/android/java/com/sa2recomp/app/TweakC.java", "host/android/java/com/sa2recomp/app/Ui.java"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("")
+    assert TS.host_files(tmp_path) == ["host/android/java/com/sa2recomp/app/TweakC.java", "host/launch/tweaks/b.cpp",
+                                       "host/player/tweaks/a.cpp", "host/player/tweaks/a.h"]
+
+
+@pytest.mark.parametrize("line, refusal", [
+    ('    X(SA2_TWEAK_ZZ, "zz", "zz on", "a tweak with no home") \\\n',
+     r"SA2_TWEAK_HOST_LIST has \d+ X\( lines, of which \d+ are its shape"),
+    ('    X(SA2_TWEAK_ZZ, "zz", "zz on", "a tweak", "desktop") \\\n', r"gives \['zz'\] a home that is none of"),
+])
+def test_a_host_line_the_tools_cannot_take_is_refused_by_name(tmp_path, line, refusal):
+    rt = host_header(tmp_path, line)
+    with pytest.raises(SystemExit, match=refusal):
+        TS.host_rows(rt)
+
+
+def host_header(d: Path, lines: str = HOST_LINES) -> Path:
+    """d/runtime: runtime/sa2_tweaks.c and a copy of runtime/sa2_tweaks.h with `lines` in
+    SA2_TWEAK_HOST_LIST; d/host/player: the host's reader, so its relative include finds the copy."""
+    rt = d / "runtime"
+    rt.mkdir(parents=True)
+    (rt / "sa2_tweaks.c").write_text((RUNTIME / "sa2_tweaks.c").read_text())
+    h = (RUNTIME / "sa2_tweaks.h").read_text()
+    end = "    /* the end of the list */"
+    at = h.index(end, h.index("#define SA2_TWEAK_HOST_LIST(X)"))
+    (rt / "sa2_tweaks.h").write_text(h[:at] + lines + h[at:])
+    hp = d / "host" / "player"
+    hp.mkdir(parents=True)
+    for f in ("tweaks.h", "tweaks.cpp"):
+        (hp / f).write_text((PLAYER / f).read_text())
+    return rt
+
+
+# The game with four host tweaks registered: sa2_tweak_on of the game's one tweak.
+HOST_GAME_DRIVER = r"""
+#include <stdio.h>
+#include "sa2_tweaks.h"
+int main(void) { printf("%d\n", sa2_tweak_on(SA2_TWEAK_NO_EVENT_BARS)); return 0; }
+"""
+# The host's reader: argv[1] the home; argv[2] the caller's reason it is no play session ("-" in
+# play), or "play:IPS", sa2tw::not_play's answer for its three flags (each 0 or 1: --interactive,
+# --input-path, synthetic input); argv[3], when given, "game": off() asks a game environment of its
+# own (GAME_<setting> in the driver's), as the launcher asks the one it gives the game, and not the
+# driver's. Prints the mask from zz-app's bit, sa2tw::on of three bits, and the line.
+HOST_DRIVER = r"""
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include "tweaks.h"
+int main(int argc, char** argv) {
+    if (argc != 3 && !(argc == 4 && !std::strcmp(argv[3], "game"))) return 2;
+    const char* why = std::strcmp(argv[2], "-") ? argv[2] : nullptr;
+    if (!std::strncmp(argv[2], "play:", 5) && std::strlen(argv[2]) == 8)
+        why = sa2tw::not_play(argv[2][5] == '1', argv[2][6] == '1', argv[2][7] == '1');
+    const char* why_off = argc == 3 ? sa2tw::off(why) : sa2tw::off(why, [](const char* k) {
+        return std::getenv((std::string("GAME_") + k).c_str());
+    });
+    const sa2tw::Reading r = sa2tw::read(std::getenv("SA2_TWEAKS"), why_off, argv[1]);
+    sa2tw::g_on = r.on;
+    std::printf("%u %d %d %d\n[%s]\n", r.on >> sa2tw::SA2_TWEAK_ZZ_APP_INDEX, sa2tw::on(sa2tw::SA2_TWEAK_ZZ_PLAYER),
+                sa2tw::on(sa2tw::SA2_TWEAK_ZZ_SCALE),
+                sa2tw::on(sa2tw::SA2_TWEAK_ZZ_LAUNCH), r.line.c_str());
+    return 0;
+}
+"""
+
+
+@pytest.fixture(scope="module")
+def host_exes(zig, tmp_path_factory) -> dict:
+    if shutil.which("g++") is None:
+        pytest.fail("g++ is not installed, and the host's reader is built with it (host/player/build.sh)")
+    d = tmp_path_factory.mktemp("host")
+    rt = host_header(d)
+    assert [r["name"] for r in TS.host_rows(rt)] == host_names() + ZZ
+    (d / "game.c").write_text(HOST_GAME_DRIVER)
+    (d / "host.cpp").write_text(HOST_DRIVER)
+    out = {"game": d / "game", "host": d / "host-reader"}
+    done = subprocess.run([str(zig), "cc", *CC[:-2], "-I", str(rt), str(d / "game.c"), str(rt / "sa2_tweaks.c"),
+                           "-o", str(out["game"])], capture_output=True, text=True, env=zig_env(d))
+    assert done.returncode == 0, done.stderr
+    done = subprocess.run([*CXX, "-I", str(d / "host" / "player"), str(d / "host.cpp"),
+                           str(d / "host" / "player" / "tweaks.cpp"), "-o", str(out["host"])],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    out["dir"] = d
+    return out
+
+
+def test_the_game_names_a_host_tweak_as_the_hosts_and_turns_nothing_on(host_exes):
+    game = host_exes["game"]
+    assert run(game) == (["0"], "")
+    assert run(game, SA2_TWEAKS="zz-player") == (["0"], (
+        'sa2 tweaks: none on (SA2_TWEAKS=zz-player; host tweak, not the game\'s: "zz-player" (the player\'s))\n'))
+    value = "no-event-bars, zz-launch,zz-app,zz-launch,bogus"
+    assert run(game, SA2_TWEAKS=value) == (["1"], (
+        f'sa2 tweaks: event-bars off (SA2_TWEAKS={value}; host tweaks, not the game\'s: "zz-app" (the app\'s), '
+        f'"zz-launch" (the launcher\'s); no tweak is named "bogus", so it is ignored; '
+        f'{the_tweaks(plain_names(), host_names() + ZZ)})\n'))
+    assert run(game, SA2_TWEAKS="zz-player,no-event-bars", SA2_REPLAY_WORDS="/dev/null") == (["0"], (
+        "sa2 tweaks: SA2_TWEAKS=zz-player,no-event-bars ignored in a replay (SA2_REPLAY_TICKS or "
+        "SA2_REPLAY_WORDS is set)\n"))
+
+
+def test_the_game_has_no_bit_for_a_host_tweak(zig, host_exes):
+    """A host tweak's bit is the host's alone (host/player/tweaks.h): the runtime cannot ask it."""
+    d = host_exes["dir"]
+    (d / "asks.c").write_text('#include "sa2_tweaks.h"\nint asks(void) { return sa2_tweak_on(SA2_TWEAK_ZZ_PLAYER); }\n')
+    done = subprocess.run([str(zig), "cc", *CC[:-2], "-I", str(d / "runtime"), "-c", str(d / "asks.c"),
+                           "-o", str(d / "asks.o")], capture_output=True, text=True, env=zig_env(d))
+    assert done.returncode != 0 and "SA2_TWEAK_ZZ_PLAYER" in done.stderr
+
+
+def host(exe: Path, home: str = "player", why: str = "-", *source: str, **env: str) -> list[str]:
+    out, err = run(exe, home, why, *source, **env)
+    assert err == ""
+    return out
+
+
+@pytest.mark.parametrize("env", [{}, {"SA2_TWEAKS": ""}])
+def test_the_host_reader_with_no_value_turns_nothing_on_and_says_nothing(host_exes, env):
+    assert host(host_exes["host"], **env) == ["0 0 0 0", "[]"]
+    assert host(host_exes["host"], "player", "outside play (a test)", **env) == ["0 0 0 0", "[]"]
+
+
+def test_the_host_reader_turns_on_its_homes_tweaks_in_list_order(host_exes):
+    exe = host_exes["host"]
+    assert host(exe, SA2_TWEAKS="zz-player") == ["4 1 0 0", "[sa2 host tweaks (player): player on (SA2_TWEAKS=zz-player)]"]
+    assert host(exe, SA2_TWEAKS=" zz-scale ,zz-player,zz-scale,") == [
+        "12 1 1 0", "[sa2 host tweaks (player): player on, scale on (SA2_TWEAKS= zz-scale ,zz-player,zz-scale,)]"]
+
+
+def test_the_host_reader_names_another_homes_tweak_and_leaves_the_games_names_alone(host_exes):
+    """A game tweak's name, and a name in neither list, are the game's to report (its line names
+    them): the host's line says nothing of them, never calling a game tweak unknown."""
+    exe = host_exes["host"]
+    assert host(exe, SA2_TWEAKS="no-event-bars,Zz-Player,bogus") == [
+        "0 0 0 0", "[sa2 host tweaks (player): none on (SA2_TWEAKS=no-event-bars,Zz-Player,bogus)]"]
+    assert host(exe, SA2_TWEAKS="zz-launch,zz-player,zz-app") == [
+        "4 1 0 0", '[sa2 host tweaks (player): player on (SA2_TWEAKS=zz-launch,zz-player,zz-app; not the player\'s: '
+        '"zz-app" (the app\'s), "zz-launch" (the launcher\'s))]']
+    assert host(exe, "launcher", SA2_TWEAKS="zz-player,zz-launch") == [
+        "2 0 0 1", '[sa2 host tweaks (launcher): launch on (SA2_TWEAKS=zz-player,zz-launch; not the launcher\'s: '
+        '"zz-player" (the player\'s))]']
+
+
+@pytest.mark.parametrize("why, env, said", [
+    ("outside play (play is --interactive with --input-path)", {},
+     "ignored outside play (play is --interactive with --input-path)"),
+    ("-", {"SA2_REPLAY_TICKS": "/dev/null"}, "ignored in a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)"),
+    ("outside play (x)", {"SA2_REPLAY_WORDS": "/dev/null"},
+     "ignored in a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)"),
+])
+def test_the_host_reader_is_off_out_of_play_and_in_a_replay_and_says_why(host_exes, why, env, said):
+    assert host(host_exes["host"], "player", why, SA2_TWEAKS="zz-player,zz-scale", **env) == [
+        "0 0 0 0", f"[sa2 host tweaks (player): SA2_TWEAKS=zz-player,zz-scale {said}]"]
+
+
+OUTSIDE = "ignored outside play (play is --interactive with --input-path)"
+SYNTHETIC = "ignored in a synthetic-input run (--synthetic-keys or --synthetic-input)"
+
+
+@pytest.mark.parametrize("flags, said", [
+    ("000", OUTSIDE),        # no --interactive: a stream file's replay
+    ("001", OUTSIDE),
+    ("010", OUTSIDE),
+    ("100", OUTSIDE),        # --interactive with no --input-path: the launcher's selftest
+    ("101", OUTSIDE),
+    ("111", SYNTHETIC),      # --interactive --input-path with --synthetic-keys or --synthetic-input
+    ("110", None),           # play: the launcher's, the Android session's
+])
+def test_the_players_play_check_is_play_alone(host_exes, flags, said):
+    """sa2tw::not_play, the player's main's check (player.cpp): play is --interactive with
+    --input-path and no synthetic input, and every other session says why its tweaks are off."""
+    out = host(host_exes["host"], "player", f"play:{flags}", SA2_TWEAKS="zz-player")
+    assert out == (["4 1 0 0", "[sa2 host tweaks (player): player on (SA2_TWEAKS=zz-player)]"] if said is None else
+                   ["0 0 0 0", f"[sa2 host tweaks (player): SA2_TWEAKS=zz-player {said}]"])
+
+
+REPLAY = "ignored in a replay (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)"
+
+
+@pytest.mark.parametrize("env, said", [
+    ({}, None),
+    ({"GAME_SA2_REPLAY_TICKS": "/dev/null"}, REPLAY),
+    ({"GAME_SA2_REPLAY_WORDS": ""}, REPLAY),                    # set, if empty, as the game asks it
+    ({"SA2_REPLAY_TICKS": "/dev/null"}, None),                  # the launcher's own, which the game never sees
+    ({"SA2_REPLAY_WORDS": "/dev/null", "GAME_SA2_REPLAY_TICKS": "x"}, REPLAY),
+])
+def test_the_launchers_replay_check_asks_the_games_environment_alone(host_exes, env, said):
+    """The launcher asks off() of the environment it gives the game (game.env's lines), never its
+    own: the game ignores its tweaks exactly when the launcher does."""
+    out = host(host_exes["host"], "launcher", "-", "game", SA2_TWEAKS="zz-launch", **env)
+    assert out == (["2 0 0 1", "[sa2 host tweaks (launcher): launch on (SA2_TWEAKS=zz-launch)]"] if said is None else
+                   ["0 0 0 0", f"[sa2 host tweaks (launcher): SA2_TWEAKS=zz-launch {said}]"])
+
+
+def test_a_game_tweaks_bit_cannot_be_asked_of_the_hosts_mask(host_exes):
+    """sa2tw::on takes a host tweak's sa2tw::Bit, never the game's enum: the mistake does not compile."""
+    d = host_exes["dir"]
+    (d / "asks.cpp").write_text('#include "tweaks.h"\nbool asks() { return sa2tw::on(SA2_TWEAK_NO_EVENT_BARS); }\n')
+    done = subprocess.run([*CXX, "-I", str(d / "host" / "player"), "-c", str(d / "asks.cpp"), "-o", str(d / "asks.o")],
+                          capture_output=True, text=True)
+    assert done.returncode != 0 and "sa2tw::Bit" in done.stderr
+
+
+def test_the_real_host_reader_compiles_with_the_real_list(tmp_path):
+    done = subprocess.run([*CXX, "-c", str(PLAYER / "tweaks.cpp"), "-o", str(tmp_path / "tweaks.o")],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+
+
+def test_every_build_of_the_player_and_the_launcher_compiles_the_host_tweaks():
+    """The reader (host/player/tweaks.cpp) and each home's files, by glob, in the four builds of the
+    player and the launcher's, with runtime/sa2_tweaks.h among each build record's sources; and
+    the player, the launcher and the Android session give the player SA2_TWEAKS in play."""
+    for script, var in (("host/player/build.sh", "HERE"), ("host/d3d9gpu/build.sh", "P")):
+        text = (ROOT / script).read_text()
+        assert re.search(r"^for tu in player input mixer stream sha256 texcodec touch_overlay tweaks; do$", text, re.M), script
+        assert f'for src in "${var}"/tweaks/*.cpp; do' in text and 'tu=tweak_$(basename "$src" .cpp)' in text, script
+        assert '"$REPO/runtime/sa2_tweaks.h"' in text, script
+    launch = (ROOT / "host/launch/build.sh").read_text()
+    assert '"$HOSTDIR/player/tweaks.cpp"' in launch and 'for src in "$HERE"/tweaks/*.cpp; do' in launch
+    sys.path.insert(0, str(ROOT / "tools" / "s7"))
+    import host2_win_build as HW
+    assert HW.PLAYER_UNITS[-1] == "tweaks"
+    win = (ROOT / "tools/s7/host2_win_build.py").read_text()
+    assert 'o / f"tweak_{s.stem}.o", None) for s in sorted((P / "tweaks").glob("*.cpp"))]' in win
+    android = (ROOT / "tools/s8/android_app.py").read_text()
+    assert 'o / f"tweak_{s.stem}.o") for s in sorted((P / "tweaks").glob("*.cpp"))]' in android
+    spec = importlib.util.spec_from_file_location("android_app_tweaks_under_test", ROOT / "tools/s8/android_app.py")
+    aa = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(aa)
+    assert "tweaks" in aa.Builder.player_units(None)
+    player = (ROOT / "host/player/player.cpp").read_text()
+    assert ("const char* not_play = sa2tw::not_play(o.interactive, !o.input_path.empty(),\n"
+            "                                           !o.synthetic_keys.empty() || !o.synthetic_input.empty());\n"
+            '    const sa2tw::Reading tweaks = sa2tw::read(getenv("SA2_TWEAKS"), sa2tw::off(not_play), "player");') in player
+    launcher = (ROOT / "host/launch/sa2_launch.cpp").read_text()
+    assert ('    if (!tweak_value.empty()) {\n        penv.set("SA2_TWEAKS", tweak_value);\n'
+            '        for (const char* k : {"SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"})\n'
+            '            if (const std::string* v = genv.find(k)) penv.set(k, *v);\n') in launcher
+    session = (ROOT / "host/android/native/sa2_android_session.cpp").read_text()
+    assert ('        setenv("SA2_TWEAKS", tweaks->c_str(), 1);\n'
+            '        for (const char* k : {"SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"})\n'
+            '            if (const std::string* v = env_find(genv, k)) setenv(k, v->c_str(), 1);\n') in session
+    assert ('"SA2_PLAYER_PROF", "SA2_PLAYER_PROF_OUT", "SA2_TWEAKS", "SA2_REPLAY_TICKS",\n'
+            '                          "SA2_REPLAY_WORDS"}) unsetenv(k);') in session
+
+
+def test_the_launcher_and_the_player_take_the_same_synthetic_input_flags():
+    """The launcher drops SA2_TWEAKS for a --player-arg that is one of sa2tw::kSyntheticFlags; the
+    player's main parses each of them and no other synthetic-input flag, so the launcher calls a
+    session a test run exactly when the player does (test_installer_launch runs the launcher)."""
+    flags = re.findall(r'"(--[a-z-]+)"', re.search(r"kSyntheticFlags\[\] = \{([^}]*)\}",
+                                                   (PLAYER / "tweaks.h").read_text()).group(1))
+    assert flags == ["--synthetic-keys", "--synthetic-input"]
+    player = (ROOT / "host/player/player.cpp").read_text()
+    assert sorted(set(re.findall(r'a == "(--synthetic-[a-z-]+)"', player))) == sorted(flags)
+    launcher = (ROOT / "host/launch/sa2_launch.cpp").read_text()
+    assert ("    for (const std::string& a : o.player_args)\n        for (const char* f : sa2tw::kSyntheticFlags)\n"
+            "            if (!synthetic && a == f) synthetic = f;\n") in launcher

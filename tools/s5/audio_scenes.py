@@ -190,7 +190,9 @@ MIN_FREE_BYTES = 30 << 30
 REPLACEABLE = ROOT / "private" / "generated"
 # The player as host/player/build.sh builds sa2_player and run_player.sh runs it: the
 # scripts, the expectations generator and what it reads (dxvk.conf, tools/pins.json), and
-# every source and header the binary is compiled from (host/sa2_stream.h is the recorder's).
+# every source and header the binary is compiled from (host/sa2_stream.h is the recorder's),
+# the host tweaks' reader and every player tweak's files among them (host/player/tweaks/, which
+# build.sh compiles by glob and player.cpp includes: runtime/sa2_tweaks.h, "Add a host tweak").
 PLAYER = ("host/player/build.sh", "host/player/run_player.sh", "host/player/player_env.sh",
           "host/player/generate_expectations.py", "host/player/dxvk.conf", "tools/pins.json",
           "host/player/player.cpp", "host/player/input.cpp", "host/player/mixer.cpp",
@@ -198,7 +200,9 @@ PLAYER = ("host/player/build.sh", "host/player/run_player.sh", "host/player/play
           "host/player/input.h", "host/player/mixer.h", "host/player/names.h", "host/player/pace.h",
           "host/player/sha256.h", "host/player/stream.h", "host/player/texcodec.h",
           "host/player/sdl_mark.h", "host/player/build_record.py", "host/player/touch_overlay.h",
-          "host/player/prof.h")
+          "host/player/prof.h", "host/player/tweaks.h", "host/player/tweaks.cpp",
+          *sorted(f"host/player/tweaks/{p.name}" for p in (ROOT / "host" / "player" / "tweaks").glob("*")
+                  if p.suffix in (".cpp", ".h")))
 # What the runs are made of, beside the lifted image: this tool; the recorder and its stream
 # format; tools/s4/tick_replay.py's lifted pipeline for a stage run (the link, the probe, the
 # tick probe and its headers, the device profile, the saves, tools/s4/stage_run.py and every

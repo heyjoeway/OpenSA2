@@ -8,8 +8,11 @@
 #   --cxx zig zig c++ (clang 20) from tools/env.sh; with --target x86_64-windows-gnu it builds
 #             sa2recomp.exe on sa2_launch_win32.cpp and host/install's sa2_platform_win32.cpp.
 #
-# The launcher shares host/install's config reader and platform layer and host/player's SHA-256,
-# compiled from the directories beside this one, so a snapshot of host/ builds as a whole.
+# The launcher shares host/install's config reader and platform layer and host/player's SHA-256
+# and host tweaks reader (tweaks.cpp, with runtime/sa2_tweaks.h, the list it reads), compiled from
+# the directories beside this one, so a snapshot of host/ with runtime/sa2_tweaks.h builds as a
+# whole. Each host tweak of the launcher's, host/launch/tweaks/<name>.cpp, is compiled by glob
+# (runtime/sa2_tweaks.h, "Add a host tweak").
 # Its dialogs (the first run's folder question, play's error box: sa2_dialog.h) are the release's
 # own SDL3, loaded at run time (dlopen, LoadLibraryW), so it links no SDL and needs no SDL header.
 set -euo pipefail
@@ -39,7 +42,10 @@ fi
 mkdir -p "$(dirname "$OUT")"
 I="$HOSTDIR/install"
 SOURCES=("$HERE/sa2_launch.cpp" "$HERE/sa2_relay.cpp" "$HERE/sa2_json.cpp" "$HERE/sa2_dialog.cpp"
-         "$I/sa2_config.cpp" "$HOSTDIR/player/sha256.cpp" "$TABLE")
+         "$I/sa2_config.cpp" "$HOSTDIR/player/sha256.cpp" "$HOSTDIR/player/tweaks.cpp" "$TABLE")
+for src in "$HERE"/tweaks/*.cpp; do
+    [ -e "$src" ] && SOURCES+=("$src")
+done
 if [ "$WINDOWS" = 1 ]; then
     SOURCES+=("$HERE/sa2_launch_win32.cpp" "$I/sa2_platform_win32.cpp")
 else

@@ -42,8 +42,10 @@ its frames and write a final report. What each case pins:
   stream, and the session's launcher.log keeps what it said;
 * play's full width: --play-res and --no-widescreen over game.env's own SA2_PLAY_RES or
   SA2_PLAY_ASPECT, nothing with no display, nothing in the selftest, and the record says which;
-* play's tweaks: game.env's SA2_TWEAKS as written, never the caller's, none in the selftest, and
-  the record says which;
+* play's tweaks: game.env's SA2_TWEAKS as written, to the game and the player alike, never the
+  caller's, none in the selftest or a synthetic-input --player-arg session (to neither), off for
+  the launcher too in a replay that game.env sets (and the player is given that setting), never for
+  the caller's own replay setting, and the record and the launcher's line say which;
 * --host picks the player; the selftest with no config, a .json record and unknown arguments are
   refused; the launcher compiles for x86_64-windows-gnu;
 * the fresh-host runner binds only each route's source read only, stops on anything it must not
@@ -215,7 +217,8 @@ with open(record, "w") as f:
 # 16-byte records after the stream's header) and writes a final report. FAKE_PLAYER (a JSON object)
 # chooses `exit` (its exit status), `complete` (the report's), `short` (frames it leaves
 # unpresented) and `end_after` (seconds after which it asks for the end through --end-fd, as a
-# window's close does).
+# window's close does). Its report names the SA2_TWEAKS it was given (`sa2_tweaks`, null for none)
+# and the replay settings (`sa2_replay`: SA2_REPLAY_TICKS and SA2_REPLAY_WORDS, those set).
 FAKE_PLAYER = r"""#!/usr/bin/env python3
 import json, os, struct, sys, threading
 cfg = json.loads(os.environ.get("FAKE_PLAYER", "{}"))
@@ -236,7 +239,9 @@ frames = sum(1 for at in range(head, len(data) - 15, 16) if struct.unpack_from("
 with open(report, "w") as f:
     json.dump({"complete": cfg.get("complete", True), "exit_status": cfg.get("exit", 0), "bytes": len(data),
                "presents": frames - cfg.get("short", 0), "name": os.path.basename(a[0]),
-               "argv": a[1:]}, f)
+               "argv": a[1:], "sa2_tweaks": os.environ.get("SA2_TWEAKS"),
+               "sa2_replay": {k: os.environ[k] for k in ("SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS") if k in os.environ}},
+              f)
 sys.exit(cfg.get("exit", 0))
 """
 
@@ -920,22 +925,29 @@ def test_play_sets_the_full_width_answer_only_where_asked(release, tmp_path):
 
 def test_play_passes_game_envs_tweaks_and_the_selftest_drops_them(release, tmp_path):
     """Tweaks (runtime/sa2_tweaks.c): game.env's SA2_TWEAKS line reaches play's game as written, and
-    the caller's own SA2_TWEAKS does not; with none the game gets none; the selftest drops game.env's.
-    Each says which, and the record keeps it (`tweaks`)."""
+    its player too (host/player/tweaks.h, the host's tweaks), and the caller's own SA2_TWEAKS
+    reaches neither; with none they get none; the selftest drops game.env's for both. Each says
+    which, and the record keeps it (`tweaks`)."""
     home, _ = installed(release, tmp_path)
     env = env_for(home, FAKE_GAME=json.dumps({"title_at": 30}), FAKE_PLAYER=json.dumps({"end_after": 1.0}),
                   SA2_TWEAKS="from-the-shell")
 
-    def play(name: str) -> tuple[str | None, str, str]:
+    def play(name: str, *args: str, **more: str) -> tuple[str | None, str, str]:
         session = tmp_path / name
-        p = subprocess.run([str(release["rel"] / "bin" / "sa2recomp"), "--no-pace", "--out", str(session)],
-                           capture_output=True, text=True, env=env, timeout=300)
+        p = subprocess.run([str(release["rel"] / "bin" / "sa2recomp"), "--no-pace", "--out", str(session), *args],
+                           capture_output=True, text=True, env=dict(env, **more), timeout=300)
         assert p.returncode == 0, p.stdout + p.stderr
         got = json.loads((session / "game-args.runrec").read_text())["env"]
+        report = json.loads((session / "player-report.runrec").read_text())
+        assert report["sa2_tweaks"] == got.get("SA2_TWEAKS"), (report["sa2_tweaks"], got.get("SA2_TWEAKS"))
+        # The player is given the game's replay settings beside its tweaks, and else none.
+        replay = {k: v for k, v in got.items() if k in ("SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS")}
+        assert report["sa2_replay"] == (replay if got.get("SA2_TWEAKS") else {}), (report["sa2_replay"], replay)
         return got.get("SA2_TWEAKS"), json.loads((session / "launch.runrec").read_text())["tweaks"], p.stderr
 
     got, said, err = play("none")
     assert got is None and said == "none" and "sa2recomp: tweaks: none\n" in err
+    assert "sa2 host tweaks" not in err
     game_env = release["rel"] / "share" / "game.env"
     text = game_env.read_text()
     try:
@@ -943,9 +955,34 @@ def test_play_passes_game_envs_tweaks_and_the_selftest_drops_them(release, tmp_p
         got, said, err = play("game-env")
         assert got == "no-event-bars" and said == "SA2_TWEAKS=no-event-bars (game.env)"
         assert "sa2recomp: tweaks: SA2_TWEAKS=no-event-bars (game.env)\n" in err
+        # The launcher's line whenever the value is set: no launcher tweak is registered, so none on.
+        assert "sa2recomp: sa2 host tweaks (launcher): none on (SA2_TWEAKS=no-event-bars)\n" in err
+        # The caller's own replay setting reaches neither the game nor the player, and leaves the
+        # launcher's tweaks as they are: the game, the player and the launcher keep theirs.
+        got, said, err = play("shell-replay", SA2_REPLAY_TICKS="/dev/null")
+        assert got == "no-event-bars" and said == "SA2_TWEAKS=no-event-bars (game.env)"
+        assert "sa2recomp: sa2 host tweaks (launcher): none on (SA2_TWEAKS=no-event-bars)\n" in err
+        # A synthetic-input session (host/launch/windows_play.py's) is a test run: no tweaks for any.
+        for flag in ("--synthetic-keys", "--synthetic-input"):
+            got, said, err = play("synthetic" + flag, "--player-arg", flag, "--player-arg", "keys.tsv")
+            assert got is None and said == (f"none: a synthetic-input session (--player-arg {flag}) drops game.env's "
+                                            "SA2_TWEAKS=no-event-bars"), said
+            assert f"sa2recomp: tweaks: {said}\n" in err and "sa2 host tweaks" not in err
+        # A replay setting in game.env: the game ignores its tweaks (runtime/sa2_tweaks.c), and so
+        # does the launcher, saying so, and the player is given the setting to say the same.
+        # Each of the two settings, and both; play() checks the player is given those set.
+        for name, lines in (("ticks", "SA2_REPLAY_TICKS=/dev/null\n"), ("words", "SA2_REPLAY_WORDS=/dev/null\n"),
+                            ("both", "SA2_REPLAY_TICKS=/dev/null\nSA2_REPLAY_WORDS=/dev/null\n")):
+            game_env.write_text(text + "SA2_TWEAKS=no-event-bars\n" + lines)
+            got, said, err = play("game-env-replay-" + name)
+            assert got == "no-event-bars" and said == "SA2_TWEAKS=no-event-bars (game.env)"
+            assert ("sa2recomp: sa2 host tweaks (launcher): SA2_TWEAKS=no-event-bars ignored in a replay "
+                    "(SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set)\n") in err
+        game_env.write_text(text + "SA2_TWEAKS=no-event-bars\n")
         p, doc, session = selftest(release, home, tmp_path, name="selftest")
         assert p.returncode == 0, p.stdout + p.stderr
         assert "SA2_TWEAKS" not in json.loads((session / "game-args.runrec").read_text())["env"]
+        assert json.loads((session / "player-report.runrec").read_text())["sa2_tweaks"] is None
         assert doc["tweaks"] == "none: the selftest drops game.env's SA2_TWEAKS=no-event-bars"
     finally:
         game_env.write_text(text)

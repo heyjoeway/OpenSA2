@@ -73,6 +73,17 @@ A tweak is an optional change to the game's behavior that a player turns on with
 
 A Mod Loader patch that changes the game's code bytes cannot be applied as it is, because OpenSA2 never runs the game's original code. Such a patch becomes a code-patch tweak: a spec in `tools/s8/variants/tweaks/<name>.json` takes the place of the runtime file, and `tools/s8/variants/variants.py` translates each function that the patch reaches again from the patched bytes. `tools/s8/variants/README.md` describes the tool, its checks, and its limits.
 
+## Add a host tweak
+
+A host tweak is a tweak whose change the player, the desktop launcher, or the Android app makes. It never changes the game, and it is turned on with the same `SA2_TWEAKS` setting. Its steps also add lines and change none:
+
+1. Add one line for the tweak to `SA2_TWEAK_HOST_LIST` in `runtime/sa2_tweaks.h`, with its home: `player`, `launcher`, or `app`. A host tweak has no line in `SA2_TWEAK_LIST`.
+2. Put its code in its home: `host/player/tweaks/<name>.cpp` for the player, `host/launch/tweaks/<name>.cpp` for the launcher, or `host/android/java/com/sa2recomp/app/Tweak<Name>.java` for the Android app. The code checks that its tweak is on first and otherwise does nothing. The builds find the file without further changes, and the player or the launcher gets one call where the tweak acts.
+3. For a player or app tweak, add one line for its switch to `TWEAKS` in `host/android/java/com/sa2recomp/app/GameSettings.java`. A launcher tweak has no Android switch.
+4. Add a row to the [Tweaks](downloads.md#tweaks) table.
+
+The player and the launcher turn their tweaks on only in play, never in a replay or a session with synthetic input. `Documentation/scripts/tests/test_tweaks.py` checks the host list against the home files and the Android lines. "Add a host tweak" in the header comment of `runtime/sa2_tweaks.h` gives the full rules.
+
 ## Understand the full build prerequisites
 
 The game build is a developer workflow, with a Linux build host used for desktop and Android targets. The existing scripts expect a local toolchain and generated files under the ignored `private/` directory.

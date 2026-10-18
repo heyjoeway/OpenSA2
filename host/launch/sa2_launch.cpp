@@ -99,14 +99,24 @@
 // default, named in one setting, SA2_TWEAKS, a comma-separated list. On the desktop it is a line
 // in share/game.env, which reaches the game as written (the launcher passes none of its own
 // environment's SA2_ variables): SA2_TWEAKS=no-event-bars removes the black bars at the sides of
-// most in-engine cutscenes on a screen wider than 4:3. The selftest runs the game as it is and
-// drops the line. The launcher says what the game is given, the record keeps it (`tweaks`), and
-// the game's own line saying which tweaks are on starts the session's game.log ("sa2 tweaks:
-// ...").
+// most in-engine cutscenes on a screen wider than 4:3. The player is given the same value, for the
+// host's own tweaks (host/player/tweaks.h; runtime/sa2_tweaks.h lists the game's and the host's
+// alike), and so is the launcher's reader, for those made here (host/launch/tweaks/<name>.cpp),
+// whose line the launcher prints whenever the value is set ("sa2 host tweaks (launcher): ...").
+// The selftest runs the game and the player as they are and drops the line for both, and so does
+// a session whose --player-arg gives the player synthetic input (--synthetic-keys or
+// --synthetic-input, sa2tw::kSyntheticFlags): that is a test run, whose player ignores its tweaks.
+// A replay setting (SA2_REPLAY_TICKS or SA2_REPLAY_WORDS) in game.env turns every tweak off, as
+// the game does: the launcher asks the game's environment, not its own, and gives the player that
+// setting beside SA2_TWEAKS, so all three say "ignored in a replay". The launcher says what the
+// game is given, the record keeps it (`tweaks`), and the game's own line saying which tweaks are
+// on starts the session's game.log ("sa2 tweaks: ..."), the player's its player.err
+// ("sa2 host tweaks (player): ...").
 //
 // --player-arg ARG (play only, repeatable) appends ARG to the player's command line: a
 // diagnostic, as the player's own --synthetic-keys with its logs and --max-frames, which drives a
-// play session with no person (host/launch/windows_play.py). The record names them.
+// play session with no person (host/launch/windows_play.py). The record names them. With either
+// synthetic-input flag among them, game.env's SA2_TWEAKS is dropped (the header, "Tweaks").
 //
 // The selftest ("launched", G7's installer clause): the game must reach the title (GameMode 14,
 // GameMode_Advertise, with CurrentMenu 0, Menus_TitleScreen: the addresses and values of
@@ -178,6 +188,7 @@
 #include "sa2_platform.h"
 #include "sa2_relay.h"
 #include "sha256.h"
+#include "tweaks.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -786,6 +797,11 @@ struct Env {
     }
     void drop(const std::string& k) {
         kv.erase(std::remove_if(kv.begin(), kv.end(), [&](const auto& e) { return e.first == k; }), kv.end());
+    }
+    const std::string* find(const std::string& k) const {
+        for (const auto& e : kv)
+            if (e.first == k) return &e.second;
+        return nullptr;
     }
 };
 
@@ -1488,19 +1504,39 @@ int launch(int argc, char** argv) {
         // The HUD at its 4:3 positions (runtime/sa2_widescreen.c), unless game.env sets SA2_PLAY_HUD43.
         if (!in_env("SA2_PLAY_HUD43")) genv.set("SA2_PLAY_HUD43", "1");
     }
-    // Tweaks (the header, "Tweaks"): game.env's SA2_TWEAKS, in play alone.
-    std::string tweaks = "none";
-    const auto tw = std::find_if(genv.kv.begin(), genv.kv.end(), [](const auto& e) { return e.first == "SA2_TWEAKS"; });
-    if (tw != genv.kv.end() && !tw->second.empty()) {
-        const std::string named = "SA2_TWEAKS=" + tw->second;
+    // Tweaks (the header, "Tweaks"): game.env's SA2_TWEAKS, in play alone, for the game, the player
+    // (penv below) and the launcher's own host tweaks. A session whose player is given synthetic
+    // input is a test run, as the selftest is: the player ignores its tweaks there (sa2tw::not_play),
+    // so the game and the launcher drop them too.
+    const char* synthetic = nullptr;   // the first of the player's synthetic-input flags --player-arg gives
+    for (const std::string& a : o.player_args)
+        for (const char* f : sa2tw::kSyntheticFlags)
+            if (!synthetic && a == f) synthetic = f;
+    std::string tweaks = "none", tweak_value;
+    if (const std::string* tw = genv.find("SA2_TWEAKS"); tw && !tw->empty()) {
+        const std::string named = "SA2_TWEAKS=" + *tw;
         if (o.selftest) {
-            genv.drop("SA2_TWEAKS");
             tweaks = "none: the selftest drops game.env's " + named;
+            genv.drop("SA2_TWEAKS");
+        } else if (synthetic) {
+            tweaks = std::string("none: a synthetic-input session (--player-arg ") + synthetic + ") drops game.env's " + named;
+            genv.drop("SA2_TWEAKS");
         } else {
             tweaks = named + " (game.env)";
+            tweak_value = *tw;
         }
     }
     say("tweaks: %s", tweaks);
+    // A replay is the game's environment's to say (game.env's lines), as the game asks it
+    // (runtime/sa2_tweaks.c): the launcher's own environment, whose SA2_ variables the game never
+    // sees, is not asked. The launcher's line is printed whenever the value is set, its "ignored"
+    // reason too.
+    const sa2tw::Reading launcher_tweaks = sa2tw::read(tweak_value.c_str(), sa2tw::off(nullptr, [&](const char* k) {
+        const std::string* v = genv.find(k);
+        return v ? v->c_str() : nullptr;
+    }), "launcher");
+    sa2tw::g_on = launcher_tweaks.on;
+    if (!launcher_tweaks.line.empty()) say("%s", launcher_tweaks.line);
     // A console made for this launch alone (Windows, a double-click) goes before the game's window
     // comes; a shell's, or redirected output, stays (sa2l::release_own_console).
     const std::string console = o.selftest ? "" : sa2l::release_own_console();
@@ -1542,6 +1578,13 @@ int launch(int argc, char** argv) {
     if (!by_path) penv.set("SA2_DXVK_D3D9", dxvk_lib);
     penv.set("SA2_PLAY_OUT", session + "/play");
     if (std::string(host->id) == "sdl3-gpu") penv.set("SA2_D3D9GPU_REPORT", session + "/d3d9gpu.runrec");
+    // The host's tweaks (the header, "Tweaks"), and the game's replay settings beside them, so the
+    // player's off() reaches the game's verdict (it reads these two nowhere else).
+    if (!tweak_value.empty()) {
+        penv.set("SA2_TWEAKS", tweak_value);
+        for (const char* k : {"SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"})
+            if (const std::string* v = genv.find(k)) penv.set(k, *v);
+    }
     const std::string video_driver = !o.video_driver.empty() ? o.video_driver : o.selftest ? "offscreen" : "";
     if (!video_driver.empty()) penv.set("SDL_VIDEO_DRIVER", video_driver);
     // Offscreen there is no window to claim: host 2 then only submits each Present

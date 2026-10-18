@@ -146,7 +146,9 @@ named in SA2_TWEAKS, and in every replay, each wrap only calls the lifted origin
 README.txt lists every tweak in runtime/sa2_tweaks.h but the code-patch tweaks the game does not
 link (`player_readme`), and the build names those (`unlinked_patches`): a Windows game, a Linux
 game built without --variants, or variants built without that tweak's spec. When DIR links a test
-fixture (tools/s8/variants/fixtures/), the build says so, and README.txt leaves it out.
+fixture (tools/s8/variants/fixtures/), the build says so, and README.txt leaves it out. The host
+tweaks (SA2_TWEAK_HOST_LIST) are listed with the game's, in name order, but those whose home is the
+Android app (`DESKTOP_HOMES`).
 """
 from __future__ import annotations
 
@@ -237,11 +239,13 @@ SCHEMA = "sa2-s7-release/v1"
 # probe it links as its driver, the tick probe the observer wraps, the presentation recorder), and
 # both players; and the tools that generate the tables and the observer.
 SOURCE_GLOBS = ("host/launch/*.cpp", "host/launch/*.h", "host/launch/build.sh",
+                "host/launch/tweaks/*.cpp", "host/launch/tweaks/*.h",
                 "host/install/*.cpp", "host/install/*.h", "host/install/build.sh",
                 "runtime/*.c", "runtime/*.cpp", "runtime/*.h", "runtime/*.inc", "runtime/tweaks/*.c",
                 "harness/crt_probe.c", "harness/replay/wrap_tick_probe.c", "harness/replay/*.h",
                 "host/sa2_present_rec.c", "host/*.h",
                 "host/player/*.cpp", "host/player/*.c", "host/player/*.h", "host/player/build.sh",
+                "host/player/tweaks/*.cpp", "host/player/tweaks/*.h",
                 "host/player/dxvk.conf",
                 "host/d3d9gpu/*.cpp", "host/d3d9gpu/*.c", "host/d3d9gpu/*.h", "host/d3d9gpu/*.hlsl",
                 "host/d3d9gpu/*.glsl", "host/d3d9gpu/shader/*", "host/d3d9gpu/build.sh",
@@ -840,6 +844,9 @@ def game_f80_mode(notes: dict) -> str:
 
 
 README = "README.txt"
+# The host tweaks' homes a desktop release has (runtime/sa2_tweaks.h, "Add a host tweak"): README.txt
+# lists their tweaks with the game's.
+DESKTOP_HOMES = ("player", "launcher")
 # What README.txt says of each build of the game (player_readme).
 README_BUILD = {
     "double": ["  The game here is the double build: its x87 floating point runs in 64-bit doubles at",
@@ -853,12 +860,15 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT, li
     """The player's README.txt at the release's top: how to start, what the first start does,
     controllers, saves and where the logs are, the tweaks (each one's summary in `src`'s
     runtime/sa2_tweaks.h SA2_TWEAK_LIST, but the code-patch tweaks not in `linked`, the ones the
-    game links: variant_tweaks), and which build of the game it is (`f80_mode`, game_f80_mode's).
+    game links: variant_tweaks; and SA2_TWEAK_HOST_LIST's whose home a desktop has, DESKTOP_HOMES,
+    all in name order), and which build of the game it is (`f80_mode`, game_f80_mode's).
     Written by the assemble step, so it is in the manifest."""
     win = target == "x86_64-windows"
     ts = load(src, "tools/s4/tweak_sources.py", "release_tweak_sources")
     left_out = {r["name"] for r in ts.patches(src / "runtime")} - set(linked)
-    tweaks = [r for r in ts.rows(src / "runtime") if r["name"] not in left_out]
+    tweaks = [r for r in ts.every_row(src / "runtime")
+              if r["name"] not in left_out and r.get("home", "player") in DESKTOP_HOMES]
+    hosts = any("home" in r for r in tweaks)
     if not tweaks:
         raise SystemExit(f"release_build: {src / 'runtime' / 'sa2_tweaks.h'} lists no tweak this game has")
     pad = max(len(t["name"]) for t in tweaks)
@@ -892,6 +902,8 @@ def player_readme(target: str, f80_mode: str = NATIVE_MODE, src: Path = ROOT, li
         f"  {env}:",
         *[f"    SA2_TWEAKS={t['name']:<{pad}}    {t['summary']}" for t in tweaks],
         "  Name several with commas. Each session's game.log begins by saying which are on.",
+        *(["  A host tweak (the player's or the launcher's) is said in player.err or launcher.log."]
+          if hosts else []),
         "",
         "This build",
         *build,

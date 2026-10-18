@@ -354,8 +354,10 @@ def test_a_variant_tweak_is_listed_after_the_lists_tweaks_and_ignored_in_a_repla
     assert out == "eax 1 esp 18004 ret 404242\n"
     plain = [r["name"] for r in TS.rows(ROOT / "runtime")
              if r["name"] not in {p["name"] for p in TS.patches(ROOT / "runtime")}]
+    hosts = [r["name"] for r in TS.host_rows(ROOT / "runtime")]
     assert err == ('sa2 tweaks: event-bars off (SA2_TWEAKS=no-event-bars,u; no tweak is named "u", so it '
-                   f"is ignored; the tweaks: {', '.join(plain + ['t'])})\n")
+                   f"is ignored; the tweaks: {', '.join(plain + ['t'])}"
+                   + (f"; the host tweaks: {', '.join(hosts)}" if hosts else "") + ")\n")
     out, err = run(lifted["exe"], SA2_TWEAKS="t", SA2_REPLAY_TICKS="/dev/null")
     assert out == "eax 1 esp 18004 ret 404242\n"
     assert err.startswith("sa2 tweaks: SA2_TWEAKS=t ignored in a replay")
@@ -379,7 +381,9 @@ def test_a_fixture_past_bit_32_runs_its_variant_and_no_other_bit_does(lifted):
                                    f"(SA2_TWEAKS={names[33]},{names[44]},t)")
     _, err = run(lifted["wide"], SA2_TWEAKS="?")
     unlinked = {r["name"] for r in TS.patches(ROOT / "runtime")}
-    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join([n for n in names if n not in unlinked] + ['t'])})")
+    hosts = [r["name"] for r in TS.host_rows(ROOT / "runtime")]
+    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join([n for n in names if n not in unlinked] + ['t'])}"
+                                      + (f"; the host tweaks: {', '.join(hosts)}" if hosts else "") + ")")
     assert run(lifted["wide"], SA2_TWEAKS="t", SA2_REPLAY_TICKS="/dev/null")[0] == "eax 1 esp 18004 ret 404242\n"
 
 

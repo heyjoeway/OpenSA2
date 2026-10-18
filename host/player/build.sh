@@ -27,6 +27,10 @@
 # The stream format header is host/sa2_stream.h, the recorder's
 # (host/sa2_present_rec.c); SA2_STREAM_H_DIR names another directory holding it,
 # for a checkout that does not have it yet.
+#
+# The player's host tweaks (tweaks.h): tweaks.cpp, the reader, with runtime/sa2_tweaks.h, the list
+# it reads, and each host/player/tweaks/<name>.cpp by glob (runtime/sa2_tweaks.h, "Add a host
+# tweak"), each object named tweak_<name>.o.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 HOST=$(dirname "$HERE")
@@ -56,7 +60,8 @@ mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 # What the build reads, hashed before it compiles anything and again in its records at the
 # end (build_record.py): a source that changes while the build runs refuses the record.
-SOURCES=("$HERE" "$STREAM_H_DIR/sa2_stream.h" "$HOST/dxvk_smoke.cpp" "$REPO/tools/pins.json")
+SOURCES=("$HERE" "$STREAM_H_DIR/sa2_stream.h" "$HOST/dxvk_smoke.cpp" "$REPO/tools/pins.json"
+         "$REPO/runtime/sa2_tweaks.h")
 "$PY" "$HERE/build_record.py" --start --out "$OUT/player_tools.json" --tree "$HOST/.." --sources "${SOURCES[@]}"
 "$PY" "$HERE/build_record.py" --start --out "$OUT/sa2_player.json" --tree "$HOST/.." --sources "${SOURCES[@]}"
 "$PY" "$HERE/generate_expectations.py" --host dxvk \
@@ -94,8 +99,14 @@ POBJ=$OUT/obj/sa2_player
 mkdir -p "$POBJ"
 find "$POBJ" -maxdepth 1 \( -type f -o -type l \) \( -name '*.o' -o -name '*.d' \) -delete
 OBJS=()
-for tu in player input mixer stream sha256 texcodec touch_overlay; do
+for tu in player input mixer stream sha256 texcodec touch_overlay tweaks; do
   $CXX "${FLAGS[@]}" -I"$STREAM_H_DIR" "${DX[@]}" -MMD -MF "$POBJ/$tu.d" -c "$HERE/$tu.cpp" -o "$POBJ/$tu.o"
+  OBJS+=("$POBJ/$tu.o")
+done
+for src in "$HERE"/tweaks/*.cpp; do
+  [ -e "$src" ] || continue
+  tu=tweak_$(basename "$src" .cpp)
+  $CXX "${FLAGS[@]}" -I"$STREAM_H_DIR" "${DX[@]}" -MMD -MF "$POBJ/$tu.d" -c "$src" -o "$POBJ/$tu.o"
   OBJS+=("$POBJ/$tu.o")
 done
 $CXX -o "$OUT/sa2_player" "${OBJS[@]}" "${SDL[@]}" -lpng -lzstd -ldl

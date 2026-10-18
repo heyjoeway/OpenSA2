@@ -95,7 +95,7 @@ D9G_UNITS = ("d9g_device_draw", "d9g_draw_state", "d9g_device", "d9g_resources",
 # shader/build_translator.sh's TUS.
 TRANSLATOR_UNITS = ("d9g_shader", "d9g_shader_abi", "d9g_shader_link", "d9g_shader_cache", "d9g_shader_shims",
                     "d9g_shader_profile", "d9g_shader_vulkan")
-PLAYER_UNITS = ("player", "input", "mixer", "stream", "sha256", "texcodec", "touch_overlay")
+PLAYER_UNITS = ("player", "input", "mixer", "stream", "sha256", "texcodec", "touch_overlay", "tweaks")
 SDL_CMAKE_OPTIONS = ("-DCMAKE_BUILD_TYPE=Release", "-DSDL_SHARED=ON", "-DSDL_STATIC=OFF", "-DSDL_TESTS=OFF",
                      "-DSDL_EXAMPLES=OFF", "-DSDL_TEST_LIBRARY=OFF")
 # host/d3d9gpu/build.sh's FLAGS and PFLAGS less -g, with clang's warning about mingw-w64's COM
@@ -534,6 +534,8 @@ class Builder:
         pflags = [*WARN, f"-I{exp}", "-DSA2_PLAYER_GPU=1", f"-I{ROOT / 'host'}", *sdl_inc, dep_inc]
         dflags = [*WARN, f"-I{gen}", f"-I{H}", f"-I{P}", *sdl_inc]
         units = [(self.cxx, pflags, P / f"{t}.cpp", o / f"{t}.o", None) for t in PLAYER_UNITS]
+        # Each host tweak of the player's (runtime/sa2_tweaks.h, "Add a host tweak"), by glob.
+        units += [(self.cxx, pflags, s, o / f"tweak_{s.stem}.o", None) for s in sorted((P / "tweaks").glob("*.cpp"))]
         units.append((self.cxx, [*dflags, f"-I{H / 'test'}", "-DSA2_CLEAR_MATRIX_STATIC"], H / "test/clear_matrix.cpp",
                       o / "clear_matrix.o", None))
         tid = getattr(self, "translator_id", None) or json.loads(
@@ -584,11 +586,14 @@ class Builder:
         # statically, nothing is imported), and clang's per-unit __clang_call_terminate. A
         # mangled name is the standard library's when it demangles to std:: (after any special
         # name's prefix: "typeinfo for ", "VTT for ", "virtual thunk to " ...).
-        # One of host 2's own, named: d9g_shader_profile.h's DeviceFactsQuery's implicit destructor
+        # Two of host 2's own, named: d9g_shader_profile.h's DeviceFactsQuery's implicit destructor
         # (a bool, four std::strings and a struct of scalars), which clang emits as a COMDAT in
-        # d9g_gpu_sdl.o and d9g_shader_vulkan.o alike where g++ inlines the translator's copy.
+        # d9g_gpu_sdl.o and d9g_shader_vulkan.o alike where g++ inlines the translator's copy; and
+        # the host tweaks' inline mask and its test (host/player/tweaks.h, sa2tw::g_on and
+        # sa2tw::on), which the player and a host tweak's change in d9g share by design.
         section_or_helper = re.compile(r"^(\.|DW\.ref\.|__clang_call_terminate$|_ZNSt|_ZNKSt|_ZSt|"
-                                       r"_ZN3d9g6shader16DeviceFactsQueryD[12]Ev$)")
+                                       r"_ZN3d9g6shader16DeviceFactsQueryD[12]Ev$|"
+                                       r"_ZN5sa2tw4g_onE$|_ZN5sa2tw2onENS_3BitE$)")
         std = re.compile(r"^(?:[A-Za-z -]+ (?:for|to) )?std::")
         for a, b in (("player", "d9g"), ("player", "translator"), ("d9g", "translator")):
             both = sorted(s for s in defined[a] & defined[b] if not section_or_helper.match(s))

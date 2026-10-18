@@ -108,7 +108,7 @@ def test_not_with_no_event_bars_beside_a_name_that_is_no_tweak(exe):
     assert out == GAME
     assert err == (f"sa2 tweaks: none on (SA2_TWEAKS={value}; event-bars-all and no-event-bars cannot "
                    "both be on, so neither is; no tweak is named \"widescreen-fmv\", so it is ignored; "
-                   f"the tweaks: {', '.join(TT.names())})\n")
+                   f"{TT.the_tweaks(TT.plain_names(), TT.host_names())})\n")
 
 
 @pytest.mark.parametrize("replay", ["SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"])

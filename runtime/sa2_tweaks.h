@@ -13,17 +13,33 @@
  * any tweak, and in SA2_TWEAK_PATCH_LIST too; its spec, tools/s8/variants/tweaks/<name>.json,
  * stands in place of a runtime file ("Add a code-patch tweak" below).
  *
+ * A host tweak is the third kind: a change the host makes, in the player (host/player, and
+ * host/d3d9gpu, the renderer host 2's player links), the desktop launcher (host/launch) or the
+ * Android app, and never in the game. SA2_TWEAKS names it as it names the game's, and its one line
+ * is in SA2_TWEAK_HOST_LIST below, in place of a line in SA2_TWEAK_LIST: the two lists are the one
+ * list of tweaks a player is shown (the Android Tweaks card, the release's README.txt) and every
+ * tool reads (tools/s4/tweak_sources.py). The runtime knows each host tweak by its name, so it never
+ * calls one unknown, and turns nothing on for it; host/player/tweaks.h makes the host's own bits
+ * from the same lines and reads SA2_TWEAKS in the player and the launcher ("Add a host tweak").
+ *
  * The rules every tweak keeps:
  *
  *   - Play only. The list is ignored when SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is set, with one
  *     line saying so; tools/s4/device_profile.py PLAY_ENV strips SA2_TWEAKS from every registered
- *     run's environment, and the launcher's selftest drops it (host/launch/sa2_launch.cpp).
+ *     run's environment, and the launcher's selftest drops it, as does a launcher session whose
+ *     player is given synthetic input (host/launch/sa2_launch.cpp). The player reads it in a play
+ *     session alone (--interactive with --input-path, no synthetic input) and never with the game's
+ *     SA2_REPLAY_TICKS or SA2_REPLAY_WORDS set (the launcher asks the game's environment, and it and
+ *     the Android session give the player those two beside SA2_TWEAKS); the launcher and the
+ *     Android session give it to the player in play alone (host/player/tweaks.h).
  *   - One report line. At the start, when SA2_TWEAKS is set, the run prints one line to stderr (the
  *     session's game.log): the active tweaks, "sa2 tweaks: event-bars off (SA2_TWEAKS=no-event-bars)",
  *     or why none is on. A name that is no tweak is named in that line and ignored, and so is a
- *     code-patch tweak the game was built without. The launcher's record and the Android session's
- *     report carry the setting and this line. A tweak's own lines after it begin
- *     "sa2 tweaks: <report>: ".
+ *     code-patch tweak the game was built without; a host tweak is named in it as the host's. The
+ *     player's own line, "sa2 host tweaks (player): ...", says which of its tweaks are on (its
+ *     stderr: the launcher's session's player.err, the Android session's player.log). The
+ *     launcher's record and the Android session's report carry the setting and these lines. A
+ *     tweak's own lines after it begin "sa2 tweaks: <report>: " ("sa2 host tweaks: <report>: ").
  *   - Off is the lifted code alone: each wrap tests sa2_tweak_on(its bit) first (a code-patch
  *     tweak's generated wrap, sa2_tweak_patch_on) and otherwise only calls `__real_` and returns.
  *   - By name, never silently: a case a tweak leaves alone on purpose, or cannot act on (a guest
@@ -32,7 +48,7 @@
  * Where the setting comes from: on the desktop, a line in the release's share/game.env (the
  * launcher passes none of its own environment's SA2_ variables to the game); on Android, the
  * settings screen's Tweaks card (host/android GameSettings.TWEAKS and sessionSettings), or a
- * game.env.extra line, which wins.
+ * game.env.extra line, which wins. The player is given the same value as the game.
  *
  * Add a tweak. Each step adds lines and edits none, so tweaks written at once in separate
  * worktrees merge cleanly, or with a conflict between two added lines that keeps both:
@@ -87,6 +103,38 @@
  * A spec under tools/s8/variants/fixtures/ is the tool's test fixture, not a tweak: it is in no list
  * and no settings screen. A game linked with its variants knows it by its spec's name, after the
  * list's tweaks.
+ *
+ * Add a host tweak (host/player/tweaks.h has the host's reader and its rules). Each step adds lines,
+ * as a tweak's do:
+ *
+ *   1. One line in SA2_TWEAK_HOST_LIST, and none in SA2_TWEAK_LIST (a name is in one list):
+ *      X(SA2_TWEAK_<NAME>, "<name>", "<report>", "<summary>", "<home>"), in name order. <name>,
+ *      <report> and <summary> as a tweak's; <home> is where its change is made: "player"
+ *      (host/player, and host/d3d9gpu: the player of every platform), "launcher" (the desktop
+ *      launcher, host/launch) or "app" (the Android app's Java). Its bit is its place in this list,
+ *      in the host's own mask: it spends none of the game's SA2_TWEAK_MAX.
+ *   2. Its own file, in its home:
+ *        player    host/player/tweaks/<name>.cpp, which every build of the player compiles by glob
+ *                  (host/player/build.sh, host/d3d9gpu/build.sh, tools/s7/host2_win_build.py,
+ *                  tools/s8/android_app.py), with host/player/tweaks/<name>.h when player.cpp calls
+ *                  into it. Its code tests sa2tw::on(sa2tw::SA2_TWEAK_<NAME>) first; the call where
+ *                  it acts is the one line it adds to player.cpp. A change inside host/d3d9gpu tests
+ *                  sa2tw::on there (inline: host 2's own tests link no reader and see every tweak
+ *                  off), and its own code stays in its player file where it can.
+ *        launcher  host/launch/tweaks/<name>.cpp, which host/launch/build.sh compiles by glob. The
+ *                  launcher reads SA2_TWEAKS in play from share/game.env, the game's value.
+ *        app       host/android/java/com/sa2recomp/app/Tweak<Name>.java, <Name> the name's words
+ *                  capitalised and joined (no-event-bars: TweakNoEventBars), which the app's Java
+ *                  build compiles with the rest. It asks GameSettings.tweaksOn, the Tweaks card's
+ *                  switch (game.env.extra, which the session reads after the app is up, does not
+ *                  reach it), and says in logcat (tag sa2recomp) what it did.
+ *      Off is the host as it was: each change tests its tweak first and otherwise does nothing.
+ *   3. One line in host/android GameSettings.TWEAKS, as a tweak's, when its home is "player" or
+ *      "app"; a launcher tweak has none, since it does nothing on Android.
+ *   4. Its tests. test_tweaks.py holds the host list to the home files and the Android lines, and
+ *      the reader to its cases; what the tweak does goes in a test file of its own.
+ *   5. A row in the player's guide (OpenSA2's docs/downloads.md, "Tweaks"). The release's
+ *      README.txt lists it with the game's when its home is "player" or "launcher".
  */
 #ifndef SA2_TWEAKS_H
 #define SA2_TWEAKS_H
@@ -137,7 +185,9 @@ enum {
 
 /* The bits the tweak mask has: the list's tweaks and the fixtures a game links, together. */
 #define SA2_TWEAK_MAX 64
+#ifndef __cplusplus   /* host/player/tweaks.h includes this header in C++, which has static_assert */
 _Static_assert(SA2_TWEAK_COUNT <= SA2_TWEAK_MAX, "SA2_TWEAK_LIST holds more tweaks than the 64-bit mask has bits");
+#endif
 
 /* A tweak's bit, a uint64_t: past bit 31 the enum is wider than int (a GNU C extension, which the
  * runtime's compilers, clang and zig cc, take). */
@@ -154,6 +204,12 @@ enum {
 
 #define SA2_TWEAK_PATCH_OR(bit) | bit
 #define SA2_TWEAK_PATCHES ((uint64_t)0 SA2_TWEAK_PATCH_LIST(SA2_TWEAK_PATCH_OR))
+
+/* X(bit, name, report, summary, home): every host tweak, one line each, in name order ("Add a host
+ * tweak", step 1). The runtime reads their names and homes (sa2_tweaks.c); their bits are the
+ * host's, host/player/tweaks.h's. */
+#define SA2_TWEAK_HOST_LIST(X) \
+    /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */
 int sa2_tweak_on(uint64_t bit);

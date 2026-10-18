@@ -24,7 +24,7 @@
 //    session's own (the installation, the session's files and the stream's settings, set last).
 //    So game.env.extra wins over the settings screen. The player's settings among them
 //    (SA2_TOUCH_*, SA2_PAD_MAP, SA2_PLAYER_PICTURE_Y, SA2_PLAYER_PROF*) go to the player, in this
-//    process's environment, and not to the game.
+//    process's environment, and not to the game; SA2_TWEAKS goes to both.
 //  - The relay (host/launch/sa2_relay.h) hands the stream on to the player, paced (lead 1) through
 //    the pace pipe, whose read end the game gets as descriptor 43 (SA2_REC_PACE_FD).
 //  - The player: host/player's main (renamed sa2_player_main by tools/s8/android_app.py) on this
@@ -98,12 +98,15 @@
 // upright window (host/player/player.cpp "The picture's place"); the session says the player's
 // line for it ("player: picture: ...").
 //
-// Tweaks (runtime/sa2_tweaks.h): changes to the game's own behaviour, each off by default. The
-// settings screen's Tweaks card sends the ones turned on as one setting, SA2_TWEAKS=<names>
-// ("no-event-bars": no black bars at the sides of most in-engine cutscenes), which reaches the
-// game as every other setting does (a game.env.extra line replaces it). The report names the
-// setting ("settings: SA2_TWEAKS=...") and then the game's own line saying which tweaks are on
-// ("game: sa2 tweaks: event-bars off ...", from its game.log).
+// Tweaks (runtime/sa2_tweaks.h): changes to the game's own behaviour, or the host's, each off by
+// default. The settings screen's Tweaks card sends the ones turned on as one setting,
+// SA2_TWEAKS=<names> ("no-event-bars": no black bars at the sides of most in-engine cutscenes),
+// which reaches the game as every other setting does (a game.env.extra line replaces it), and the
+// player too, with the same value, after game.env.extra's (host/player/tweaks.h: the host tweaks
+// whose home is the player), with the game's SA2_REPLAY_TICKS or SA2_REPLAY_WORDS if game.env.extra
+// sets one, so the player ignores its tweaks in a replay as the game does. The report names the setting ("settings: SA2_TWEAKS=...") and then
+// the game's own line saying which tweaks are on ("game: sa2 tweaks: event-bars off ...", from its
+// game.log), and the player's ("player: sa2 host tweaks (player): ...", from its player.log).
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -252,7 +255,8 @@ int run_player(const std::vector<std::string>& args) {
 
 void player_env(const std::string& session) {
     for (const char* k : {"SA2_DXVK_D3D9", "SA2_D3D9GPU_PRESENT", "SDL_VIDEO_DRIVER", "SDL_AUDIO_DRIVER",
-                          "SA2_PLAYER_PROF", "SA2_PLAYER_PROF_OUT"}) unsetenv(k);
+                          "SA2_PLAYER_PROF", "SA2_PLAYER_PROF_OUT", "SA2_TWEAKS", "SA2_REPLAY_TICKS",
+                          "SA2_REPLAY_WORDS"}) unsetenv(k);
     setenv("SA2_PLAY_OUT", (session + "/play").c_str(), 1);
     setenv("SA2_D3D9GPU_REPORT", (session + "/d3d9gpu.runrec").c_str(), 1);
     setenv("SDL_NO_SIGNAL_HANDLERS", "1", 1);
@@ -1043,6 +1047,16 @@ int play_game(const Args& a) {
     held_end.hold(end_w);
     player_env(session);
     for (const auto& kv : prof_env) setenv(kv.first.c_str(), kv.second.c_str(), 1);
+    // The tweaks (the header, "Tweaks"): the game's value, game.env.extra's when it has one, for the
+    // player's host tweaks too; and the game's replay settings beside it (a game.env.extra line),
+    // which turn the game's tweaks off (runtime/sa2_tweaks.c), so the player's off() says the same
+    // (host/player/tweaks.h, "Play only"). player_env unset all three.
+    const std::string* tweaks = env_find(genv, "SA2_TWEAKS");
+    if (tweaks && !tweaks->empty()) {
+        setenv("SA2_TWEAKS", tweaks->c_str(), 1);
+        for (const char* k : {"SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS"})
+            if (const std::string* v = env_find(genv, k)) setenv(k, v->c_str(), 1);
+    }
     if (const std::string* hz = env_find(prof_env, "SA2_PLAYER_PROF")) {
         const std::string* dir = env_find(prof_env, "SA2_PLAYER_PROF_OUT");
         say("player: SA2_PLAYER_PROF=%s, its render thread's sampler (host/player/prof.h), into %s", hz->c_str(),
@@ -1095,10 +1109,14 @@ int play_game(const Args& a) {
         if (env_find(genv, "SA2_PLAY_RES") || env_find(genv, "SA2_PLAY_ASPECT"))
             relay_line(session + "/game.log", "widescreen: ", "game: ", player_done);
     });
-    // The game's tweaks line (runtime/sa2_tweaks.c), printed at its start.
+    // The game's tweaks line (runtime/sa2_tweaks.c), printed at its start, and the player's
+    // (host/player/tweaks.cpp), printed at its own.
     std::thread tweaks_thread([&] {
-        const std::string* t = env_find(genv, "SA2_TWEAKS");
-        if (t && !t->empty()) relay_line(session + "/game.log", "sa2 tweaks: ", "game: ", player_done);
+        if (tweaks && !tweaks->empty()) relay_line(session + "/game.log", "sa2 tweaks: ", "game: ", player_done);
+    });
+    std::thread host_tweaks_thread([&] {
+        if (tweaks && !tweaks->empty())
+            relay_line(session + "/player.log", "sa2 host tweaks (player): ", "player: ", player_done);
     });
     // The player's line for the picture's place (its first Present after the first frame).
     std::thread picture_thread([&] {
@@ -1153,6 +1171,7 @@ int play_game(const Args& a) {
     mon_thread.join();
     ws_thread.join();
     tweaks_thread.join();
+    host_tweaks_thread.join();
     picture_thread.join();
     watch.join();
     relay_thread.join();

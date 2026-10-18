@@ -109,7 +109,7 @@ SA2_TWEAKS=no-event-bars
 
 On Windows the file is `share\game.env` in the extracted folder. For the Linux package it is `/usr/lib/opensa2/share/game.env`, which you edit as root; a package update replaces it. Separate several tweak names with commas. Setting `SA2_TWEAKS` in a shell has no effect, because the launcher passes only `game.env`'s settings to the game.
 
-The launcher prints the tweaks it passes, and each session's game log starts with a line that names the active tweaks. A name that is not a tweak is reported by name in that line and ignored.
+The launcher prints the tweaks it passes, and each session's game log starts with a line that names the active tweaks. A name that is not a tweak is reported by name in that line and ignored. Some tweaks change the player or the launcher instead of the game. The game's line names them as host tweaks, and the player says which of its tweaks are on in its own log, `player.err` (on Android, the session report). The launcher says which of its own are on in `launcher.log`.
 
 ## Source and checksums
 

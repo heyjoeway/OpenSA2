@@ -262,6 +262,14 @@
 // CLOCK_MONOTONIC (the clock of "t_start_monotonic_s"), for another process's clock to
 // be set beside.
 //
+// Host tweaks (tweaks.h; runtime/sa2_tweaks.h lists every tweak, the game's and the host's):
+// SA2_TWEAKS, read once, in a play session alone (--interactive with --input-path, no synthetic
+// input, no SA2_REPLAY_TICKS or SA2_REPLAY_WORDS: the game's, which the launcher and the Android
+// session give the player beside SA2_TWEAKS), and one stderr line, "sa2 host tweaks (player):
+// ...", whenever it is set. Each tweak whose home is the player is its own file,
+// host/player/tweaks/<name>.cpp, and tests sa2tw::on first: with none named, and in every replay,
+// the player is the build it was.
+//
 // The window, measured: at every Present the window's SDL flags are sampled
 // just before the Present, and the report's "window" keeps them by frame
 // ("flags_at_present": runs of [first frame, last frame, SDL_WindowFlags], with
@@ -329,6 +337,7 @@
 #include "stream.h"
 #include "texcodec.h"
 #include "touch_overlay.h"
+#include "tweaks.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -6071,6 +6080,15 @@ int main(int argc, char** argv) {
     // the run refuses --snap (check_outputs), with a report saying so.
     if (!o.snaps.empty() && o.snap_dir.empty())
         if (const char* out = getenv("SA2_PLAY_OUT"); out && *out) o.snap_dir = std::string(out) + "/snaps";
+    // Host tweaks (tweaks.h): SA2_TWEAKS, read once, in a play session alone: --interactive with
+    // --input-path, a person's window driving the game (the launcher's play, the Android
+    // session's), with no synthetic input and no replay. A stream file's replay, the launcher's
+    // selftest (no --input-path) and the synthetic tests have every host tweak off.
+    const char* not_play = sa2tw::not_play(o.interactive, !o.input_path.empty(),
+                                           !o.synthetic_keys.empty() || !o.synthetic_input.empty());
+    const sa2tw::Reading tweaks = sa2tw::read(getenv("SA2_TWEAKS"), sa2tw::off(not_play), "player");
+    sa2tw::g_on = tweaks.on;
+    if (!tweaks.line.empty()) std::fprintf(stderr, "%s\n", tweaks.line.c_str());
 #ifndef _WIN32
     if (o.end_fd >= 0) std::signal(SIGUSR1, on_end_signal);   // the caller's end request
 #else

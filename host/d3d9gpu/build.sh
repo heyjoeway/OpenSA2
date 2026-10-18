@@ -70,7 +70,7 @@ OUT=$(cd "$OUT" && pwd)
 # end (host/player/build_record.py): a source that changes while the build runs refuses it.
 P=$HOST/player
 SOURCES=("$HERE" "$P/sha256.cpp" "$P/sha256.h" "$P/stream.cpp" "$P/stream.h" "$P/texcodec.cpp" "$P/texcodec.h"
-         "$STREAM_H_DIR/sa2_stream.h")
+         "$STREAM_H_DIR/sa2_stream.h" "$P/tweaks.h" "$REPO/runtime/sa2_tweaks.h")
 "$PY" "$P/build_record.py" --start --out "$OUT/d3d9gpu_tools.json" --tree "$HOST/.." --sources "${SOURCES[@]}"
 # The pinned dxbc-spirv archive the translator links (R1 U1): tools/pins.json, a source of the
 # player's record, holds its sha256, and shader/build_translator.sh refuses any other.
@@ -79,7 +79,7 @@ DXBC_ARCHIVE=$("$PY" -c 'import json, sys; print(json.load(open(sys.argv[1]))["t
 DXBC_ARCHIVE=$REPO/$DXBC_ARCHIVE
 # The player's start set: everything its compiles can read in the tree (the record keeps
 # only what they did read).
-PLAYER_SOURCES=("$HERE" "$P" "$STREAM_H_DIR/sa2_stream.h" "$REPO/tools/pins.json")
+PLAYER_SOURCES=("$HERE" "$P" "$STREAM_H_DIR/sa2_stream.h" "$REPO/tools/pins.json" "$REPO/runtime/sa2_tweaks.h")
 "$PY" "$P/build_record.py" --start --out "$OUT/sa2_player_gpu.json" --tree "$HOST/.." --sources "${PLAYER_SOURCES[@]}"
 "$PY" "$P/generate_expectations.py" --host sdlgpu --repo "$REPO" --install "$I" --out "$OUT/expected-gpu"
 GEN=$OUT/d3d9gpu-gen
@@ -132,9 +132,17 @@ mkdir -p "$GOBJ"
 find "$GOBJ" -maxdepth 1 \( -type f -o -type l \) \( -name '*.o' -o -name '*.d' \) -delete
 PFLAGS=(-std=c++17 -O2 -g -Wall -Wextra -Wno-unused-parameter -I"$OUT/expected-gpu" -DSA2_PLAYER_GPU=1)
 GOBJS=()
-for tu in player input mixer stream sha256 texcodec touch_overlay; do
+for tu in player input mixer stream sha256 texcodec touch_overlay tweaks; do
   $CXX "${PFLAGS[@]}" -I"$STREAM_H_DIR" -I"$I/include/dxvk" -I"$I/include" -MMD -MF "$GOBJ/$tu.d" \
     -c "$P/$tu.cpp" -o "$GOBJ/$tu.o"
+  GOBJS+=("$GOBJ/$tu.o")
+done
+# Each host tweak of the player's (runtime/sa2_tweaks.h, "Add a host tweak"), as host/player/build.sh.
+for src in "$P"/tweaks/*.cpp; do
+  [ -e "$src" ] || continue
+  tu=tweak_$(basename "$src" .cpp)
+  $CXX "${PFLAGS[@]}" -I"$STREAM_H_DIR" -I"$I/include/dxvk" -I"$I/include" -MMD -MF "$GOBJ/$tu.d" \
+    -c "$src" -o "$GOBJ/$tu.o"
   GOBJS+=("$GOBJ/$tu.o")
 done
 $CXX "${FLAGS[@]}" -I"$HERE/test" -DSA2_CLEAR_MATRIX_STATIC -MMD -MF "$GOBJ/clear_matrix.d" \
@@ -146,13 +154,15 @@ $CXX -o "$OUT/sa2_player_gpu" "${GOBJS[@]}" "$OUT/libsa2_d3d9gpu.a" "${SHADER_LI
 # copy of a weak definition silently: no symbol but the standard library's template code
 # (mangled in std:: or __gnu_cxx::) may be defined by two of the player's objects, d9g's and the
 # translator's (whose standard-library code is compiled with DXVK's -D_GLIBCXX_ASSERTIONS=1:
-# shader/build_translator.sh).
+# shader/build_translator.sh). One of host 2's own, named: the host tweaks' inline mask and its
+# test (host/player/tweaks.h, sa2tw::g_on and sa2tw::on), which the player and a host tweak's
+# change in d9g share by design.
 defined_by() { nm --defined-only "$@" | awk 'NF == 3 && $2 ~ /^[A-Z]$/ {print $3}' | sort -u; }
 for pair in "GOBJS DOBJS" "GOBJS TOBJS" "DOBJS TOBJS"; do
   set -- $pair
   declare -n first=$1 second=$2
   both=$(comm -12 <(defined_by "${first[@]}") <(defined_by "${second[@]}") \
-         | grep -vE '^(_ZNSt|_ZNKSt|_ZSt|_ZN9__gnu_cxx|DW\.ref\.)' || true)
+         | grep -vE '^(_ZNSt|_ZNKSt|_ZSt|_ZN9__gnu_cxx|DW\.ref\.|_ZN5sa2tw4g_onE$|_ZN5sa2tw2onENS_3BitE$)' || true)
   unset -n first second
   [ -z "$both" ] || { echo "the player, d9g and the translator: $pair both define: $(c++filt <<< "$both" | tr '\n' ' ')"; exit 2; }
 done

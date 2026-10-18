@@ -98,6 +98,7 @@ final class GameSettings {
         new Tweak("forgiving-restarts", "Forgiving restarts", "Restarting from the pause menu keeps your rings and costs no life, and a miss keeps your score. Rings kept through a restart still give extra lives, and your save keeps the lives you have and the rings you finish with. Scores, ranks and missions you finish with it on are saved as usual."),
         new Tweak("fov", "Wider field of view", "Widens the camera's view in levels by a quarter, so you see more around your character. The HUD, cutscenes and menus are unchanged."),
         new Tweak("frametime-overlay", "Frame-time overlay", "Shows a small box at the top left with the frame rate, the frame time and the frames shown late."),
+        new Tweak("garden-ring-trickle", "Rings over time in Chao World", "Adds one ring to your ring total every second while you are in Chao World, up to 9,999,999. The rings are kept in your save."),
         new Tweak("gold-beetle-stays", "Gold Beetles stay", "A Gold Beetle no longer flies away after a moment; it stays until you destroy it. The extra points count in your saved scores and ranks."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),
         new Tweak("hide-radar", "Hide the emerald radar", "Treasure hunts (Knuckles and Rouge) show no emerald radar and no \"!\" over a piece, and play no radar beep, so you find the pieces by eye and with the hint monitors."),

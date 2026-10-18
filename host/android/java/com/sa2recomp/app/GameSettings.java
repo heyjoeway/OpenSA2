@@ -76,6 +76,7 @@ final class GameSettings {
     static final Tweak[] TWEAKS = {
         new Tweak("all-events-skippable", "Skip any cutscene", "Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch."),
         new Tweak("fast-stage-load", "Faster stage loading", "Starts a stage as soon as it has loaded, without waiting for the loading screen to finish. Chao World loads as usual."),
+        new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),
         new Tweak("no-event-bars", "Remove cutscene black bars", "Removes the black bars at the sides of most cutscenes on a wide picture. The opening and four other cutscenes framed for 4:3 keep theirs, and so do movies."),
     };
 

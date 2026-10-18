@@ -281,6 +281,12 @@ void *__wrap_sub_405310(void *state, uint32_t pc, void *memory) {
  * 0x005FF640 reaches a loading wait, so it is not a site); the imports they reach are the C
  * library's, the same set as the score window's (hud43-fold trees.py).
  *
+ * hide-hud (SA2_TWEAKS, runtime/tweaks/hide-hud.c) hides the score window from inside this file's
+ * wrap of 0x0044E9C0, since a function is wrapped once: hud43_call asks it first, and with that
+ * tweak on it takes the call itself (the window's RET, and O written as 0x0044E080 would write it,
+ * from sa2_hud43_hud_h's H) and the swap does not happen. With the tweak off it answers 0 at its
+ * first test and the call goes on as above.
+ *
  * The setting, read once: SA2_PLAY_HUD43=1 turns it on; unset, empty or 0 leaves it off, and any
  * other value leaves it off with one line. Ignored when SA2_REPLAY_TICKS or SA2_REPLAY_WORDS is
  * set; tools/s4/device_profile.py OWNED strips it from every replay's environment besides. With
@@ -384,12 +390,29 @@ static int hud43_on(void) {
     return g_hud43;
 }
 
+/* The H bits the HUD's layout sites read at this H and V: the 4:3 value while SA2_PLAY_HUD43 is on
+ * and the screen is wider than 4:3, otherwise H itself (inside a swap, H is the 4:3 value already
+ * and comes back as it is). For code that writes what a layout site would write without running
+ * one: hide-hud's x origin O (runtime/tweaks/hide-hud.c), so that O holds one value for every
+ * reader. */
+uint32_t sa2_hud43_hud_h(uint32_t h_bits, uint32_t v_bits) {
+    if (!hud43_on()) return h_bits;
+    const float h = hud43_f(h_bits), v = hud43_f(v_bits);
+    if (!(v > 0.0f && (double)h * 3.0 > (double)v * 4.0)) return h_bits;
+    return sa2_hud43_value(v_bits);
+}
+
+/* runtime/tweaks/hide-hud.c: 1 when hide-hud is on and has taken the score window's call itself,
+ * 0 (its first test, with the tweak off) when the lifted body is to run. */
+int sa2_tweak_hide_hud_score_window(void *state);
+
 static void hud43_first(int site, const char *as) {
     if (g_hud43_sites[site].acted++ == 0)
         fprintf(stderr, "widescreen: HUD at 4:3: %s %s\n", g_hud43_sites[site].what, as);
 }
 
 static void *hud43_call(hud43_lifted real, int site, void *state, uint32_t pc, void *memory) {
+    if (site == HUD43_SITE_44e9c0 && sa2_tweak_hide_hud_score_window(state)) return memory;
     if (!hud43_on()) return real(state, pc, memory);
     if (g_hud43_sites[site].kind == HUD43_GUARD) {
         if (!g_hud43_swapped) return real(state, pc, memory);

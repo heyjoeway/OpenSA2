@@ -12,9 +12,16 @@ VerticalResolution (0x0174BA64, 0x0174BA68): each stand-in `__real_` prints the 
 calls the next wrap of a chain the case names, so a case reads what a layout function and the
 guards it reaches see, nested, and what H is when the outermost wrap returns. "then" in a chain
 starts the next call at the top level, after the previous one returned. Two stand-ins also model
-the HUD's x origin O (0x01A559E4), which outlives the call that writes it: the score window's
-writes O = 40 - 276(k-1) from the k it reads, as 0x0044E080 does, and the trick score's prints
-its top-tier sprite's x from O, k and the 1.6 test, as 0x0044D5BD-0x0044D72B compute it.
+the HUD's x origin O (0x01A559E4, guest memory, 0.0 at the start), which outlives the call that
+writes it: the score window's writes O = 40 - 276(k-1) from the k it reads, as 0x0044E080 does at
+PC24 (every step rounded to float), and the trick score's prints its top-tier sprite's x from O,
+k and the 1.6 test, as 0x0044D5BD-0x0044D72B compute it.
+
+The play tweak hide-hud (runtime/tweaks/hide-hud.c) takes the score window's call from inside the
+wrap here, so the build links it and runtime/sa2_tweaks.c as every runtime link does; its kart
+callees have stand-ins that are not called. The score window's switches (0x0174AFCC and
+0x0174AFCE) read 1, and its caller's return address 0x0043D274 is at guest [ESP]: a RET the tweak
+takes prints "ret <EIP>". The hide-hud cases show the trick score at the x it has with the HUD on.
 """
 from __future__ import annotations
 
@@ -35,7 +42,8 @@ import link_s4 as LS  # noqa: E402
 ZIG = ROOT / "private" / "predecessor-tools" / "zig" / "zig-x86_64-linux-0.15.2" / "zig"
 RUNTIME = ROOT / "runtime"
 CC = ["-target", "x86_64-linux-musl", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(RUNTIME)]
-VARS = ("SA2_PLAY_RES", "SA2_PLAY_ASPECT", "SA2_PLAY_HUD43", "SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS")
+VARS = ("SA2_PLAY_RES", "SA2_PLAY_ASPECT", "SA2_PLAY_HUD43", "SA2_REPLAY_TICKS", "SA2_REPLAY_WORDS",
+        "SA2_TWEAKS")
 SOURCE = (RUNTIME / "sa2_widescreen.c").read_text()
 # HUD43_SITES as the file lists them: (va, kind).
 SITES = re.findall(r"^\s*X\(([0-9a-f]+), (HUD43_\w+),", SOURCE, re.M)
@@ -54,13 +62,22 @@ DRIVER = r"""
 
 #define BASE 0x10000u
 #define RES 0x0174BA60u   /* HorizontalResolution at +4, VerticalResolution at +8 */
+#define SWITCHES 0x0174AFC0u   /* the score window's 0x0174AFCC and its layout's 0x0174AFCE */
+#define ORIGIN 0x01A559E0u   /* O at +4 */
+#define STACK 0x20000u
 static uint8_t mem[0x100];
 static uint8_t res[0x10];
+static uint8_t switches_mem[0x10] = {[0xC] = 1, [0xE] = 1};
+static uint8_t origin_mem[0x10];
+static uint8_t stack[0x100] = {[0x80] = 0x74, [0x81] = 0xD2, [0x82] = 0x43};   /* 0x0043D274 */
 static uint32_t eax;
 
 static uint8_t *at(uint32_t a, uint32_t n) {
     if (a >= BASE && a + n <= BASE + sizeof mem) return mem + (a - BASE);
     if (a >= RES && a + n <= RES + sizeof res) return res + (a - RES);
+    if (a >= SWITCHES && a + n <= SWITCHES + sizeof switches_mem) return switches_mem + (a - SWITCHES);
+    if (a >= ORIGIN && a + n <= ORIGIN + sizeof origin_mem) return origin_mem + (a - ORIGIN);
+    if (a >= STACK && a + n <= STACK + sizeof stack) return stack + (a - STACK);
     return NULL;
 }
 int sa2_peek(uint32_t a, uint32_t n, void *out) {
@@ -88,10 +105,15 @@ static void *call_wrap(const char *va);
 static float h_now(void) { float f; memcpy(&f, res + 4, 4); return f; }
 static float v_now(void) { float f; memcpy(&f, res + 8, 4); return f; }
 static float k_now(void) { volatile float a = h_now() / 640.0f, b = v_now() / 480.0f; return a / b; }
-static float origin;    /* the HUD's x origin O, 0x01A559E4 */
 static void *body(uint32_t va, void *memory) {
     printf("%06x %.4f\n", va, (double)h_now());
-    if (va == 0x44e9c0u) origin = (float)(40.0 - 276.0 * ((double)k_now() - 1.0));
+    if (va == 0x44e9c0u) {      /* O, the HUD's x origin at 0x01A559E4 */
+        volatile float k = k_now(), d = k - 1.0f, m = d * 276.0f, o = 40.0f - m;
+        const float w = o;
+        memcpy(origin_mem + 4, &w, 4);
+    }
+    float origin;
+    memcpy(&origin, origin_mem + 4, 4);
     if (va == 0x44d360u) {
         const double x = 16.0 + ((double)k_now() - 1.0) * (16.0 - 320.0);
         const int wide = (double)h_now() / (double)v_now() > 1.6;
@@ -102,7 +124,17 @@ static void *body(uint32_t va, void *memory) {
     return memory;
 }
 @STUBS@
-uint32_t sa2_rt_get_gpr(const void *state, int idx) { (void)state; return idx == SA2_EAX ? eax : 0xDEADu; }
+uint32_t sa2_rt_get_gpr(const void *state, int idx) {
+    (void)state;
+    return idx == SA2_EAX ? eax : idx == SA2_ESP ? STACK + 0x80u : 0xDEADu;
+}
+void sa2_rt_set_gpr(void *state, int idx, uint32_t v) {
+    (void)state;
+    if (idx == SA2_EIP) printf("ret 0x%08X\n", v);
+}
+/* hide-hud's kart callees: not called by these cases. */
+void *__real_sub_61bae0(void *s, uint32_t pc, void *m) { (void)s; (void)pc; exit(6); return m; }
+void *__real_sub_61b1d0(void *s, uint32_t pc, void *m) { (void)s; (void)pc; exit(6); return m; }
 
 static int found = 1;
 void *__real_sub_405310(void *state, uint32_t pc, void *memory) {
@@ -125,8 +157,10 @@ int main(int argc, char **argv) {
         nchain = argc - 4;
         pos = 0;
         while (pos < nchain) {
-            if (strcmp(chain[pos], "then") == 0) pos++;
-            else call_wrap(chain[pos]);
+            if (strcmp(chain[pos], "then") == 0) { pos++; continue; }
+            const int before = pos;
+            call_wrap(chain[pos]);
+            if (pos == before) pos++;      /* a wrap that took the call: its body never ran */
         }
         printf("after %.4f\n", (double)h_now());
         return 0;
@@ -188,7 +222,8 @@ def exe(tmp_path_factory) -> Path:
                ZIG_GLOBAL_CACHE_DIR=os.environ.get(
                    "ZIG_GLOBAL_CACHE_DIR", str(ROOT / "private" / "generated" / "zig-cache-tests")))
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"),
-                           str(RUNTIME / "sa2_widescreen.c"), "-o", str(out)],
+                           str(RUNTIME / "sa2_widescreen.c"), str(RUNTIME / "sa2_tweaks.c"),
+                           str(RUNTIME / "tweaks" / "hide-hud.c"), "-o", str(out)],
                           capture_output=True, text=True, env=env)
     assert done.returncode == 0, done.stderr
     return out
@@ -365,3 +400,44 @@ def test_hud43_says_when_a_swap_spans_a_hand_off(exe):
 
 def test_hud43_value_for_every_height(exe):
     assert run(exe, "values")[0] == "values bad 0"
+
+
+# ------------------------------------------------------------------ hide-hud's score window
+TRICK = ("44e9c0", "then", "44d360")
+
+
+@pytest.mark.parametrize("h, v, hud43, x", [
+    (1440, 1080, "", "55.0000"),            # 4:3: 16 + O - 1 with O = 40
+    (2340, 1080, "", "-42.5000"),           # the port's: 16 + 0.625 x (16-320) - O - 1, O = -132.5
+    (2560, 1080, "", "-46.7778"),
+    (2340, 1080, "1", "55.0000"),           # SA2_PLAY_HUD43: the 4:3 layout, O = 40
+    (2856, 1280, "1", "55.0000"),           # 1280 lines: k = 1 - 2^-24, O = 40.000015
+])
+def test_hide_hud_keeps_the_trick_score_where_the_hud_puts_it(exe, h, v, hud43, x):
+    """The score window not drawn, and the trick score after it at the x it has with the HUD on:
+    the tweak writes O as the window's layout would, from the width that layout reads."""
+    lines, _ = hud(exe, h, v, *TRICK, SA2_PLAY_HUD43=hud43)
+    assert lines[-2:] == [f"trick sprite x {x}", f"after {h}.0000"] and lines[0].startswith("44e9c0 ")
+    lines, err = hud(exe, h, v, *TRICK, SA2_PLAY_HUD43=hud43, SA2_TWEAKS="hide-hud")
+    assert lines[0] == "ret 0x0043D274"     # the window's RET alone: its body never ran
+    assert lines[-2:] == [f"trick sprite x {x}", f"after {h}.0000"]
+    assert not [line for line in lines if line.startswith("44e9c0 ")]
+    assert "sa2 tweaks: hud hidden: score window not drawn (x origin " in err
+    assert "the score window: score, time, rings, lives (0x0044E9C0) laid out at 4:3" not in err
+
+
+def test_hide_hud_before_the_fix_left_the_origin_at_0(exe):
+    """What the finding saw: with the window skipped and O never written, the trick score's sprite
+    is 16 + 0 - 1 = 15 at 4:3, 40 canvas pixels left of its 55."""
+    lines, _ = hud(exe, 1440, 1080, "44d360")
+    assert lines == ["44d360 1440.0000", "trick sprite x 15.0000", "after 1440.0000"]
+
+
+def test_hide_hud_off_leaves_the_score_window_to_its_wrap(exe):
+    for env in ({}, {"SA2_TWEAKS": "no-event-bars"}):
+        lines, _ = hud(exe, 2340, 1080, *TRICK, SA2_PLAY_HUD43="1", **env)
+        assert lines == ["44e9c0 1440.0000", "44d360 1440.0000", "trick sprite x 55.0000", "after 2340.0000"]
+    # In a replay both switches are ignored: the port's layout, the window drawn.
+    lines, _ = hud(exe, 2340, 1080, *TRICK, SA2_PLAY_HUD43="1", SA2_TWEAKS="hide-hud",
+                   SA2_REPLAY_TICKS="/dev/null")
+    assert lines == ["44e9c0 2340.0000", "44d360 2340.0000", "trick sprite x -42.5000", "after 2340.0000"]

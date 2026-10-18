@@ -171,6 +171,7 @@
     X(SA2_TWEAK_ANALOG_FIX, "analog-fix", "analog full throw", "a gamepad stick gives full speed from about two thirds of a push, not before half, so half a push walks") \
     X(SA2_TWEAK_CHAO_KEY_ALWAYS, "chao-key-always", "chao key always", "a Chao World visit after every stage cleared in one-player play, as with the Chao Key found") \
     X(SA2_TWEAK_CHAO_STAT_X5, "chao-stat-x5", "chao stats x5", "Chao gain up to five times the stat points from Chaos Drives, small animals and fruit, at most 100 a stat for each animal or drive so no stat loses points (kept in the Chao save)") \
+    X(SA2_TWEAK_DRAW_DISTANCE, "draw-distance", "draw distance doubled", "stage objects appear and stay loaded at twice the usual distance") \
     X(SA2_TWEAK_DRIVES_TO_MINIMALS, "drives-to-minimals", "drives become minimals", "destroyed enemies leave a small animal instead of a Chaos Drive") \
     X(SA2_TWEAK_EVENT_BARS_ALL, "event-bars-all", "event-bars always", "black bars at the sides of every cutscene on a wide screen, as on a 4:3 one") \
     X(SA2_TWEAK_FAST_STAGE_LOAD, "fast-stage-load", "fast stage load", "a stage starts as soon as its files are loaded, without the loading screen's wait") \

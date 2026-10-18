@@ -223,6 +223,11 @@ const char *sa2_vfs_handle_guest_path(uint32_t h);
 int      sa2_vfs_close(uint32_t h);
 int      sa2_vfs_read(uint32_t h, void *buf, uint32_t want, uint32_t *got);
 int      sa2_vfs_write(uint32_t h, const void *buf, uint32_t want, uint32_t *put);
+/* The host read or write sa2_vfs_read or sa2_vfs_write is inside, for the stall watch
+ * (runtime/sa2_stall.h): 1 with *write (0 for a read), its host thread's id, the guest's path,
+ * the bytes asked and when the call began (CLOCK_MONOTONIC, ns); 0 when none is, and always on
+ * hosts other than Linux. Read without a lock, from another thread. */
+int      sa2_vfs_io_now(int *write, uint32_t *tid, const char **path, uint64_t *bytes, int64_t *since_ns);
 /* `method` is Win32's FILE_BEGIN/FILE_CURRENT/FILE_END (0/1/2). */
 int      sa2_vfs_seek(uint32_t h, int64_t offset, uint32_t method, uint64_t *newpos);
 int      sa2_vfs_size(uint32_t h, uint64_t *size);

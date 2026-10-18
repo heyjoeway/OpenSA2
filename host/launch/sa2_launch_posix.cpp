@@ -68,8 +68,10 @@ bool make_fifo(const std::string& path, std::string* error) {
 // The stream's pipes hold 1 MB, Linux's unprivileged most (/proc/sys/fs/pipe-max-size): with the
 // 64 KB default the game waited on a full pipe about 5 ms a tick behind a slow reader (unit
 // perf-game, 2026-10-12: 21.3 ms against 15.9 ms per Metal Harbor tick). A refusal keeps the
-// default. A paced relay sizes both of its pipes again while it runs (sa2_relay.cpp, kPlayerPipe
-// and kFifoHeld), since the frames that wait between the game and the player depend on them.
+// default. The game's FIFO keeps this size for the whole session: the relay never resizes it once
+// the game can write, since a resize under a waiting write can lose that write's wakeup on Linux
+// 5.8 to 6.7 (sa2_relay.h). A paced relay sets the player's pipe to kPlayerPipe once, before its
+// writer starts (sa2_relay.cpp, "Pace").
 static void widen_pipe(int fd) {
 #ifdef F_SETPIPE_SZ
     if (fd >= 0) (void)fcntl(fd, F_SETPIPE_SZ, 1 << 20);
@@ -246,7 +248,7 @@ bool wait_exit(Proc& p, double timeout_s) {
 
 bool send_signal(const Proc& p, Signal s, bool group) {
     if (!p.running || p.id <= 0) return false;
-    int sig = s == Signal::Terminate ? SIGTERM : s == Signal::User1 ? SIGUSR1 : SIGKILL;
+    int sig = s == Signal::Terminate ? SIGTERM : s == Signal::User1 ? SIGUSR1 : s == Signal::Nudge ? SIGURG : SIGKILL;
     return kill(group ? -pid_t(p.id) : pid_t(p.id), sig) == 0;
 }
 

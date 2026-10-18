@@ -5,7 +5,11 @@
 
 #include <pthread.h>
 #if defined(__linux__)
+#include <errno.h>
 #include <sched.h>
+#include <sys/syscall.h>
+/* <unistd.h>'s, declared alone: that header's brk() would meet this file's brk below. */
+long syscall(long number, ...);
 #endif
 #include <stdlib.h>
 #include <signal.h>
@@ -15,6 +19,7 @@
 #include "cpu_state.h"
 #include "guest_memory.h"
 #include "sa2_call.h"
+#include "sa2_stall.h"
 #include "sa2_trap.h"
 
 /* ------------------------------------------------------------------ state */
@@ -75,6 +80,7 @@ typedef struct {
     pthread_t       host;
     pthread_cond_t  cv;
     int             host_started;
+    uint32_t        host_tid;               /* the host thread's id (Linux gettid), 0 elsewhere */
 } thread_row;
 
 /* The ceiling is the stack arena's, plus thread 0 which has its own pinned
@@ -155,10 +161,56 @@ static int      g_poll_handoff = 1;
  * leave a sleep state. A measurement's knob (the thermal unit, 2026-10-12): it changes where the
  * guest runs, never what it computes or in what order, so a replay is the same with it set. */
 #if defined(__linux__)
+static uint32_t host_tid_now(void) { return (uint32_t)syscall(SYS_gettid); }
+
 static cpu_set_t g_guest_cpus;
 static int       g_guest_cpus_on;
-static void guest_cpus_apply(void) {
-    if (g_guest_cpus_on) (void)sched_setaffinity(0, sizeof g_guest_cpus, &g_guest_cpus);
+
+/* A CPU set as a list ("0-3,7") into buf[n]; "?" for none. */
+static void cpu_list(const cpu_set_t *set, char *buf, size_t n) {
+    size_t len = 0;
+    buf[0] = 0;
+    for (int c = 0; set && c < CPU_SETSIZE && len + 16 < n; c++) {
+        if (!CPU_ISSET(c, set)) continue;
+        int e = c;
+        while (e + 1 < CPU_SETSIZE && CPU_ISSET(e + 1, set)) e++;
+        len += (size_t)snprintf(buf + len, n - len, e > c ? "%s%d-%d" : "%s%d", len ? "," : "", c, e);
+        c = e;
+    }
+    if (!buf[0]) snprintf(buf, n, "?");
+}
+
+/* SA2_GUEST_HOST_CPUS on the calling host thread, guest thread `index` (starting at `start_va`).
+ * Says nothing when the thread then runs on exactly the CPUs asked. Otherwise one line, for the
+ * first 16 such threads: the call's error, or the CPUs the kernel left it (a cpuset narrower than
+ * the list, or a CPU not active). 0 when it holds, 1 when the CPUs differ, -1 when the call failed.
+ * Called before the thread takes the guest lock, so the count is atomic. */
+static int guest_cpus_apply(int index, uint32_t start_va) {
+    if (!g_guest_cpus_on) return 0;
+    const int rc = sched_setaffinity(0, sizeof g_guest_cpus, &g_guest_cpus);
+    const int err = rc ? errno : 0;
+    cpu_set_t got;
+    CPU_ZERO(&got);
+    const int read_back = sched_getaffinity(0, sizeof got, &got) == 0;
+    if (!rc && read_back && CPU_EQUAL(&got, &g_guest_cpus)) return 0;
+    /* The first 16 are said; a game that makes many threads does not fill its log with them. */
+    static int said;
+    const int nth = __atomic_add_fetch(&said, 1, __ATOMIC_RELAXED);
+    if (nth > 16) return rc ? -1 : 1;
+    if (nth == 16)
+        fprintf(stderr, "sa2: SA2_GUEST_HOST_CPUS: the 16th thread that does not run where asked; later ones are "
+                "not said\n");
+    char asked[256], now[256];
+    cpu_list(&g_guest_cpus, asked, sizeof asked);
+    cpu_list(read_back ? &got : NULL, now, sizeof now);
+    if (rc)
+        fprintf(stderr, "sa2: SA2_GUEST_HOST_CPUS: guest thread %d (start 0x%08x, host tid %u): sched_setaffinity "
+                "to CPUs %s failed: %s (errno %d); it runs on CPUs %s\n", index, start_va, host_tid_now(), asked,
+                strerror(err), err, now);
+    else
+        fprintf(stderr, "sa2: SA2_GUEST_HOST_CPUS: guest thread %d (start 0x%08x, host tid %u) asked for CPUs %s "
+                "and runs on CPUs %s\n", index, start_va, host_tid_now(), asked, now);
+    return rc ? -1 : 1;
 }
 static void guest_cpus_from_env(void) {
     const char *v = getenv("SA2_GUEST_HOST_CPUS");
@@ -182,17 +234,56 @@ static void guest_cpus_from_env(void) {
         else if (*p) ok = 0;
     }
     g_guest_cpus_on = ok && CPU_COUNT(&g_guest_cpus) > 0;
+    if (!g_guest_cpus_on) {
+        fprintf(stderr, "sa2: SA2_GUEST_HOST_CPUS=%s: not a CPU list; not used\n", v);
+        return;
+    }
+    /* The calling thread is guest thread 0's; said once the call has been made. */
+    const int got = guest_cpus_apply(0, 0);
     fprintf(stderr, "sa2: SA2_GUEST_HOST_CPUS=%s: %s\n", v,
-            g_guest_cpus_on ? "guest threads run on those CPUs" : "not a CPU list; not used");
-    guest_cpus_apply();                 /* the calling thread is guest thread 0's */
+            got == 0 ? "guest threads run on those CPUs"
+                     : got > 0 ? "guest threads are asked onto those CPUs; guest thread 0 runs on a different set (above)"
+                               : "guest threads are asked onto those CPUs; guest thread 0's call failed (above)");
 }
+
+/* SIGURG, the relay's nudge (host/launch/sa2_relay.h, "The stall watch"): taken as a no-op with
+ * SA_RESTART, so a system call it interrupts starts again, or returns what it had done, as a
+ * write the kernel left asleep on a pipe does. A process-directed signal lands on any thread that
+ * does not block it; the one that matters is the token's holder, inside the recorder's write or
+ * the pace pipe's read, so a thread that is not passes it on to that one. */
+static volatile sig_atomic_t g_nudges;
+static void on_nudge(int sig) {
+    (void)sig;
+    const int saved = errno;
+    g_nudges++;
+    const int cur = g_current;
+    if (cur >= 0 && cur < SA2_MAX_GUEST_THREADS) {
+        const uint32_t tid = g_t[cur].host_tid;
+        if (tid && tid != host_tid_now()) syscall(SYS_tgkill, syscall(SYS_getpid), (long)tid, (long)SIGURG);
+    }
+    errno = saved;
+}
+static void nudge_handler_install(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_nudge;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGURG, &sa, NULL))
+        fprintf(stderr, "sa2: SIGURG, the relay's nudge, cannot be caught: %s\n", strerror(errno));
+}
+static uint64_t nudges_taken(void) { return (uint64_t)g_nudges; }
 #else
-static void guest_cpus_apply(void) {}
+static uint32_t host_tid_now(void) { return 0; }
+static int guest_cpus_apply(int index, uint32_t start_va) { (void)index; (void)start_va; return 0; }
 static void guest_cpus_from_env(void) {}
+static void nudge_handler_install(void) {}
+static uint64_t nudges_taken(void) { return 0; }
 #endif
 
 void sa2_threads_config_from_env(void) {
     guest_cpus_from_env();
+    nudge_handler_install();
     const char *v = getenv("SA2_THREADS_BREAK");
     snprintf(g_break, sizeof g_break, "%s", v ? v : "");
     v = getenv("SA2_VIRTUAL_BUDGET_MS");
@@ -356,6 +447,42 @@ const char *sa2_sched_wait_reason_name(int idx) {
     default:              return "not-blocked";
     }
 }
+/* The stall watch's copy (sa2_stall.h). Read without the guest lock, on the watch's thread. */
+int sa2_sched_stall_rows(sa2_stall_row *out, int max, int *current, int *lock_held, uint64_t *nudges) {
+    *current = g_current;
+    if (pthread_mutex_trylock(&g_lock) == 0) {
+        *lock_held = 0;
+        pthread_mutex_unlock(&g_lock);
+    } else {
+        *lock_held = 1;
+    }
+    *nudges = nudges_taken();
+    int n = 0;
+    const int count = g_count;
+    for (int i = 0; i < count && i < SA2_MAX_GUEST_THREADS && n < max; i++) {
+        const thread_row *t = &g_t[i];
+        if (!t->used) continue;
+        sa2_stall_row *r = &out[n++];
+        memset(r, 0, sizeof *r);
+        r->index = t->index;
+        r->host_tid = t->host_tid;
+        r->start_va = t->start_va;
+        r->state = t->state >= 0 && t->state < T_STATE_N ? k_state_name[t->state] : "?";
+        r->suspend_count = t->suspend_count;
+        r->wait = sa2_sched_wait_reason_name(i);
+        r->wait_object = sa2_sched_wait_object(i);
+        r->deadline_us = sa2_sched_wait_deadline(i);
+        r->where = t->where ? t->where : "";
+        r->last_caller = t->last_caller;
+        r->guest_calls = t->guest_calls;
+        r->blocks = t->blocks;
+        r->wakes = t->wakes;
+        r->kstate = '?';
+        r->last_cpu = -1;
+    }
+    return n;
+}
+
 uint32_t *sa2_sched_tls(int idx) {
     if (g_break[0] && !strcmp(g_break, "sharedtls")) return g_t[0].tls;
     thread_row *t = row(idx);
@@ -1046,7 +1173,8 @@ static void *thread_body(void *arg) {
     pthread_sigmask(SIG_BLOCK, &s, NULL);
 #endif      /* Windows: no SIGALRM; sa2_call's bound is the thread that armed it (sa2_trap.c) */
     sa2_trap_thread_init();
-    guest_cpus_apply();
+    t->host_tid = host_tid_now();
+    (void)guest_cpus_apply(t->index, t->start_va);
 
     pthread_mutex_lock(&g_lock);
     t->host_started = 1;
@@ -1105,6 +1233,7 @@ int sa2_sched_init(void) {
     t->stack_slot = -1;                 /* thread 0 keeps the pinned stack */
     t->stack_low_water = SA2_GUEST_STACK_TOP;
     t->host = pthread_self();
+    t->host_tid = host_tid_now();
     pthread_cond_init(&t->cv, NULL);
     t->slices = 1;
     t->seq = 0;

@@ -64,7 +64,7 @@ RUNTIME_C = ["guest_memory.c", "function_table_impl.c", "sa2_trap.c", "sa2_call.
              "sa2_devprofile.c", "sa2_locale.c", "sa2_frameskip.c",
              "sa2_guest_call.c", "sa2_dinput.c", "sa2_wbem.c", "sa2_poll_handoff.c",
              "sa2_exe_overlay.c", "sa2_cri_dsp.c", "sa2_ninja_math.c", "sa2_widescreen.c",
-             "sa2_crt_x87.c", "sa2_tweaks.c"]
+             "sa2_crt_x87.c", "sa2_tweaks.c", "sa2_stall.c"]
 # The tweaks' own files, runtime/tweaks/*.c, join RUNTIME_C after PRODUCTION_WRAPS below.
 RUNTIME_CXX = ["remill_runtime.cpp", "sa2_emulate.cpp"]
 # The shipped executable's code-section overlay (runtime/sa2_exe_overlay.h): the table

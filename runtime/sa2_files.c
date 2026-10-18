@@ -857,18 +857,64 @@ int sa2_vfs_close(uint32_t h) {
     return SA2_VFS_OK;
 }
 
+/* The host call in progress (sa2_vfs_io_now). Only the guest thread holding the guest lock
+ * reads or writes a file, so one call is in progress at most; the stall watch reads these from
+ * its own thread, without a lock, and `active` last. */
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <time.h>
+static struct {
+    volatile int        active, write;
+    volatile uint32_t   tid;
+    const char *volatile path;
+    volatile uint64_t   bytes;
+    volatile int64_t    since_ns;
+} g_io;
+static void io_begin(int write, const char *path, uint64_t bytes) {
+    static __thread uint32_t tid;
+    if (!tid) tid = (uint32_t)syscall(SYS_gettid);
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    g_io.write = write;
+    g_io.tid = tid;
+    g_io.path = path;
+    g_io.bytes = bytes;
+    g_io.since_ns = (int64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+    __atomic_store_n(&g_io.active, 1, __ATOMIC_RELEASE);
+}
+static void io_end(void) { __atomic_store_n(&g_io.active, 0, __ATOMIC_RELEASE); }
+int sa2_vfs_io_now(int *write, uint32_t *tid, const char **path, uint64_t *bytes, int64_t *since_ns) {
+    if (!__atomic_load_n(&g_io.active, __ATOMIC_ACQUIRE)) return 0;
+    *write = g_io.write;
+    *tid = g_io.tid;
+    *path = g_io.path;
+    *bytes = g_io.bytes;
+    *since_ns = g_io.since_ns;
+    return 1;
+}
+#else
+static void io_begin(int write, const char *path, uint64_t bytes) { (void)write; (void)path; (void)bytes; }
+static void io_end(void) {}
+int sa2_vfs_io_now(int *write, uint32_t *tid, const char **path, uint64_t *bytes, int64_t *since_ns) {
+    (void)write; (void)tid; (void)path; (void)bytes; (void)since_ns;
+    return 0;
+}
+#endif
+
 int sa2_vfs_read(uint32_t h, void *buf, uint32_t want, uint32_t *got) {
     if (got) *got = 0;
     vfs_handle *r = handle_of(h);
     if (!r || r->kind != 1 || r->fd < 0) return SA2_VFS_NO_HANDLE;
     if (!(r->access & SA2_VFS_ACCESS_READ)) return SA2_VFS_HOST_ERROR;
     uint32_t done = 0;
+    io_begin(0, r->guest, want);
     while (done < want) {
         ssize_t n = read(r->fd, (char *)buf + done, want - done);
-        if (n < 0) { if (errno == EINTR) continue; return SA2_VFS_HOST_ERROR; }
+        if (n < 0) { if (errno == EINTR) continue; io_end(); return SA2_VFS_HOST_ERROR; }
         if (n == 0) break;
         done += (uint32_t)n;
     }
+    io_end();
     if (got) *got = done;
     g_st.reads++;
     g_st.bytes_read += done;
@@ -881,11 +927,13 @@ int sa2_vfs_write(uint32_t h, const void *buf, uint32_t want, uint32_t *put) {
     if (!r || r->kind != 1 || r->fd < 0) return SA2_VFS_NO_HANDLE;
     if (!(r->access & SA2_VFS_ACCESS_WRITE)) return SA2_VFS_HOST_ERROR;
     uint32_t done = 0;
+    io_begin(1, r->guest, want);
     while (done < want) {
         ssize_t n = write(r->fd, (const char *)buf + done, want - done);
-        if (n <= 0) { if (n < 0 && errno == EINTR) continue; return SA2_VFS_HOST_ERROR; }
+        if (n <= 0) { if (n < 0 && errno == EINTR) continue; io_end(); return SA2_VFS_HOST_ERROR; }
         done += (uint32_t)n;
     }
+    io_end();
     if (put) *put = done;
     g_st.writes++;
     g_st.bytes_written += done;

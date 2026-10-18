@@ -110,6 +110,9 @@ ALLOWED_UNDEFINED = frozenset({
     "fputc", "fputs", "free", "fwrite", "getenv", "getpid", "malloc", "memcpy", "memset",
     "open", "realloc", "snprintf", "strcmp", "strerror", "strlen", "strstr", "vfprintf",
     "vsnprintf", "write",
+    # read: one byte a frame from a paced session's pace pipe, an inherited descriptor
+    # (SA2_REC_PACE_FD, host/launch/sa2_relay.h); never the guest's
+    "read",
     # the runtime, read only: a bounds check and a memcpy (sa2_peek), a register of
     # the call's state, the scheduler's and window's counters, the recording
     # device's tables, and its file-texture rows (sa2_d3d9_texsrc_at refreshes two

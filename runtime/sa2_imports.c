@@ -29,6 +29,7 @@
 #include "sa2_wbem.h"
 #include "sa2_xaudio2.h"
 #include "sa2_threads.h"
+#include "sa2_stall.h"
 #include "sa2_window.h"
 
 /* --------------------------------------------------------------- state */
@@ -6442,6 +6443,7 @@ void sa2_imports_config_from_env(void) {
     v = getenv("SA2_GUEST_PID");
     if (v && *v) g_pid = (uint32_t)strtoul(v, NULL, 0);
     sa2_threads_config_from_env();
+    sa2_stall_start();             /* SA2_STALL_DUMP_MS: the stall watch's thread (sa2_stall.h) */
     v = getenv("SA2_GUEST_TID");
     if (v && *v) { g_tid = (uint32_t)strtoul(v, NULL, 0); sa2_sched_set_base_tid(g_tid); }
     v = getenv("SA2_GUEST_CMDLINE");

@@ -526,6 +526,7 @@ bool send_signal(const Proc& p, Signal s, bool) {
     if (!p.running) return false;
     HANDLE h = reinterpret_cast<HANDLE>(p.id);
     if (s == Signal::Kill) return TerminateProcess(h, 1) != 0;
+    if (s == Signal::Nudge) return false;            // no such signal (sa2_launch_platform.h)
     if (s == Signal::User1) {
         // The player's end request: its named event (player.cpp watch_end_event); false while
         // the player has not made it yet, as a SIGUSR1 before its handler would not be taken.

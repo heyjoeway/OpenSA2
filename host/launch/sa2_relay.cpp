@@ -3,11 +3,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 
 #ifndef _WIN32
+#include <cerrno>
 #include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace sa2l {
@@ -17,22 +20,31 @@ constexpr uint8_t kMagic[8] = {'S', 'A', '2', 'D', '3', 'D', '9', 'S'};
 constexpr uint32_t kKindFrame = 3;
 constexpr size_t kChunk = 1u << 20;
 
-// The pace's two pipe sizes (sa2_relay.h, "Pace"). The player's pipe holds kPlayerPipe, Linux's
-// default, so a frame is handed on in full only when the player has read all but that much of
-// it. The game's FIFO holds one page while the lead is reached, so the game's next Present
-// write waits after its first page, and its own size again (the launcher's 1 MB) when the
-// relay reads, so a frame passes in one or two writes.
+// Pace (sa2_relay.h). The player's pipe holds kPlayerPipe, Linux's default, so a frame is handed
+// on in full only when the player has read all but that much of it. The game waits after its
+// write of frame K until frame K - lead has been handed on: on the pace pipe's next byte, or, for
+// a game that takes no credits, on its full FIFO while the reader holds.
 //
-// Both were 1 MB on Linux and Android before the thermal unit (2026-10-12), so with a game
-// faster than the player about four frames waited between them (1 MB in each pipe and the
-// relay's frame): on Linux a key pressed in a stage reached the Present of its first frame 112
-// to 137 ms after the player sent it, and 81 ms with these sizes (the unit's measurement over
-// the synthetic keys of paced live sessions, private/generated/s8/thermal/key_latency.py). A
-// FIFO of 64 KB throughout would bound it as well, but made the game hand each frame over in ten
-// pieces, each a wait on the relay while it holds the guest lock (unit perf-game's measurement,
-// sa2_launch_posix.cpp). The kernel rounds a size up to whole pages.
+// Until 2026-10-17 the game's FIFO did the waiting: the relay shrank it to one page while the
+// lead held, so the game's next Present write waited after its first page, and grew it back to
+// the launcher's 1 MB when it read again, so a frame passed in one or two writes. Both pipes were
+// 1 MB on Linux and Android before the thermal unit (2026-10-12), and with a game faster than the
+// player about four frames waited between them; on Linux a key pressed in a stage reached the
+// Present of its first frame 112 to 137 ms after the player sent it, and 81 ms with the one-page
+// FIFO and this player pipe (the unit's measurement over the synthetic keys of paced live
+// sessions). A FIFO of 64 KB throughout bounds a large frame as well, but hands it over in ten
+// pieces, each a wait on the relay while the game holds the guest lock; and the logos' and menus'
+// frames are about 5 KB, so a fixed FIFO larger than a page lets many of them through.
+// The grow came while the game's write slept on the full page, which is the resize Linux 5.8 to
+// 6.7 can lose the wakeup of: pipe_resize_ring wakes the pipe's writers before pipe_set_size
+// raises max_usage, a writer that looks in between sees the pipe still full and sleeps again, and
+// no later read wakes it, since pipe_read wakes writers only when the pipe was full by the new
+// max_usage. The game then waits in write(2) for good, holding the guest lock, and every guest
+// thread with it. That is the likely cause of the AYN Thor's stall at the SEGA logo (Android 13 on
+// a QCS8550, a 5.15-era kernel), and most likely when the writer shares a CPU with the relay, so
+// that the wakeup preempts the resize. The pace pipe waits at the same point in the game's frame,
+// after Present, with no resize, and for frames of any size.
 constexpr size_t kPlayerPipe = 64u << 10;
-constexpr size_t kFifoHeld = 4096;
 
 // The pipe's size, 0 where it cannot be read or set (Windows: a named pipe's buffer is its
 // server's); the size it has after asking for `bytes` (the kernel rounds up, and refuses to
@@ -53,6 +65,9 @@ size_t resize_pipe(Fd fd, size_t bytes) {
     (void)bytes;
 #endif
     return pipe_size(fd);
+}
+double seconds_since(std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
 }
 uint32_t le32(const uint8_t* p) {
     return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
@@ -127,9 +142,41 @@ void FrameParser::feed(const uint8_t* data, size_t n) {
     if (done) waiting_.erase(waiting_.begin(), waiting_.begin() + long(done));
 }
 
+// The pace pipe's bytes. Its write end is O_NONBLOCK: a game that takes no credits fills it, and
+// the relay then counts what the full pipe refused rather than wait on the game.
+void Relay::give_credits(uint64_t n) {
+    static const uint8_t ones[64] = {};
+    while (n && credits_ != kNoFd) {
+        const size_t ask = size_t(std::min<uint64_t>(n, sizeof ones));
+#ifndef _WIN32
+        const ssize_t k = write(int(credits_), ones, ask);
+        if (k < 0 && errno == EINTR) continue;
+        if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            std::lock_guard<std::mutex> lk(mu_);
+            st_.credits_dropped += n;
+            return;
+        }
+        if (k <= 0) {                     // the game is gone (EPIPE): nobody waits on it
+            close_credits();
+            return;
+        }
+        n -= uint64_t(k);
+        std::lock_guard<std::mutex> lk(mu_);
+        st_.credits += uint64_t(k);
+#else
+        (void)ask;
+        return;
+#endif
+    }
+}
+
+// Closed when the player goes and when the stream ends: the recorder reads end of file and paces
+// no more, so the game can still be asked to stop and end through its own code.
+void Relay::close_credits() { close_fd(credits_); }
+
 void Relay::writer() {
     if (on_writer_start) on_writer_start();
-    uint64_t sent = 0;
+    uint64_t sent = 0, out = 0;
     for (;;) {
         std::vector<uint8_t> chunk;
         {
@@ -140,78 +187,116 @@ void Relay::writer() {
             queue_.pop_front();
         }
         bool ok = !st_.player_gone && write_all(out_, chunk.data(), chunk.size());
-        std::lock_guard<std::mutex> lk(mu_);
-        queued_ -= chunk.size();
-        if (!ok) {
-            if (!st_.player_gone) st_.player_gone = true;
-            st_.bytes_dropped += chunk.size();
-            for (auto& c : queue_) st_.bytes_dropped += c.size();
-            queue_.clear();
-            queued_ = 0;
-        } else {
-            sent += chunk.size();
-            st_.bytes_out = sent;
-            const auto& ends = parser_.frame_ends();
-            st_.frames_out = uint64_t(std::upper_bound(ends.begin(), ends.end(), sent) - ends.begin());
-            frames_out_.store(st_.frames_out);
+        uint64_t newly_out = 0;
+        bool gone_now = false;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            queued_ -= chunk.size();
+            if (!ok) {
+                gone_now = !st_.player_gone;
+                st_.player_gone = true;
+                st_.bytes_dropped += chunk.size();
+                for (auto& c : queue_) st_.bytes_dropped += c.size();
+                queue_.clear();
+                queued_ = 0;
+            } else {
+                sent += chunk.size();
+                st_.bytes_out = sent;
+                const auto& ends = parser_.frame_ends();
+                st_.frames_out = uint64_t(std::upper_bound(ends.begin(), ends.end(), sent) - ends.begin());
+                frames_out_.store(st_.frames_out);
+                newly_out = st_.frames_out - out;
+                out = st_.frames_out;
+            }
+            cv_.notify_all();
         }
-        cv_.notify_all();
+        if (gone_now) close_credits();
+        else if (newly_out) give_credits(newly_out);
     }
     close_fd(out_);
 }
 
+// The hold, mu_ held: the lead of whole frames read and not yet handed on, or the byte cap; never
+// once the player is gone. Derived each time from what it depends on, never kept in a flag: a flag
+// set at a hold's start and cleared where the reader sees it end stayed set when the writer ended
+// the hold between two of the reader's looks, which turned the stall watch off for the session.
+bool Relay::held_locked() const {
+    if (st_.player_gone) return false;
+    if (lead_ && st_.frames_in >= st_.frames_out + lead_) return true;
+    return queued_ >= cap_;
+}
+
+// The stall watch (sa2_relay.h). The reader's thread, mu_ not held.
+void Relay::watch_stall(const std::atomic<bool>& game_alive) {
+    std::string line;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        const auto& ends = parser_.frame_ends();
+        // Bytes past a whole frame: the start of a frame whose write has not finished. Before
+        // the first frame the header waits, legitimately, for the game's first Present.
+        if (!watching_.load() || !game_alive.load() || !st_.writer_seen || st_.player_gone || held_locked() ||
+            ends.empty())
+            return;
+        const uint64_t partial = parser_.bytes() - ends.back();
+        const double quiet = seconds_since(quiet_since_);
+        if (partial == 0 || quiet < next_nudge_s_) return;
+        st_.nudges++;
+        const uint64_t n = st_.nudges;
+        nudge_every_s_ = std::min(nudge_every_s_ * 2, 32.0);
+        next_nudge_s_ = quiet + nudge_every_s_;
+        char buf[320];
+        std::snprintf(buf, sizeof buf,
+                      "relay: no byte from the game for %.1f s with %llu bytes of frame %llu read (FIFO %llu bytes, "
+                      "%llu frames in, %llu out); nudge %llu: ",
+                      quiet, (unsigned long long)partial, (unsigned long long)ends.size() + 1,
+                      (unsigned long long)pipe_size(in_), (unsigned long long)st_.frames_in,
+                      (unsigned long long)st_.frames_out, (unsigned long long)n);
+        line = buf;
+    }
+    const bool sent = nudge ? nudge() : false;
+    line += sent ? "signalled the game" : "no signal to send on this host";
+    if (note) note(line);
+}
+
 void Relay::run(const std::atomic<bool>& game_alive) {
-    // The pace's pipes (kPlayerPipe, kFifoHeld): only with a lead, and only where both sizes can
-    // be read and set; elsewhere the sizes are left as they are.
-    const size_t fifo_open = lead_ ? pipe_size(in_) : 0;
-    const bool sized = fifo_open > kFifoHeld && resize_pipe(out_, kPlayerPipe) != 0;
-    bool shrink_ok = sized;   // cleared when a grow-back is refused (pipe-user-pages-soft)
-    bool fifo_small = false;
+    // The player's pipe to kPlayerPipe: only with a lead, and only where pipe sizes can be read
+    // and set. Before the writer thread starts, so no write of the relay's waits on it.
+    if (lead_ && pipe_size(in_) != 0) resize_pipe(out_, kPlayerPipe);
+#ifndef _WIN32
+    if (credits_ != kNoFd) {
+        const int fl = fcntl(int(credits_), F_GETFL);
+        if (fl < 0 || fcntl(int(credits_), F_SETFL, fl | O_NONBLOCK) != 0) close_credits();
+    }
+#endif
+    // The game's first lead_ frames go without waiting (with lead 0 every frame does, and the
+    // pace pipe is closed at once).
+    if (lead_) give_credits(lead_);
+    else close_credits();
     std::thread w([this] { writer(); });
     std::vector<uint8_t> buf(kChunk);
     for (;;) {
+        bool still_held = false;
         {
-            // The hold: the lead of whole frames not handed on, or the byte cap.
             std::unique_lock<std::mutex> lk(mu_);
-            auto lead_reached = [&] { return !st_.player_gone && lead_ && st_.frames_in >= st_.frames_out + lead_; };
-            auto held = [&] {
-                if (st_.player_gone) return false;
-                if (lead_reached()) return true;
-                return queued_ >= cap_;
-            };
-            // The FIFO one page while the lead holds, its own size again when it does not. A
-            // shrink the kernel refuses (the FIFO holds more than a page) is asked again at the
-            // next look; it is made at the look after the read that reached the lead, when the
-            // game has just finished its write.
-            // A grow-back the kernel refuses (the user's pipe pages over pipe-user-pages-soft:
-            // a shrink is always allowed, a grow is not) stops the shrinking for the session;
-            // the grow is still asked at every look, so the FIFO gets its size back once pages
-            // are free, and is never shrunk again into frames of one page each.
-            auto fit_fifo = [&] {
-                if (!sized) return;
-                if (fifo_small) {
-                    if (lead_reached() && shrink_ok) return;
-                    const size_t now = resize_pipe(in_, fifo_open);
-                    fifo_small = now == 0 || now < fifo_open;
-                    if (fifo_small) shrink_ok = false;
-                    return;
-                }
-                if (!shrink_ok || !lead_reached()) return;
-                const size_t now = resize_pipe(in_, kFifoHeld);
-                fifo_small = now != 0 && now < fifo_open;
-            };
-            fit_fifo();
-            if (held()) {
+            if (held_locked()) {
                 st_.holds++;
-                cv_.wait_for(lk, std::chrono::milliseconds(200), [&] { return !held(); });
-                if (held()) continue;
-                fit_fifo();
+                cv_.wait_for(lk, std::chrono::milliseconds(200), [&] { return !held_locked(); });
+                // The game's silence while the reader held was the reader's doing. Set after every
+                // wait, so it is right whichever look sees the hold end: this one, or the next,
+                // when the writer hands a frame on between the two.
+                quiet_since_ = std::chrono::steady_clock::now();
+                still_held = held_locked();
             }
+        }
+        if (still_held) {
+            if (on_hold_wait) on_hold_wait();
+            continue;
         }
         int r = wait_readable(in_, 100);
         if (r < 0) break;
         if (r == 0) {
             if (!game_alive.load() && !st_.writer_seen) break;
+            watch_stall(game_alive);
             continue;
         }
         long n = read_some(in_, buf.data(), buf.size());
@@ -231,6 +316,8 @@ void Relay::run(const std::atomic<bool>& game_alive) {
         std::lock_guard<std::mutex> lk(mu_);
         st_.writer_seen = true;
         st_.bytes_in += uint64_t(n);
+        quiet_since_ = std::chrono::steady_clock::now();
+        next_nudge_s_ = nudge_every_s_ = kStallSeconds;
         parser_.feed(buf.data(), size_t(n));
         st_.records = parser_.records();
         st_.frames_in = parser_.frame_ends().size();
@@ -249,11 +336,18 @@ void Relay::run(const std::atomic<bool>& game_alive) {
         cv_.notify_all();
     }
     w.join();
+    close_credits();
 }
 
 RelayStats Relay::stats() const {
     std::lock_guard<std::mutex> lk(mu_);
-    return st_;
+    RelayStats s = st_;
+    const auto& ends = parser_.frame_ends();
+    s.partial_bytes = parser_.bytes() - (ends.empty() ? 0 : ends.back());
+    s.fifo_bytes = reading_done_ ? 0 : pipe_size(in_);
+    s.held_now = !reading_done_ && held_locked();
+    s.quiet_s = s.held_now ? 0.0 : seconds_since(quiet_since_);
+    return s;
 }
 
 }  // namespace sa2l

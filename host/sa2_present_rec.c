@@ -39,7 +39,8 @@
  * variable, sa2_sched_current and sa2_sched_frames (runtime/sa2_threads.c), beside
  * sa2_virtual_us (runtime/sa2_imports.c) and sa2_window_stats (runtime/
  * sa2_window.c), which copy. The host resources it takes -- a file descriptor, a
- * malloc'd buffer, an atexit entry -- are the process's, which the runtime never
+ * malloc'd buffer, an atexit entry, and in paced play the pace pipe's inherited
+ * descriptor, which it reads (SA2_REC_PACE_FD) -- are the process's, which the runtime never
  * hands the guest: it numbers guest handles itself (harness/replay/
  * wrap_tick_probe.c says the same of its word log). Two runtime calls write host
  * scratch that every reader rewrites before reading: sa2_d3d9_texsrc_at refreshes
@@ -187,6 +188,17 @@
  *                          2026-10-12). The counts file's "audio" "store_hash" says how many
  *                          closed and how many went without. Unset, 1 or anything else, every
  *                          such Unlock carries it: replays, the selftest, every receipt's run.
+ *   SA2_REC_PACE_FD=<n>    the read end of a live session's pace pipe, inherited as descriptor
+ *                          n (host/launch/sa2_relay.h, "Pace"): after each frame's records are
+ *                          written, the recorder reads one byte from it, so the game waits
+ *                          there, after its Present's write, until the relay has handed on the
+ *                          frame `lead` frames back. The guest reads only the virtual clock, so
+ *                          the wait changes nothing it computes. End of file (the relay closed
+ *                          it: the player has gone or the stream ended) ends the pacing for the
+ *                          run, silently; an error ends it too, said in the sidecar. Neither
+ *                          stops the stream. Read only while the stream runs. Paced play only
+ *                          (host/launch, host/android); unset or not a decimal number, nothing
+ *                          is read.
  *
  * Breaks for the tests only. Each is compiled in with -D and exists so a check in
  * test_s5_stream.py is shown to fail without the property it holds; no
@@ -650,6 +662,7 @@ static uint32_t g_lock_order;
 /* The stream writer: records are built whole in g_buf and written out after every
  * Present's records, when the buffer fills, and at exit. */
 static int      g_fd = -1;
+static int      g_pace_fd = -1;    /* SA2_REC_PACE_FD, -1 once pacing has ended */
 static uint8_t *g_buf;
 static uint32_t g_cap, g_len;
 static uint32_t g_seq;
@@ -822,6 +835,27 @@ static int wr_flush(void) {
     g_flushes++;
     return 1;
 }
+
+/* The pace (SA2_REC_PACE_FD): one byte after a frame's records are out (REC_BREAK_NOFLUSH
+ * leaves the frame in the buffer, and so reads none). */
+#ifndef REC_BREAK_NOFLUSH
+static void pace_wait(void) {
+    if (g_pace_fd < 0 || !g_stream_on) return;
+    uint8_t b;
+    for (;;) {
+        const ssize_t k = read(g_pace_fd, &b, 1);
+        if (k == 1) return;
+        if (k < 0 && errno == EINTR) continue;
+        if (k < 0)
+            status_write("recording, pid %ld; frames unpaced from frame %llu on: the pace pipe "
+                         "(SA2_REC_PACE_FD=%d) does not read: %s", (long)getpid(),
+                         (unsigned long long)g_frames, g_pace_fd, strerror(errno));
+        close(g_pace_fd);
+        g_pace_fd = -1;
+        return;
+    }
+}
+#endif
 
 /* Room for `n` more bytes in one piece, flushing or growing the buffer. */
 static int wr_reserve(uint64_t n) {
@@ -1000,7 +1034,7 @@ static void emit_call(rec_call *c, uint32_t entry) {
     }
     c->nnotes = 0;
 #ifndef REC_BREAK_NOFLUSH
-    if (c->frame) wr_flush();
+    if (c->frame && wr_flush()) pace_wait();
 #endif
 }
 
@@ -1809,6 +1843,13 @@ static void rec_init(void) {
     g_counts_path = getenv("SA2_REC_COUNTS");
     const char *aw = getenv("SA2_REC_AUDIO_WATCH");
     g_au_watch = !(aw && !strcmp(aw, "0"));
+    const char *pf = getenv("SA2_REC_PACE_FD");
+    if (pf && *pf) {                                /* decimal digits only, 0 to 65535 */
+        int n = 0;
+        const char *p = pf;
+        while (*p >= '0' && *p <= '9' && n <= 65535) n = n * 10 + (*p++ - '0');
+        if (!*p && n <= 65535) g_pace_fd = n;
+    }
     const char *he = getenv("SA2_REC_STORE_HASH_EVERY");
     if (he && *he) {                                /* decimal digits only, 1 to 65536 */
         uint32_t n = 0;

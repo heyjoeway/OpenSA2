@@ -310,6 +310,7 @@ final class CrashReport {
         }
         out.append("android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT)
            .append(", ").append(Build.DISPLAY).append(")\n");
+        out.append(kernelLine(System.getProperty("os.version"))).append('\n');
         out.append("gpu: ").append(gpu((JSONObject) gpuRec.get("sdl_gpu"))).append('\n');
         out.append("vulkan: ").append(vulkanText(c)).append('\n');
         out.append("memory: ").append(memory(c)).append('\n');
@@ -446,14 +447,23 @@ final class CrashReport {
         }
     }
 
-    /** The runtime's fault report (sa2_trap.c: "sa2 runtime: ..." and its " callers" line). */
+    /** The kernel's version (os.version: uname's release, "5.15.78-android13-8-..."): a pipe between
+     * the game and the relay could lose a writer's wakeup on Linux 5.8 to 6.7 without the 2024 fix
+     * (host/launch/sa2_relay.h). */
+    static String kernelLine(String osVersion) {
+        return "kernel: " + (osVersion == null || osVersion.trim().isEmpty() ? "(not given)" : osVersion.trim());
+    }
+
+    /** The runtime's fault report (sa2_trap.c: "sa2 runtime: ..." and its " callers" line), and the
+     * stall watch's table when the game stopped making frames (sa2_stall.c: "sa2 stall: ..."). */
     private static void runtimeLines(StringBuilder out, List<String> game, Redactor r) {
         if (game == null) return;
-        int n = 0;
+        int n = 0, stall = 0;
         for (String l : game) {
             if (l.startsWith("sa2 runtime:") || l.startsWith(" callers") || l.startsWith("sa2 trap:")) {
-                out.append("game: ").append(r.apply(l)).append('\n');
-                if (++n >= 12) break;
+                if (n++ < 12) out.append("game: ").append(r.apply(l)).append('\n');
+            } else if (l.startsWith("sa2 stall:") || l.startsWith("sa2: SA2_GUEST_HOST_CPUS: guest thread")) {
+                if (stall++ < 40) out.append("game: ").append(r.apply(l)).append('\n');
             }
         }
     }

@@ -1,10 +1,13 @@
 """The stream relay and the player's live reader, as compiled C++ unit tests.
 
 host/launch/test_relay.cpp holds sa2l::FrameParser (host/launch/sa2_relay.cpp) to the parser it
-replaced over streams fed in pieces of every size, and the relay's pace: a writer that writes
-each frame in one write into a FIFO opened and sized as the launcher does, the relay with lead 1,
-and a slow reader, where the writer may never finish a frame more than two frames ahead of the
-reader. host/player/test_stream.cpp is the reader's own test (host/player/stream.cpp), with the
+replaced over streams fed in pieces of every size, and the relay on a FIFO opened and sized as the
+launcher does, with lead 1: its pace (a writer that writes each frame in one write and then takes
+its pace byte, as the recorder does, and a slow reader: the writer may never return from a Present
+more than two frames ahead of the reader); a writer that takes no pace bytes waiting on its full
+FIFO, whose size must never change meanwhile; the stall watch's one nudge, about a second after a
+writer stops part way through a frame, also after a hold that the writer ends between two of the
+reader's looks; and the pace pipe's end of file once the player goes. host/player/test_stream.cpp is the reader's own test (host/player/stream.cpp), with the
 live reader's reuse of its record's storage and its bodies read in place.
 
 Each is built with the system compiler into the test's temporary folder and run there; the pass
@@ -43,6 +46,11 @@ def test_the_relay_parses_every_piece_and_paces_the_writer_two_frames_ahead(tmp_
     assert pace, out
     ahead = int(pace[0].split("at most ")[1].split()[0])
     assert ahead <= 2, pace[0]
+    # The FIFO is never resized under a waiting writer, the stall watch nudges once, a hold the
+    # writer ends between two of the reader's looks leaves the watch on, and the pace pipe ends
+    # with the player.
+    for verdict in ("RELAY_NO_RESIZE_OK", "RELAY_STALL_OK", "RELAY_HOLD_END_OK", "RELAY_GONE_OK"):
+        assert any(line.startswith(verdict) for line in out.splitlines()), out
 
 
 def test_the_live_reader_passes_its_own_checks(tmp_path):

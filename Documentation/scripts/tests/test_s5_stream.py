@@ -1740,7 +1740,7 @@ def test_the_runner_compiles_the_recorder_as_link_s4_does(monkeypatch, tmp_path)
 def test_the_recorder_object_reaches_only_its_list_and_computes_nothing(production_object):
     got = OC.check(production_object())
     assert got["ok"] is True, got
-    assert got["undefined"] == len(OC.ALLOWED_UNDEFINED) == 64
+    assert got["undefined"] == len(OC.ALLOWED_UNDEFINED) == 65
     assert got["defined"] == len(OC.DEFINED) == len(WRAPS) == 13
     assert got["code_findings"] == [] and got["float_conversions"] == []
 

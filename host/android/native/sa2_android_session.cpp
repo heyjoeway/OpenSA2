@@ -25,7 +25,8 @@
 //    So game.env.extra wins over the settings screen. The player's settings among them
 //    (SA2_TOUCH_*, SA2_PAD_MAP, SA2_PLAYER_PICTURE_Y, SA2_PLAYER_PROF*) go to the player, in this
 //    process's environment, and not to the game.
-//  - The relay (host/launch/sa2_relay.h) hands the stream on to the player, paced (lead 1).
+//  - The relay (host/launch/sa2_relay.h) hands the stream on to the player, paced (lead 1) through
+//    the pace pipe, whose read end the game gets as descriptor 43 (SA2_REC_PACE_FD).
 //  - The player: host/player's main (renamed sa2_player_main by tools/s8/android_app.py) on this
 //    thread, with the launcher's play argv: --interactive with in-process pipes for --video-fd,
 //    --cancel-fd and --end-fd, --stage 3, --input-path, --pace and --audio. The player draws the
@@ -65,6 +66,14 @@
 // clock of each CPU the guest's threads and the player's may run on (scaling_cur_freq), so a
 // faster frame can be told to come from the clocks or from less work, to logcat and to
 // last-session.txt.
+//
+// A stall (the AYN Thor's at the SEGA logo, 2026-10-17). The relay paces the game through a pace
+// pipe and never resizes the game's FIFO (host/launch/sa2_relay.h, "Pace"), and nudges the game
+// (SIGURG) when part of a frame has waited a second for the rest; its lines go to last-session.txt.
+// When no frame has been handed on for kStallSay seconds the session says so once, with each game
+// thread's state, wait channel, allowed CPUs and last CPU, and the relay's FIFO size, the bytes it
+// holds past the last whole frame and how long the game has written nothing; a perf line over a
+// window that ends in such a stall carries the same.
 //
 // Full width (the user's request of 2026-10-12,
 // Documentation/decisions/2026-10-12-S7-widescreen-pulled-forward.md). Sa2Activity passes the
@@ -140,6 +149,8 @@ constexpr const char* kTag = "sa2recomp";
 constexpr const char* kGameLib = "libsa2game.so";
 constexpr size_t kRelayCap = 64u << 20;                  // the launcher's
 constexpr double kStopGrace = 10, kKillGrace = 5, kFeedGrace = 15;
+constexpr double kStallSay = 5;                          // seconds without a frame: the stall line
+constexpr int kPaceFd = 43;                              // the game's pace pipe, as the launcher's
 constexpr int kKeepSessions = 3;
 
 std::string g_files, g_report;        // <files>, <files>/last-session.txt
@@ -452,6 +463,7 @@ std::vector<int32_t> tasks_of(int pid) {
 struct Task {
     int32_t tid = 0;
     std::string comm, cpus;       // its name, its Cpus_allowed_list
+    char state = '?';             // R running, S sleeping, D uninterruptible, T stopped, ...
     int last_cpu = -1;            // the CPU it last ran on
     int64_t ns = -1;              // its time on a CPU (schedstat)
 };
@@ -479,6 +491,8 @@ Task task_of(int pid, int32_t tid) {
         const size_t rp = s.rfind(')');
         if (rp != std::string::npos) {
             const char* p = s.c_str() + rp + 1;
+            while (*p == ' ') p++;
+            if (*p) t.state = *p;
             for (int field = 3; *p && field < 39; field++) {
                 while (*p == ' ') p++;
                 while (*p && *p != ' ') p++;
@@ -488,6 +502,38 @@ Task task_of(int pid, int32_t tid) {
         }
     }
     return t;
+}
+
+// Where a sleeping thread of the game waits (/proc/<pid>/task/<tid>/wchan: a kernel function,
+// pipe_write or futex_wait_queue for two; "0" or "" where the kernel does not say).
+std::string wchan_of(int pid, int32_t tid) {
+    std::string s;
+    if (!sa2p::read_file("/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid) + "/wchan", s, 256)) return "?";
+    while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
+    return s.empty() ? "0" : s;
+}
+
+// The stall's account (the header, "A stall"): each game thread's state and wait channel, and
+// what the relay holds.
+std::string stall_text(int pid, const sa2l::Relay& relay, double no_frame_s) {
+    char head[96];
+    std::snprintf(head, sizeof head, "no frame for %.1f s; game threads:", no_frame_s);
+    std::string t = head;
+    for (int32_t tid : tasks_of(pid)) {
+        const Task k = task_of(pid, tid);
+        t += " " + std::to_string(tid) + " " + k.comm + " " + std::string(1, k.state);
+        if (k.state != 'R') t += " " + wchan_of(pid, tid);
+        t += " on " + k.cpus + " (last " + std::to_string(k.last_cpu) + ");";
+    }
+    const sa2l::RelayStats r = relay.stats();
+    char rel[320];
+    std::snprintf(rel, sizeof rel,
+                  " relay: FIFO %llu bytes, %llu bytes past the last whole frame, no byte from the game for %.1f s%s, "
+                  "%llu frames in, %llu out, %llu nudges, %llu pace bytes (%llu refused)",
+                  (unsigned long long)r.fifo_bytes, (unsigned long long)r.partial_bytes, r.quiet_s,
+                  r.held_now ? " (holding)" : "", (unsigned long long)r.frames_in, (unsigned long long)r.frames_out,
+                  (unsigned long long)r.nudges, (unsigned long long)r.credits, (unsigned long long)r.credits_dropped);
+    return t + rel;
 }
 
 // The session's watch on speed (the header, "Speed on a phone"): the ADPF sessions, told each
@@ -504,6 +550,7 @@ struct Monitor {
     std::atomic<int32_t> writer_tid{0};
     const sa2l::Relay* relay = nullptr;
     std::atomic<bool> stop{false};
+    std::atomic<bool> stopping{false};    // the session is stopping the game: its frames end
     bool adpf = true;
     int64_t target_ns = 16666667;
     std::string player_cpus;
@@ -596,10 +643,14 @@ struct Monitor {
         std::map<int32_t, int64_t> task_win;      // a game thread -> its schedstat at the window's start
         for (int32_t t : tasks_of(game_pid)) task_win[t] = task_of(game_pid, t).ns;
 
+        double last_frame_t = t0;                 // when frames_out last moved
+        bool stall_said = false;
         while (!stop.load()) {
             sa2l::sleep_ms(8);
             const uint64_t f = relay->frames_out();
             if (f != f_last) {
+                last_frame_t = sa2p::monotonic_seconds();
+                stall_said = false;
                 const int64_t g = game_ns(), p = player_ns() + relay_ns();
                 if (g >= 0) {                 // -1 once the game has ended
                     if (g_last >= 0) tell(gs, (g - g_last) / int64_t(f - gf_last));
@@ -611,6 +662,10 @@ struct Monitor {
                 p_last = p;
             }
             const double now = sa2p::monotonic_seconds();
+            if (!stall_said && f_last > 0 && !stopping.load() && now - last_frame_t >= kStallSay) {
+                say("stall: %s", stall_text(game_pid, *relay, now - last_frame_t).c_str());
+                stall_said = true;
+            }
             if (hints_ok && now >= next_scan) {
                 next_scan = now + 2;
                 if (f_last > 0) {             // it has presented: its guest threads are made
@@ -644,14 +699,17 @@ struct Monitor {
                                std::to_string(int(busy[i].first / (secs * 1e7) + 0.5)) + "% on " +
                                busy[i].second.cpus + " (last " + std::to_string(busy[i].second.last_cpu) + ")";
                 const double per = frames ? 1e-6 / double(frames) : 0;
+                // A window that ends in a stall (no frame for 3 s, or none in the window) says why.
+                const std::string stalled = (frames == 0 || now - last_frame_t >= 3) && f_last > 0 && !stopping.load()
+                    ? "; stalled: " + stall_text(game_pid, *relay, now - last_frame_t) : "";
                 say("perf %.0f-%.0f s: %.1f fps; game %.2f ms of CPU a frame (%.0f%% of a core): %s; player %.2f ms "
-                    "a frame (%.0f%%) and relay %.0f%%, %s; ADPF reports: game %llu (%llu over), player %llu (%llu over)%s",
+                    "a frame (%.0f%%) and relay %.0f%%, %s; ADPF reports: game %llu (%llu over), player %llu (%llu over)%s%s",
                     t_win - t0, now - t0, double(frames) / secs, g >= 0 && g_win >= 0 ? double(g - g_win) * per : -1.0,
                     g >= 0 && g_win >= 0 ? double(g - g_win) / (secs * 1e7) : -1.0, threads.c_str(),
                     double(pl - pl_win + r - r_win) * per, double(pl - pl_win) / (secs * 1e7),
                     double(r - r_win) / (secs * 1e7), player_cpus.empty() ? "not placed" : ("on " + player_cpus).c_str(),
                     (unsigned long long)gs.reports, (unsigned long long)gs.over, (unsigned long long)ps.reports,
-                    (unsigned long long)ps.over, clocks().c_str());
+                    (unsigned long long)ps.over, clocks().c_str(), stalled.c_str());
                 t_win = now;
                 f_win = f_last;
                 g_win = g;
@@ -846,7 +904,15 @@ int play_game(const Args& a) {
         say("FAIL %s", why.c_str());
         return 5;
     }
+    // The game's FIFO holds 1 MB from now on: the relay never resizes it once the game writes
+    // (host/launch/sa2_relay.h, "Pace").
     sa2l::set_pipe_size(relay_in, 1u << 20);
+    // The pace pipe (the same): its read end the game's, as SA2_REC_PACE_FD; its write end the relay's.
+    sa2l::Fd pace_r = sa2l::kNoFd, pace_w = sa2l::kNoFd;
+    if (a.pace && !sa2l::make_pipe(pace_r, pace_w, &why)) {
+        say("FAIL %s", why.c_str());
+        return 5;
+    }
 
     // The game.
     std::vector<std::pair<std::string, std::string>> genv;
@@ -866,6 +932,7 @@ int play_game(const Args& a) {
     }
     env_set(genv, "SA2_REC_AUDIO_WATCH", "0");
     env_set(genv, "SA2_REC_STORE_HASH_EVERY", "64");
+    env_set(genv, "SA2_STALL_DUMP_MS", "3000");   // the runtime's stall watch (runtime/sa2_stall.h)
     // Full width (the header): the game's back buffer at the screen's size, unless the screen is no
     // wider than 4:3, where the game's 4:3 layout would be cut at the sides.
     uint32_t screen_w = 0, screen_h = 0;
@@ -932,6 +999,9 @@ int play_game(const Args& a) {
     env_set(genv, "SA2_INPUT_DI_SOURCE", input_fifo);
     env_set(genv, "SA2_INPUT_DI_LOG", session + "/input.log");
     env_set(genv, "SA2_LAUNCH_TICKS", session + "/ticks.tsv");
+    if (pace_r != sa2l::kNoFd) env_set(genv, "SA2_REC_PACE_FD", std::to_string(kPaceFd));
+    else genv.erase(std::remove_if(genv.begin(), genv.end(), [](auto& e) { return e.first == "SA2_REC_PACE_FD"; }),
+                    genv.end());
     // Controllers, as the launcher's play (host/launch/sa2_launch.cpp): the game gives player 1
     // a pad only when its command line is exactly "-r" (runtime/sa2_dinput.h, "InputWay"), and
     // makes pad objects only at its boot scan, which waits for the player's first pad record. On
@@ -946,11 +1016,13 @@ int play_game(const Args& a) {
     gs.stdout_path = session + "/game.out";
     gs.stderr_path = session + "/game.log";
     gs.own_group = true;
+    if (pace_r != sa2l::kNoFd) gs.fds = {{pace_r, kPaceFd}};
     sa2l::Proc game;
     if (!sa2l::spawn(gs, game, &why)) {
         say("FAIL cannot start the game: %s", why.c_str());
         return 5;
     }
+    sa2l::close_fd(pace_r);
     say("game pid %d", int(game.id));
 
     // Placement: the game's guest threads by the runtime (SA2_GUEST_HOST_CPUS); this thread, the
@@ -979,7 +1051,14 @@ int play_game(const Args& a) {
 
     // The relay.
     std::atomic<bool> game_alive{true}, player_done{false};
-    sa2l::Relay relay(relay_in, video_w, a.pace ? 1u : 0u, kRelayCap);
+    sa2l::Relay relay(relay_in, video_w, a.pace ? 1u : 0u, kRelayCap, pace_w);
+    // The stall watch (sa2_relay.h): the nudge goes to the game by the pid it started with, only
+    // while the session still counts it alive (the watch thread reaps it).
+    const sa2l::Proc game_started = game;
+    relay.nudge = [game_started, &game_alive] {
+        return game_alive.load() && sa2l::send_signal(game_started, sa2l::Signal::Nudge);
+    };
+    relay.note = [](const std::string& line) { say("%s", line.c_str()); };
     Monitor mon;
     relay.on_writer_start = [&mon] {
         clockid_t c{};
@@ -1043,6 +1122,8 @@ int play_game(const Args& a) {
             }
         }
         if (ended_by.empty()) ended_by = "the player ended";
+        relay.end_watch();
+        mon.stopping = true;
         stop_how = stop_game(game);
         game_alive = false;
         const double t0 = sa2p::monotonic_seconds();

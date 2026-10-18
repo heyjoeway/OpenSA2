@@ -104,9 +104,12 @@ bool hung_up(Fd fd);
 bool spawn(const Spawn& s, Proc& p, std::string* error);
 // Reaps `p` when it has exited; waits at most timeout_s (0: just look). True when it has exited.
 bool wait_exit(Proc& p, double timeout_s);
-enum class Signal { Terminate, User1, Kill };
+enum class Signal { Terminate, User1, Kill, Nudge };
 // User1 is the player's end request (SIGUSR1; on Windows the player's named event,
-// sa2_launch_win32.cpp).
+// sa2_launch_win32.cpp). Nudge is the relay's stall watch's (sa2_relay.h): SIGURG, which the
+// game's runtime takes as a no-op with SA_RESTART (runtime/sa2_threads.c), so a write the kernel
+// left asleep starts again; ignored by default by a process without that handler; false on
+// Windows, which has no such signal.
 bool send_signal(const Proc& p, Signal s, bool group = false);
 
 std::vector<std::pair<std::string, std::string>> environment();

@@ -84,6 +84,7 @@ final class GameSettings {
         new Tweak("no-powerup-music", "No power-up music", "The speed shoes and invincibility boxes no longer play their own tune, so the stage music keeps playing."),
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
         new Tweak("radar-all-pieces", "Radar tracks all pieces", "In treasure hunts, every piece still to find shows on the radar how near it is, not only the first. Makes hunts easier."),
+        new Tweak("ring-loss-cap", "Lose at most 20 rings", "A hit costs at most 20 rings, the ones that scatter, so you can pick them all back up. Getting back to 100 rings that way gives no second extra life. The higher ring counts, scores and ranks it brings are saved as usual."),
     };
 
     String orientation = LANDSCAPE;

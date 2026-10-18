@@ -83,6 +83,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `no-powerup-music` | The speed shoes and invincibility item boxes no longer play their own tune, so the stage music keeps playing. The power-ups still work as before. |
 | `quiet-omochao` | Omochao, the hint robot, no longer appears in the stages, so it gives no hints. The Chao Garden is unchanged. |
 | `radar-all-pieces` | In treasure hunts (Knuckles and Rouge), the radar shows how near every piece still to find is, not only the first one. This makes hunts easier. Your save is not changed. |
+| `ring-loss-cap` | When you get hit, you lose at most 20 rings instead of all of them. The game scatters at most 20 rings on a hit, so you can pick every lost ring back up. Getting back to 100 rings this way gives no second extra life. Scores and ranks you earn with it on are higher than normal and are saved as usual. |
 
 With `no-event-bars` on, five in-engine cutscenes keep their bars: the opening one (event 361) and events 21, 205, 206, and 360. These scenes are framed for 4:3. The opening draws its title cards, flashes, backdrops, and logo glow over the middle 4:3 part of the picture only, so without the bars those effects would stop at a hard edge. SA2 Render Fix keeps the bars for the same five cutscenes for this reason. Movies also keep their bars, because the video itself is 4:3.
 

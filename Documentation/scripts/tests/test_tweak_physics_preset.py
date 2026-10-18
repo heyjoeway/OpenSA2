@@ -4,8 +4,9 @@ PhysicsArray (0x017391E8, 19 entries of 0x84 bytes) into the character, the entr
 names are rewritten: by default Sonic's and Shadow's become Metal Sonic's, and SA2_PHYSICS_PRESET
 gives <to>=<from> pairs. With the tweak off the table is the executable's and nothing is read.
 
-The tweak's file and runtime/sa2_tweaks.c are built with the pinned zig as test_tweaks.py builds
-them (-O2, x86_64-linux-musl, -Werror), linked with a driver that stands in for the guest's .dataa
+The tweak's file, mech-handling.c (which acts in this file's wrap; test_tweak_mech_handling.py has
+its cases) and runtime/sa2_tweaks.c are built with the pinned zig as test_tweaks.py builds them (-O2,
+x86_64-linux-musl, -Werror), linked with a driver that stands in for the guest's .dataa
 holding the table and for the lifted body. The stand-in `__real_sub_4599c0` copies entry
 [CharID2] from guest memory, 33 dwords, as the body's `rep movsd` at 0x00459A6E does, then reloads
 the Weight dword from entry [CharID] as 0x00459910 does, and prints the character and the dwords, so
@@ -187,7 +188,8 @@ def exe(tmp_path_factory) -> Path:
     (d / "table.bin").write_bytes(b"".join(IMAGE))
     out = d / "tw"
     done = subprocess.run([str(ZIG), "cc", *CC, str(d / "driver.c"), str(RUNTIME / "sa2_tweaks.c"),
-                           str(RUNTIME / "tweaks" / "physics-preset.c"), "-o", str(out)],
+                           str(RUNTIME / "tweaks" / "physics-preset.c"),
+                           str(RUNTIME / "tweaks" / "mech-handling.c"), "-o", str(out)],
                           capture_output=True, text=True, env=zig_env(d))
     assert done.returncode == 0, done.stderr
     return out

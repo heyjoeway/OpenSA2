@@ -69,8 +69,16 @@
  * without '=') is named in a line and the table is left alone; so is a table that does not read or
  * write.
  *
- * Off is the lifted code alone: the wrap tests the tweak's bit first and otherwise only calls
- * `__real_sub_4599c0`. Risks: it changes how the characters move, so stages tuned for the original
+ * mech-handling acts in this wrap (its TWEAK_WRAPS line names it; a function has one wrap and the
+ * tools refuse a second): on the same first call, when that tweak is on, the wrap calls
+ * sa2_mech_handling_apply (runtime/tweaks/mech-handling.c), after this tweak's preset when both are
+ * on, so mech handling's five values in the walkers' entries (6, 7, 13 and 14) are written last and
+ * win over a preset that names a walker as <to>; that file's lines say which values of the preset's
+ * it replaced. A preset whose <from> is a walker copies the walker's entry as the image has it, read
+ * before mech handling writes it, and with mech-handling on a line says so.
+ *
+ * Off is the lifted code alone: the wrap tests both tweaks' bits first and, with neither on, only
+ * calls `__real_sub_4599c0`. With mech-handling on alone, the preset is not read or written. Risks: it changes how the characters move, so stages tuned for the original
  * jump and speed can play differently (Metal Sonic's higher jump reaches places the stage did not
  * plan for); in 2-player mode both players share the table. Known limit: the shared reads make a
  * custom preset reach characters it does not name, and leave some of a named character's values
@@ -122,6 +130,8 @@ static const char *const PHYSICS_FIELDS[PHYSICS_DWORDS] = {
 static const unsigned char PHYSICS_CHARID[PHYSICS_NAMED] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 9, 10, 11, 1, 6, 7, 4, 5};
 static const unsigned char PHYSICS_SONIC_FIELDS[] = {1, 28, 29, 32};   /* FloorGrip, Radius, Height, CenterHeight */
 #define PHYSICS_SONIC_CODE(c) ((c) == 1 || (c) == 8 || (c) == 12)    /* Shadow, Amy, Metal Sonic */
+/* The walkers' entries, which mech-handling (runtime/tweaks/mech-handling.c) writes after the preset. */
+#define PHYSICS_WALKER(c) ((c) == 6 || (c) == 7 || (c) == 13 || (c) == 14)
 
 #define PHYSICS_DEFAULT "metal-sonic"
 #define PHYSICS_DEFAULT_SWAPS "sonic=metal-sonic,shadow=metal-sonic"
@@ -300,18 +310,25 @@ static void physics_apply(void) {
         }
         fprintf(stderr, "sa2 tweaks: physics preset: %s takes %s's physics (%u of %u values: %s)\n",
                 PHYSICS_SAID[to], PHYSICS_SAID[from[to]], changed, PHYSICS_DWORDS, line);
+        if (sa2_tweak_on(SA2_TWEAK_MECH_HANDLING) && PHYSICS_WALKER(from[to]) && !PHYSICS_WALKER(to))
+            fprintf(stderr, "sa2 tweaks: physics preset: %s takes %s's numbers as the game has them, not "
+                    "mech handling's (that tweak changes the walkers' own entries, after the preset)\n",
+                    PHYSICS_SAID[to], PHYSICS_SAID[from[to]]);
         physics_shared((const uint32_t (*)[PHYSICS_DWORDS])table, from, to, old, src);
     }
 }
 
 void *__real_sub_4599c0(void *state, uint32_t pc, void *memory);
+void sa2_mech_handling_apply(void);   /* runtime/tweaks/mech-handling.c */
 
 __attribute__((used, retain))
 void *__wrap_sub_4599c0(void *state, uint32_t pc, void *memory) {
-    if (!sa2_tweak_on(SA2_TWEAK_PHYSICS_PRESET)) return __real_sub_4599c0(state, pc, memory);
+    if (!sa2_tweak_on(SA2_TWEAK_PHYSICS_PRESET) && !sa2_tweak_on(SA2_TWEAK_MECH_HANDLING))
+        return __real_sub_4599c0(state, pc, memory);
     if (!g_physics_done) {
         g_physics_done = 1;
-        physics_apply();
+        if (sa2_tweak_on(SA2_TWEAK_PHYSICS_PRESET)) physics_apply();
+        if (sa2_tweak_on(SA2_TWEAK_MECH_HANDLING)) sa2_mech_handling_apply();
     }
     return __real_sub_4599c0(state, pc, memory);
 }

@@ -74,6 +74,7 @@ final class GameSettings {
 
     /** Every tweak, one line each, in runtime/sa2_tweaks.h's order (name order). */
     static final Tweak[] TWEAKS = {
+        new Tweak("2p-layout-in-1p", "Two-player stage layouts", "13 one-player stages use their leftover two-player object layout: other rings, items and enemies. Hard Mode, Pumpkin Hill and Iron Gate keep their own. These layouts leave out most upgrades and Chao key boxes, and some switches and animals, so a mission may not be finishable. Clears, ranks and emblems still save; an upgrade the layout leaves out cannot be collected or saved."),
         new Tweak("all-events-skippable", "Skip any cutscene", "Start skips every cutscene, including the Hero story ending and the Last story finale, which the game otherwise makes you watch."),
         new Tweak("fast-stage-load", "Faster stage loading", "Starts a stage as soon as it has loaded, without waiting for the loading screen to finish. Chao World loads as usual."),
         new Tweak("hide-hud", "Hide the HUD", "Hides the score, time, rings and lives counters, and the kart race display. Button prompts and the radar stay."),

@@ -340,6 +340,7 @@
 #include "tweaks.h"
 #include "tweaks/camera-invert.h"
 #include "tweaks/deadzone.h"
+#include "tweaks/frametime-overlay.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -4515,6 +4516,7 @@ void Player::setup_pads() {
         else std::printf("pads: %s=%s not used: %s\n", k, v, why.c_str());
     }
     sa2_touch::set_settings(touch_, touch_settings);
+    sa2_frametime::setup(SA2_PLAYER_GPU != 0, o_.pace && host());   // host tweak frametime-overlay
     const SDL_PropertiesID props = SDL_GetWindowProperties(win_);
     if (!props || !SDL_SetPointerProperty(props, kPresentOverlayContext, this) ||
         !SDL_SetPointerProperty(props, kPresentOverlayProperty, reinterpret_cast<void*>(&Player::present_overlay)))
@@ -4900,6 +4902,7 @@ void Player::present_overlay(void* self, SDL_GPUDevice* dev, SDL_GPUCommandBuffe
         sa2_touch::draw(p->touch_, cb, target, w, h);
         ++p->overlay_presents_;
     }
+    sa2_frametime::draw(dev, cb, target, w, h, p->frame_, p->pace_.get(), p->touch_, p->win_);   // host tweak frametime-overlay
     if (!p->o_.overlay_out.empty()) p->overlay_shot(dev, cb, frame, frame_w, frame_h, w, h);
 }
 
@@ -4957,6 +4960,7 @@ void Player::overlay_shot(SDL_GPUDevice* dev, SDL_GPUCommandBuffer* cb, SDL_GPUT
         SDL_BlitGPUTexture(cb, &bi);
     }
     sa2_touch::draw(touch_, cb, s.tex[1], w, h);
+    sa2_frametime::draw(dev, cb, s.tex[1], w, h, frame_, pace_.get(), touch_, win_);   // host tweak frametime-overlay
     SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
     if (!cp) { s.error = strf("SDL_BeginGPUCopyPass: %s", SDL_GetError()); s.failed = true; return; }
     for (uint32_t i = 0; i < 2; ++i) {
@@ -5625,6 +5629,7 @@ void Player::read_dxvk_log() {
 // dlclosed (r3 section 3). Safe after a failure at any point of setup.
 void Player::teardown() {
     close_pads();                                   // before the device the overlay drew with goes
+    sa2_frametime::release();                       // host tweak frametime-overlay: its texture, before the device
     finish_input_diagnostics();
     if (end_fd_ >= 0) { ::close(end_fd_); end_fd_ = -1; }
     if (video_fd_ >= 0) { ::close(video_fd_); video_fd_ = -1; }

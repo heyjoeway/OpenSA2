@@ -127,5 +127,8 @@ enum class Control { Stick, A, B, X, Y, Start, LT, RT };
 void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y);
 // The stick's radius in pixels on a w x h target: a full push is this far from its origin.
 float stick_radius(const Overlay* o, uint32_t w, uint32_t h);
+// The box a control is drawn in on a w x h target, centre (x, y) and half its width and height
+// (the stick: its base at its resting place), for what else draws over the window to keep clear of.
+void control_box(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y, float* hw, float* hh);
 
 }  // namespace sa2_touch

@@ -618,11 +618,11 @@ bool below_picture(const Overlay* o, uint32_t w, uint32_t h) {
     return float(h) - bottom >= kBelowMin * float(std::min(w, h));
 }
 
-void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y) {
+void control_box(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y, float* hw, float* hh) {
     const Layout l = layout_of(o, w, h);
     int i = -1;
     switch (c) {
-    case Control::Stick: *x = l.stick_x; *y = l.stick_y; return;
+    case Control::Stick: *x = l.stick_x; *y = l.stick_y; *hw = *hh = l.stick_r; return;
     case Control::A: i = B_A; break;
     case Control::B: i = B_B; break;
     case Control::X: i = B_X; break;
@@ -633,6 +633,13 @@ void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* 
     }
     *x = l.b[i].x;
     *y = l.b[i].y;
+    *hw = l.b[i].hx;
+    *hh = l.b[i].hy;
+}
+
+void control_centre(const Overlay* o, uint32_t w, uint32_t h, Control c, float* x, float* y) {
+    float hw, hh;
+    control_box(o, w, h, c, x, y, &hw, &hh);
 }
 
 float stick_radius(const Overlay* o, uint32_t w, uint32_t h) { return layout_of(o, w, h).stick_r; }

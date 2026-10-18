@@ -85,6 +85,8 @@ public:
     uint64_t moves() const { return moves_; }
     double moved_s() const { return moved_s_; }
     double late_max_s() const { return late_max_; }
+    uint64_t over_frame() const { return over_frame_; }   // the report's late "over_frame"
+    double last_at_s() const { return last_at_; }          // when the last paced frame was presented
 
     // The q-quantile of the lateness, in seconds: the upper edge of the bucket it falls
     // in, or the largest lateness when it falls past the histogram (or is the largest).

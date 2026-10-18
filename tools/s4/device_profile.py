@@ -208,6 +208,11 @@ GUEST_ENV = {"cwd": "SA2_GUEST_CWD", "exe_path": "SA2_GUEST_EXE_PATH"}
 # runtime/sa2_imports.c's SA2_DEFAULT_CWD and SA2_DEFAULT_EXE_PATH: what a run
 # that stands for no capture answers, and what its record must show.
 DEFAULT_GUEST = {"cwd": "C:\\SA2", "exe_path": "C:\\SA2\\sonic2app.exe"}
+# Play's low-FPS speed fix (runtime/sa2_frameskip.c: N game ticks per drawn stage frame and the
+# clock moved N frames), which the Android session sets from its settings screen and
+# tools/s5/play_live.py from its --frameskip, and no registered run may: a run a shell left it on
+# in would record frames of N ticks as frames of one, so it is stripped with the rest.
+FRAMESKIP_ENV = ("SA2_PLAY_FRAMESKIP",)
 # The drive the oracle's prefix names the host's root by (its dosdevices hold
 # c: -> ../drive_c and z: -> /), so every path outside drive_c, the mirror the
 # runner launches from among them, is Z: and the Unix path with backslashes.
@@ -226,7 +231,7 @@ LAUNCHER = "runinprefix"
 # so one left in a shell is stripped with the rest.
 PLAY_ENV = ("SA2_PLAY_RES", "SA2_PLAY_ASPECT", "SA2_PLAY_HUD43", "SA2_TWEAKS")
 # What only a tool's device_profile argument decides, and nothing in a shell.
-OWNED = (ENV,) + HOST_OVERRIDES + tuple(GUEST_ENV.values()) + PLAY_ENV
+OWNED = (ENV,) + HOST_OVERRIDES + tuple(GUEST_ENV.values()) + PLAY_ENV + FRAMESKIP_ENV
 # The system devices' GUIDs (0x0087360C, 0x008735FC in the image).
 GUID_SYSKEYBOARD = uuid.UUID("6F1D2B61-D5A0-11CF-BFC7-444553540000").bytes_le
 GUID_SYSMOUSE = uuid.UUID("6F1D2B60-D5A0-11CF-BFC7-444553540000").bytes_le

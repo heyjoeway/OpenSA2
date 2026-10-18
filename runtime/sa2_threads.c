@@ -883,11 +883,22 @@ int sa2_sched_block(int reason, uint32_t object, uint64_t deadline_us, const cha
     }
 }
 
+/* The frame periods the next boundary moves the clock: 1, or the N game ticks the frame just ran
+ * under play's low-FPS speed fix (runtime/sa2_frameskip.c, which owes them when its level loop
+ * returns; with the fix off nothing ever owes, so every boundary moves one period). */
+static uint64_t g_frames_owed = 1;
+
+void sa2_sched_owe_frames(uint64_t n) {
+    if (n >= 1 && n <= 16) g_frames_owed = n;
+}
+
 void sa2_sched_frame_boundary(void) {
     sa2_sched_init();
+    const uint64_t periods = g_frames_owed;
+    g_frames_owed = 1;
     if (!g_frame_us) { sa2_sched_yield("frame"); return; }
     const uint64_t now = sa2_virtual_us();
-    const uint64_t next = ((now / g_frame_us) + 1ull) * g_frame_us;
+    const uint64_t next = ((now / g_frame_us) + periods) * g_frame_us;
     g_frames++;
     /* One tick row per frame, taken before the hand-off: this is the
      * "per-tick state" two runs are compared on. */

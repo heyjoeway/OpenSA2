@@ -47,6 +47,7 @@ public class Sa2SettingsActivity extends Activity {
     private TextView mOrientationNote, mPictureNote, mSizeLabel, mOpacityLabel, mPlaceLabel, mPlaceNote;
     private SeekBar mSize, mOpacity, mPlace;
     private boolean mUpdating;
+    private Button[] mFrameskip;
 
     private static final String[] ORIENTATIONS = {GameSettings.LANDSCAPE, GameSettings.PORTRAIT, GameSettings.AUTO};
 
@@ -244,6 +245,18 @@ public class Sa2SettingsActivity extends Activity {
         Ui.style(mResolution, Ui.SECONDARY);
         d.addView(mResolution, Ui.full(dp(8)));
         note(d, "Fewer lines can run faster on a slower phone.");
+        label(d, "Low-FPS speed fix (experimental)", false);
+        View.OnClickListener[] fc = new View.OnClickListener[GameSettings.FRAMESKIPS.length];
+        for (int i = 0; i < fc.length; i++) {
+            final String f = GameSettings.FRAMESKIPS[i];
+            fc[i] = v -> {
+                mS.frameskip = f;
+                save();
+            };
+        }
+        mFrameskip = segments(d, new String[] {"Off", "30 FPS", "20 FPS", "Auto"}, fc);
+        note(d, "Keeps stage speed right when the phone can't hold 60 FPS by running extra game ticks per "
+                + "drawn frame. Menus and cutscenes still slow down.");
         mHud = toggle(d, "HUD at 4:3 positions", (b, on) -> {
             mS.hud43 = on;
             save();
@@ -395,6 +408,7 @@ public class Sa2SettingsActivity extends Activity {
         mLayoutPortrait.setVisibility(portrait ? View.VISIBLE : View.GONE);
         mLayoutLandscape.setText(portrait ? "Move the controls (landscape)" : "Move the controls");
         mLayoutPortrait.setText(landscape ? "Move the controls (portrait)" : "Move the controls");
+        choose(mFrameskip, indexOf(GameSettings.FRAMESKIPS, mS.frameskip));
         mUpdating = false;
     }
 

@@ -256,3 +256,69 @@ def test_the_perf_lines_clocks_are_each_cpus_scaling_cur_freq_in_mhz(plan_driver
                                         ("a", "refused"), ("1-x", "refused")])
 def test_a_cpu_list_reads_as_the_runtimes_knob_reads_it(plan_driver, text, read):
     assert plan_driver("parse", text) == read
+
+
+# ---------------------------------------------------------------- the low-FPS speed fix setting
+
+# GameSettings.sessionSettings for a stored "frameskip", on a 2340x1080 screen with every other
+# setting at its default (which ask for nothing).
+FRAMESKIP_JAVA = r"""
+package com.sa2recomp.app;
+public class FrameskipDriver {
+    public static void main(String[] a) {
+        GameSettings s = new GameSettings();
+        if (a.length > 0) s.frameskip = a[0];
+        System.out.print(String.join(" ", s.sessionSettings(2340, 1080)));
+        System.out.print("|" + String.join(",", GameSettings.FRAMESKIPS) + "|" + new GameSettings().frameskip);
+    }
+}
+"""
+
+
+@pytest.fixture(scope="module")
+def frameskip_java(tmp_path_factory):
+    import json
+    import shutil
+    import subprocess
+    jdk = ROOT / json.loads((ROOT / "tools/pins.json").read_text())["tools"]["java"]["path"]
+    android_jar = ROOT / "private/android-sdk/platforms/android-36/android.jar"
+    missing = [str(p) for p in (jdk / "bin/javac", android_jar) if not p.exists()]
+    if missing:
+        pytest.skip(f"needs the JDK and android.jar: missing {missing}")
+    d = tmp_path_factory.mktemp("frameskip_java")
+    src = d / "java/com/sa2recomp/app"
+    src.mkdir(parents=True)
+    (src / "FrameskipDriver.java").write_text(FRAMESKIP_JAVA)
+    shutil.copy(ROOT / "host/android/java/com/sa2recomp/app/GameSettings.java", src)
+    subprocess.run([str(jdk / "bin/javac"), "--release", "11", "-nowarn", "-classpath", str(android_jar),
+                    "-d", str(d / "classes"), *map(str, src.glob("*.java"))], check=True, capture_output=True)
+
+    def run(*args):
+        return subprocess.run([str(jdk / "bin/java"), "-cp", f"{d / 'classes'}:{android_jar}",
+                               "com.sa2recomp.app.FrameskipDriver", *args], capture_output=True, text=True,
+                              check=True).stdout.split("|")
+    return run
+
+
+@pytest.mark.parametrize("stored, settings", [
+    (None, ""),
+    ("off", ""),
+    ("30", "SA2_PLAY_FRAMESKIP=2 SA2_ADPF_TARGET_US=33333"),
+    ("20", "SA2_PLAY_FRAMESKIP=3 SA2_ADPF_TARGET_US=50000"),
+    ("auto", "SA2_PLAY_FRAMESKIP=auto"),
+    ("60", ""),            # a value no build wrote reads as off
+])
+def test_the_speed_fix_setting_sends_the_frameskip_and_the_adpf_target(frameskip_java, stored, settings):
+    got, choices, default = frameskip_java(*([stored] if stored is not None else []))
+    assert got == settings
+    assert (choices, default) == ("off,30,20,auto", "off")
+
+
+def test_the_settings_screen_offers_the_four_choices_in_order():
+    java = (ROOT / "host/android/java/com/sa2recomp/app/Sa2SettingsActivity.java").read_text()
+    assert 'label(d, "Low-FPS speed fix (experimental)", false);' in java
+    assert 'segments(d, new String[] {"Off", "30 FPS", "20 FPS", "Auto"}, fc)' in java
+    assert "choose(mFrameskip, indexOf(GameSettings.FRAMESKIPS, mS.frameskip));" in java
+    # The session takes SA2_ADPF_TARGET_US as it is (1000 to 1000000 us), no native change.
+    native = (ROOT / "host/android/native/sa2_android_session.cpp").read_text()
+    assert 'env_find(genv, "SA2_ADPF_TARGET_US")' in native and "us >= 1000 && us <= 1000000" in native

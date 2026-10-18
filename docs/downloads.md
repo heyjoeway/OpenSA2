@@ -40,6 +40,7 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 - **Full-width picture** draws the game at the screen's shape. Turn it off to keep the game's own 16:9 picture, with bars at the sides of a wider screen.
 - **Aspect ratio** is the screen's shape by default. You can choose 21:9, 16:9, or 4:3 instead.
 - **Resolution** is the largest picture the screen holds. Fewer lines can run faster on a slower phone.
+- **Low-FPS speed fix (experimental)** keeps stages at their normal speed when the phone cannot draw 60 frames per second. **30 FPS** and **20 FPS** run two or three game ticks for each drawn frame, and **Auto** chooses one, two, or three as the game runs. Menus, cutscenes, and movies still slow down on a slow phone. It is off by default. See [Low-FPS speed fix](#low-fps-speed-fix-experimental) for what to expect.
 - **HUD at 4:3 positions** keeps the score, time, and rings near the middle of a wide picture. It is on by default.
 - **Touch controls** sets the size and opacity of the on-screen controls. At 0% opacity the controls are hidden but still work. **Move the controls** lets you drag each control to a new place, and **Change what the touch buttons do** changes the game button each one sends.
 - **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
@@ -115,3 +116,26 @@ The launcher prints the tweaks it passes, and each session's game log starts wit
 The release provides `SHA256SUMS` for the downloadable files. The project source for all three packages is at the release tag. The [developer guide](getting-started.md) explains the local build inputs and the current limits of the public build setup.
 
 All three packages include the math fixes from 2026-10-15. Report the platform and release version with any bug. Android shows the version in the app's title.
+
+## Low-FPS speed fix (experimental)
+
+The game advances one tick for each frame it draws, so on a device that cannot draw 60 frames per second the whole game slows down. The low-FPS speed fix runs two or three game ticks for each drawn frame in stages, so a stage keeps its normal speed at 30 or 20 frames per second. **Auto** chooses one, two, or three ticks as the game runs, from how long the game takes and how fast frames reach the screen. When drawing, not the game, holds the frame rate down, Auto keeps the higher count and tries the lower one again after 30 seconds, then less often. The fix needs a release newer than v0.1.0-alpha.3.1.
+
+What to expect:
+
+- Only stages change. Menus, the pause menu, cutscenes, and movies still draw one frame per tick, so they slow down on a slow device as before. The fade into and out of a stage also counts drawn frames, so it takes longer.
+- A button press counts once, even when a frame runs several ticks.
+- Sound effects from the ticks of one frame can start together, up to about 33 ms early at 20 frames per second.
+- The level-up message window is drawn once for each tick, over itself, so it can look more opaque.
+- In the 100-ring mission, the game checks for 100 rings once per drawn frame, so the mission can end up to two ticks after the 100th ring. If you lose rings in those ticks, collect 100 again.
+- Replays and tests never use the fix.
+
+On Android, choose it under **Low-FPS speed fix (experimental)** in **Game settings**. On Windows and Linux, add one line to the release's `share/game.env` file:
+
+```
+SA2_PLAY_FRAMESKIP=2
+```
+
+Use `2` for 30 frames per second, `3` for 20 frames per second, or `auto`. On Windows the file is `share\game.env` in the extracted folder. For the Linux package it is `/usr/lib/opensa2/share/game.env`, which you edit as root; a package update replaces it. Setting `SA2_PLAY_FRAMESKIP` in a shell has no effect, because the launcher passes only `game.env`'s settings to the game.
+
+Each session's game log starts with a line that names the setting, or says why a value was not used. During stage play it adds a line every 10 seconds: the frames drawn at each tick count, frame times, and the stage timer's progress against the wall clock, where 100% means the stage ran at its normal speed.

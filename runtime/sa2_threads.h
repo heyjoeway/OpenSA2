@@ -442,6 +442,10 @@ void sa2_sched_sleep_ms(uint32_t ms);
 void     sa2_sched_frame_boundary(void);
 uint64_t sa2_sched_frame_us(void);
 uint64_t sa2_sched_frames(void);        /* frame boundaries crossed */
+/* The next frame boundary moves the clock n frame periods (1 to 16) instead of one: play's
+ * low-FPS speed fix (runtime/sa2_frameskip.c) owes the N game ticks a stage frame ran. The
+ * boundary still counts one frame. Nothing calls it with the fix off. */
+void     sa2_sched_owe_frames(uint64_t n);
 
 /* ------------------------------------------------------- multimedia timers */
 

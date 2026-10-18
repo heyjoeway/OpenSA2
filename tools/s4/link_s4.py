@@ -61,7 +61,7 @@ RUNTIME_C = ["guest_memory.c", "function_table_impl.c", "sa2_trap.c", "sa2_call.
              "sa2_imports.c", "sa2_files.c", "sa2_window.c", "sa2_iface.c",
              "sa2_d3d9.c", "sa2_dsound.c", "sa2_ddraw.c", "sa2_xaudio2.c", "sa2_threads.c",
              "sa2_dialog.c", "sa2_gdi.c", "sa2_module.c", "sa2_format.c", "sa2_codepage.c",
-             "sa2_devprofile.c", "sa2_locale.c",
+             "sa2_devprofile.c", "sa2_locale.c", "sa2_frameskip.c",
              "sa2_guest_call.c", "sa2_dinput.c", "sa2_wbem.c", "sa2_poll_handoff.c",
              "sa2_exe_overlay.c", "sa2_cri_dsp.c", "sa2_ninja_math.c", "sa2_widescreen.c",
              "sa2_crt_x87.c", "sa2_tweaks.c"]
@@ -108,6 +108,12 @@ def exe_overlay_identity(table: Path) -> dict:
 # double mode's lifted ones, which hand every call they cannot reproduce exactly, and every call
 # in the exact build, to `__real_` (tools/s8/native_kernels/cri_dsp_diff.py holds them to it).
 #
+# sub_43ce20 and sub_441ba0 are the level loop and Control (runtime/sa2_frameskip.c): with play's
+# SA2_PLAY_FRAMESKIP=2, 3 or auto a stage frame runs N game ticks, its later passes see no new
+# press, and the clock moves N frames; unset, and in every replay, each wrap only calls `__real_`
+# (Documentation/scripts/tests/test_frameskip.py). They go before ReadConfig so the HUD sites stay
+# the list's tail (test_widescreen.py).
+#
 # sub_426cc0, sub_424ff0 and sub_426e40 are the main thread's Ninja njCalcPoint, njInvertMatrix
 # and njMultiMatrix (runtime/sa2_ninja_math.c): native bodies at PC24, bit for bit the double
 # mode's lifted ones, on the same terms (tools/s8/native_kernels/ninja_diff.py holds them to it).
@@ -137,6 +143,7 @@ def exe_overlay_identity(table: Path) -> dict:
 # reads them with ast.literal_eval and build_cost.py with a regular expression, and both add the
 # tweaks from tweak_sources.py as these lines do.
 PRODUCTION_WRAPS = ["sub_427ee0", "sub_842500", "sub_843400", "sub_843460", "sub_8418b0",
+                    "sub_43ce20", "sub_441ba0",
                     "sub_426cc0", "sub_424ff0", "sub_426e40",
                     "sub_859ac8", "sub_859648", "sub_829008", "sub_405310",
                     "sub_44e9c0", "sub_7945c0", "sub_794cb0", "sub_44d360", "sub_61bba0",

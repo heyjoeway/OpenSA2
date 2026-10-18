@@ -17,9 +17,9 @@ Usage:
   .venv/bin/python tools/s5/play_live.py --dry-run [--scene S]    # print the commands, run nothing
   (--host dxvk-native|sdl3-gpu, --out DIR, --build NAME, --player-bin DIR, --no-player-build,
    --renderer-store DIR, --profile default|registered, --keep-stream, --stream-cap-gb N,
-   --disk-floor-gb N, --no-sound, --sound-driver alsa|dummy, --audio-wav and --no-pace move
-   or add to the defaults below; --synthetic-keys N --max-frames M [--synthetic-seed S]
-   verify a --receipt session with no person, below)
+   --disk-floor-gb N, --no-sound, --sound-driver alsa|dummy, --audio-wav, --no-pace and
+   --frameskip 2|3|auto move or add to the defaults below; --synthetic-keys N --max-frames M
+   [--synthetic-seed S] verify a --receipt session with no person, below)
 
 The keys are the game's own bindings: with private/install's Config/Keyboard.cfg, player 1
 is W, S, A and D for up, down, left and right, I, J, U, K, Q and E, and Enter; the arrows
@@ -163,6 +163,19 @@ time; player/pace.tsv has them per frame.
 
 --no-pace is the session as it was before pacing: the game as fast as it runs, the frames
 as they come, and the relay never holding the game.
+
+The low-FPS speed fix
+---------------------
+--frameskip 2, 3 or auto puts SA2_PLAY_FRAMESKIP in the game's environment
+(runtime/sa2_frameskip.c): each drawn frame of a stage runs that many game ticks and the
+virtual clock moves that many frame periods, so a stage keeps its speed when frames come at
+30 or 20 a second; auto chooses 1 to 3 from the game's busy time and the frames' pace. It
+is the one way a session gets the setting: game_env() strips one a shell left, as every
+registered run's environment does (tools/s4/device_profile.py FRAMESKIP_ENV). Pacing is
+unchanged: the player shows each frame at its virtual time, which is N periods after the
+last. The game's log carries the fix's report ("frameskip: ..."). A --receipt session
+refuses it: the receipt's per-tick table and its latency count one game tick per drawn
+frame, which a frame of N ticks is not.
 
 How a session ends
 ------------------
@@ -352,6 +365,9 @@ SYNTHETIC_START, SYNTHETIC_SPAN = 0.2, 0.6
 SYNTHETIC_CLOSE = 0.9         # and the window's close request, at this much of the budget
 SYNTHETIC_MIN_GAP_MS = 150
 MAX_FRAMES_SLACK = 600
+# The low-FPS speed fix's setting (runtime/sa2_frameskip.c), set from --frameskip alone.
+FRAMESKIP_VAR = "SA2_PLAY_FRAMESKIP"
+FRAMESKIP_CHOICES = ("2", "3", "auto")
 INPUT_VARS = ("SA2_INPUT_DI_SCRIPT", "SA2_INPUT_DI_SOURCE", "SA2_INPUT_DI_LOG",
               "SA2_INPUT_SCRIPT", "SA2_INPUT_APPLIED")
 # The playback drivers a session takes, from --sound-driver or an inherited
@@ -582,6 +598,15 @@ def game_env() -> dict[str, str]:
     return {k: v for k, v in PR.clean_env().items() if k not in INPUT_VARS}
 
 
+def session_game_env(pl: dict) -> dict[str, str]:
+    """game_env(), and the low-FPS speed fix's setting from --frameskip, the one place it comes
+    from (the clean environment strips a shell's SA2_PLAY_FRAMESKIP)."""
+    env = game_env()
+    if pl.get("frameskip"):
+        env[FRAMESKIP_VAR] = pl["frameskip"]
+    return env
+
+
 def synthetic_plan(args) -> dict | None:
     """--synthetic-keys N --max-frames M (the module docstring, "The play receipt"): each
     needs the other and --receipt, the presses must fit the frame budget, and the seed is
@@ -737,6 +762,10 @@ def plan(args) -> dict:
                           "the renderers sessions ran are build outputs and")
     host = args.host
     synthetic = synthetic_plan(args)
+    if args.frameskip and args.receipt:
+        raise SystemExit("--frameskip and --receipt do not go together: the receipt's per-tick "
+                         "table and its input latency count one game tick per drawn frame, and "
+                         "a stage frame under --frameskip is several")
     if not (args.stream_cap_gb > 0 and args.disk_floor_gb >= 0):
         raise SystemExit("--stream-cap-gb must be above 0 and --disk-floor-gb not below 0")
     run_id = "dry-run" if args.dry_run else \
@@ -759,7 +788,7 @@ def plan(args) -> dict:
           "meta": meta, "cmd": cmd, "spec": spec, "player_env": penv, "bin_dir": bin_dir,
           "renderer_store": store, "renderer": None, "synthetic": synthetic,
           "binary": PR.LINKDIR / "mains" / build / "sa2_main", "limits": limits,
-          "sound": sound, "pace": pace, "receipt": receipt,
+          "sound": sound, "pace": pace, "receipt": receipt, "frameskip": args.frameskip,
           "hooks": scene_hooks(scene, rel(p["ticks_observer"]) if receipt["on"] else None)[0]}
     pl["player_cmd"] = session_player_command(pl)
     return pl
@@ -796,6 +825,11 @@ def show(pl: dict, build_player: bool) -> list[str]:
                  f"falls below {lim['disk_floor_bytes']} bytes")
     lines.append("sound: " + sound_shown(pl["sound"]))
     lines.append("pace: " + pace_shown(pl["pace"], p))
+    lines.append("frameskip: " + (f"{FRAMESKIP_VAR}={pl['frameskip']} in the game's environment "
+                                  "(runtime/sa2_frameskip.c: stage frames run "
+                                  + ("1 to 3 game ticks" if pl["frameskip"] == "auto"
+                                     else f"{pl['frameskip']} game ticks") + ")"
+                                  if pl.get("frameskip") else "off"))
     lines.append("receipt: " + receipt_shown(pl["receipt"], p))
     lines.append("end: " + end_shown(pl))
     if pl["synthetic"]:
@@ -1106,7 +1140,7 @@ def session_parties(pl: dict, asked: dict) -> dict:
     box: dict = {"stop": None, "player": None, "end": None}
     t0 = time.monotonic()
     loop = subprocess.Popen(pl["cmd"], cwd=ROOT, stdout=glog, stderr=subprocess.STDOUT,
-                            env=game_env(), start_new_session=True)
+                            env=session_game_env(pl), start_new_session=True)
 
     def said_end(why: dict) -> None:
         with end_lock:
@@ -1654,6 +1688,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-pace", action="store_true",
                     help="the session as before pacing: the game as fast as it runs and each "
                          "frame shown as it comes")
+    ap.add_argument("--frameskip", choices=FRAMESKIP_CHOICES, default=None,
+                    help="the low-FPS speed fix (SA2_PLAY_FRAMESKIP): 2 or 3 game ticks per "
+                         "drawn stage frame, or auto (1 to 3), so stages keep their speed below "
+                         "60 frames a second; not with --receipt")
     ap.add_argument("--receipt", action="store_true",
                     help="Metal Harbor only: the game writes its per-tick table, the session "
                          "its document to the untracked play-record.json, and a session that "
@@ -1741,6 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
         "sound": {"on": pl["sound"]["on"], "driver": pl["sound"]["driver"],
                   "driver_from": pl["sound"]["driver_from"],
                   "wav": rel(pl["sound"]["wav"]) if pl["sound"]["wav"] else None},
+        "frameskip": pl.get("frameskip"),
         "pace": {**pl["pace"], "relay_held": session["relay"].get("held"), "ahead": ahead,
                  "pace_log": rel(p["player"]["pace_log"]) if pl["pace"]["on"] else None,
                  "relay_frames": rel(p["relay_frames"]) if p["relay_frames"].is_file() else None},

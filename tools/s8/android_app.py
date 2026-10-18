@@ -524,7 +524,9 @@ class Builder:
         units = []
         for e in entries:
             src = Path(os.path.normpath(os.path.join(e["directory"], e["file"])))
-            rel = src.relative_to(dxvk / "subprojects/dxbc-spirv").as_posix()
+            # resolved both: compile_commands.json names the checkout that built DXVK, and a worktree
+            # reaches the same files through its private/ link
+            rel = src.resolve().relative_to((dxvk / "subprojects/dxbc-spirv").resolve()).as_posix()
             name = rel.replace("/", "_")
             flags = self.dxvk_flags(f"subprojects/dxbc-spirv/{rel}", f / f"{name}.flags")
             units.append((self.cxx, ["-w", *flags], src, o / f"{name}.o"))
@@ -769,7 +771,9 @@ class Builder:
         idsig = apk.with_name(apk.name + ".tmp.idsig")
         if idsig.exists():
             idsig.unlink()
-        return {"apk": str(apk.relative_to(ROOT)), "bytes": apk.stat().st_size, "sha256": sha256(apk),
+        # --out is resolved, which leaves ROOT in a worktree whose private/ is a link: then absolute
+        return {"apk": str(apk.relative_to(ROOT)) if apk.is_relative_to(ROOT) else str(apk),
+                "bytes": apk.stat().st_size, "sha256": sha256(apk),
                 "libs": {n: sha256(p) for n, p in libs.items()}, "game_included": "libsa2game.so" in libs}
 
 

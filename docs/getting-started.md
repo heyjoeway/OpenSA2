@@ -134,3 +134,5 @@ bin/sa2recomp --selftest
 ```
 
 This check covers installation and startup. It does not check every stage or event. Read [current limitations](status.md) before a longer session.
+
+To try the low-FPS speed fix in a development build, add `SA2_PLAY_FRAMESKIP=2`, `3`, or `auto` to the build's `share/game.env`. The live-play tool `tools/s5/play_live.py` takes `--frameskip 2|3|auto` instead, and it removes a `SA2_PLAY_FRAMESKIP` left in your shell. Registered replays and test runs never use the setting. The game's log reports what the fix did; `runtime/sa2_frameskip.c` describes the mechanism.

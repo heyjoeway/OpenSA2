@@ -46,6 +46,9 @@ final class GameSettings {
     /** Resolution choices in lines, 0 the largest the screen holds. */
     static final int[] RESOLUTIONS = {0, 1440, 1080, 900, 720, 540, 480};
     static final String[] ASPECTS = {"auto", "21:9", "16:9", "4:3"};
+    /** The low-FPS speed fix's choices, as stored (runtime/sa2_frameskip.c): off, 30 or 20 drawn frames
+     * a second in stages (2 or 3 game ticks per drawn frame), or auto (1 to 3, chosen as the game runs). */
+    static final String[] FRAMESKIPS = {"off", "30", "20", "auto"};
     /** The touch overlay's on-screen buttons (host/player/touch_overlay.h SA2_TOUCH_MAP), and a pad's
      * buttons by position (host/player/player.cpp SA2_PAD_MAP), as the settings name them. */
     static final String[] TOUCH_BUTTONS = {"A", "B", "X", "Y", "START", "LT", "RT"};
@@ -104,6 +107,7 @@ final class GameSettings {
     boolean widescreen = true, hud43 = true;
     int resolution = 0;                  // lines, 0 the screen's
     String aspect = "auto";
+    String frameskip = "off";            // FRAMESKIPS; any other stored value is off
     int touchSize = 100, touchOpacity = 100;   // percent of the overlay's own
     int pictureY = 25;                         // upright, the picture's centre, percent of the height down (0 to 50)
     String layoutLandscape = "", layoutPortrait = "";  // SA2_TOUCH_LAYOUT, SA2_TOUCH_LAYOUT_PORTRAIT; "" its own
@@ -118,6 +122,7 @@ final class GameSettings {
         s.hud43 = p.getBoolean("hud43", s.hud43);
         s.resolution = p.getInt("resolution", s.resolution);
         s.aspect = p.getString("aspect", s.aspect);
+        s.frameskip = p.getString("frameskip", s.frameskip);
         s.touchSize = p.getInt("touch_size", s.touchSize);
         s.touchOpacity = p.getInt("touch_opacity", s.touchOpacity);
         s.pictureY = p.getInt("picture_y", s.pictureY);
@@ -138,6 +143,7 @@ final class GameSettings {
                 .putBoolean("hud43", hud43)
                 .putInt("resolution", resolution)
                 .putString("aspect", aspect)
+                .putString("frameskip", frameskip)
                 .putInt("touch_size", touchSize)
                 .putInt("touch_opacity", touchOpacity)
                 .putInt("picture_y", pictureY)
@@ -276,6 +282,12 @@ final class GameSettings {
             e.add("SA2_PLAY_RES=" + (p == null ? "off" : p[0] + "x" + p[1]));
         }
         if (!hud43) e.add("SA2_PLAY_HUD43=0");
+        // The low-FPS speed fix: 2 or 3 game ticks per drawn stage frame, with ADPF's target at that
+        // frame time (host/android/native/sa2_android_session.cpp reads SA2_ADPF_TARGET_US), or auto
+        // with the 16.67 ms target, since a late game should ask for more clock.
+        if ("30".equals(frameskip)) e.addAll(Arrays.asList("SA2_PLAY_FRAMESKIP=2", "SA2_ADPF_TARGET_US=33333"));
+        else if ("20".equals(frameskip)) e.addAll(Arrays.asList("SA2_PLAY_FRAMESKIP=3", "SA2_ADPF_TARGET_US=50000"));
+        else if ("auto".equals(frameskip)) e.add("SA2_PLAY_FRAMESKIP=auto");
         if (!LANDSCAPE.equals(orientation)) e.add("SA2_PLAYER_PICTURE_Y=" + fraction(pictureY));
         if (touchSize != 100) e.add("SA2_TOUCH_SCALE=" + fraction(touchSize));
         if (touchOpacity != 100) e.add("SA2_TOUCH_OPACITY=" + fraction(touchOpacity));

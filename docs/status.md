@@ -30,6 +30,7 @@ The desktop installer supports Steam discovery, a selected game folder, and a ZI
 - The portable renderer currently depends on the project's SDL3 patches. Equivalent behavior with stock SDL3 is unfinished.
 - The faster floating-point mode used by desktop development builds needs wider gameplay comparisons. A native x87 mode remains available for fidelity work.
 - Android support is experimental. The tested phones do not represent every Android GPU or device, and sustained performance depends on temperature and workload.
+- The low-FPS speed fix is experimental and off by default. It keeps stages at their normal speed below 60 frames per second by running two or three game ticks for each drawn frame. Menus, cutscenes, and movies still slow down on a slow device, and the **Auto** setting has had little testing on phones.
 - A complete public source-build bootstrap is unfinished. The build scripts still require local generated inputs and pinned dependencies.
 
 ## Work still needed

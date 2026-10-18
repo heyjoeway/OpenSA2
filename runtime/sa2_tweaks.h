@@ -93,6 +93,7 @@
 /* X(bit, name, report, summary): every tweak, one line each, in name order (step 1 above). */
 #define SA2_TWEAK_LIST(X) \
     X(SA2_TWEAK_ALL_EVENTS_SKIPPABLE, "all-events-skippable", "every event skippable", "Start skips every cutscene, the Hero story ending and the Last story finale included") \
+    X(SA2_TWEAK_FAST_STAGE_LOAD, "fast-stage-load", "fast stage load", "a stage starts as soon as its files are loaded, without the loading screen's wait") \
     X(SA2_TWEAK_NO_EVENT_BARS, "no-event-bars", "event-bars off", "no black bars at the sides of most cutscenes on a wide screen") \
     /* the end of the list */
 

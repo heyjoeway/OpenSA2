@@ -87,12 +87,16 @@ ON = "sa2 tweaks: analog full throw (SA2_TWEAKS=analog-fix)"
 DONE = ("sa2 tweaks: analog full throw: the stroke is full at 112 past the deadzone, not 50 "
         "(0x00905790: 125000.0 -> 1404928.0)")
 D = 1404928.0                                    # 112^3
-# x1, y1 pairs, gamepad values as measured in a play run (the game's pad fill): at rest, inside the
-# deadzone, half a push right (76), the vanilla curve's full point (64), full right and left (224,
-# -225), a full diagonal (138, 138); then the keyboard's held directions (127 right, -128 up, and
-# both: the fill writes 127 or -128 for a held key).
+# x1, y1 pairs as Controllers holds them, after UpdateControllers scales the fill's raw value by
+# 128/72: gamepad values measured in a play run, at rest, inside the deadzone, half a push right
+# (76), the vanilla curve's full point (64), full right and left (224, -225), a full diagonal
+# (138, 138); then the keyboard's held directions, right, up and right with up (the fill's raw 127
+# and -128 for a held key read 225 and -227 there, y1 negated on the way, as a keyboard play run
+# measured [private]).
 STICKS = ["0", "0", "10", "-12", "76", "0", "64", "0", "224", "0", "-225", "0", "138", "138",
-          "127", "0", "0", "-128", "127", "-128"]
+          "225", "0", "0", "-225", "225", "-225"]
+# right, left, up, down, right with up, left with down, as that run read them in Controllers
+KEYS = ["225", "0", "-227", "0", "0", "-225", "0", "227", "225", "-225", "-227", "227"]
 
 
 @pytest.fixture(scope="module")
@@ -175,6 +179,41 @@ def test_full_stroke_comes_at_r_112_in_every_direction(exe):
     assert min(got[:n]) > 0.99 and max(got[n:]) < 0.97
     vanilla, _, _ = run(exe, "125000", under)
     assert strokes(vanilla) == [1.0] * n
+
+
+def update_controllers(raw: int) -> int:
+    """UpdateControllers's scaling of the fill's raw axis value (0x0077E800-0x0077E81D): shl 7,
+    the high half of imul by 0x38E38E39, sar 4, plus the sign bit, 128/72 rounded toward zero."""
+    edx = (raw << 7) * 0x38E38E39 >> 32
+    edx >>= 4
+    return edx + (1 if edx < 0 else 0)
+
+
+def test_a_held_key_reads_225_or_minus_227_in_controllers():
+    """The keyboard's raw 127 and -128 (0x00425997-0x004259CC) are scaled like the pad's, so
+    WriteAnalogs sees x1 = 225 or -227 for a held key, not 127 or -128."""
+    assert [update_controllers(v) for v in (127, -128, 0)] == [225, -227, 0]
+
+
+def test_a_held_key_is_a_full_stroke_well_past_the_full_point(exe):
+    """A held key is r = 211 to 213 past the deadzone, nearly twice the full point of 112, so the
+    keyboard runs at full stroke whether one key or two are held."""
+    rows, _, _ = run(exe, "125000", KEYS, SA2_TWEAKS="analog-fix")
+    assert strokes(rows) == [1.0] * (len(KEYS) // 2)
+    assert min(math.hypot(abs(int(KEYS[i])) - 14, max(abs(int(KEYS[i + 1])) - 14, 0))
+               for i in range(0, len(KEYS), 2)) == 211
+
+
+def test_the_pads_full_push_leaves_room_above_the_full_point(exe):
+    """The divisor is a chosen feel: 175^3, the pad's full diagonal, is the largest that keeps every
+    full push and a held key at full stroke. 112^3 is full from r = 112, with a full diagonal
+    push (r = 175) and a full push straight (r = 210) both past it."""
+    rows, _, _ = run(exe, "125000", STICKS, SA2_TWEAKS="analog-fix")
+    assert strokes(rows)[4:] == [1.0] * 6
+    for x1, y1 in ((224, 0), (-225, 0), (138, 138), (225, 0), (0, -227)):
+        assert curve(x1, y1, 175.0 ** 3) == 1.0
+    assert curve(138, 138, 176.0 ** 3) < 1.0                    # a larger divisor loses the diagonal
+    assert curve(76, 0, 175.0 ** 3) == pytest.approx(0.0445, abs=1e-4)   # and half a push creeps
 
 
 @pytest.mark.parametrize("start, said", [

@@ -20,19 +20,33 @@
  * fill (0x00425700: its input layer's axis value, after that layer's own deadzone and scaling
  * around 0x00862260, times 127.0 at 0x009060E8, truncated by _ftol2 0x008287C0) gives x1 = 224 at a
  * full push right (XInput 32767), -225 left (-32768), 138 on each axis at a full diagonal (23170,
- * 23170) and 76 at half a push (16384). So a pad reaches r = 210 straight and 175 on a diagonal, and the vanilla
- * curve is full from x1 = 64, a bit under half a push (0.46 of the throw). The keyboard is not a
- * stick: the fill writes x1 = 127 or -128 for a held direction (0x00425997-0x004259CC), r = 113.
+ * 23170) and 76 at half a push (16384). Those x1 are after UpdateControllers's scaling: the fill's
+ * raw value, 127.0 times the axis, is scaled by 128/72 on its way to Controllers (0x0077E800-
+ * 0x0077E81D: shl 7, imul by 0x38E38E39, sar 4, plus the sign bit). So a pad reaches r = 210
+ * straight and 175 on a diagonal, and the vanilla curve is full from x1 = 64, a bit under half a
+ * push (0.46 of the throw). The keyboard is not a stick: the fill writes a raw 127 or -128 for a
+ * held direction (0x00425997-0x004259CC), the same raw scale as the pad's, and the same scaling
+ * makes that x1 = 225 or -227 in Controllers (y1, negated on the way, -225 up and 227 down)
+ * [private: the kart-steer-fix keys-off run read only 225, 0 and -227 there, and analog-fix's
+ * keyboard runs those and the diagonals 225/-225 and -227/227], r = 211 to 213 straight and about
+ * 300 with two keys held.
  *
  * The tweak changes the divisor: on its first call with the tweak on, the wrap reads the 8 bytes at
  * 0x00905790 and, when they are exactly 125000.0, writes 1404928.0 (112^3) there, says so once, and
- * calls the lifted body. The stroke is then r^3 / 1404928, full at r = 112: one under the keyboard's
- * 113, so a held key is still a full stroke, which is as far as the curve can stretch. On a
- * pad the stroke is full from about two thirds of a push straight and four fifths on a diagonal
- * (vanilla: under half), half a push gives 0.17 (vanilla 1.0), a walk, and the curve between is the
- * game's cube. The per-axis deadzone and the clamp are the game's too, so a resting stick's drift
- * stays inside the deadzone as before. One divisor cannot do more: a pad's full push is r = 175 to
- * 210, and a divisor sized for it would leave a held key at a quarter stroke.
+ * calls the lifted body. The stroke is then r^3 / 1404928, full at r = 112. On a pad the stroke is
+ * full from about two thirds of a push straight and four fifths on a diagonal (vanilla: under
+ * half), half a push gives 0.17 (vanilla 1.0), a walk, and the curve between is the game's cube.
+ * The per-axis deadzone and the clamp are the game's too, so a resting stick's drift stays inside
+ * the deadzone as before. A held key is r = 211 or more, so it is a full stroke under this divisor
+ * and under any divisor a pad's full push allows; the keyboard sets no limit.
+ *
+ * 112 is a chosen feel, not a limit. What bounds the divisor is the pad's own reach: its smallest
+ * full push is the diagonal's r = 175, so any divisor up to 175^3 (5359375) keeps a full push in
+ * every direction, and a held key, at full stroke. 175^3 is not used: it puts full stroke at the
+ * diagonal's rim exactly, so a stick that falls a little short of its rim (wear, or the input
+ * layer's own deadzone and scaling) would never reach a full stroke on a diagonal, and half a push
+ * would give 0.04, barely a creep. 112^3 leaves a third of the throw straight, and a fifth on a
+ * diagonal, between full stroke and the rim, and keeps half a push a walk.
  *
  * 0x00905790 is in .rdata (0x00873000-0x00916105; .text ends at 0x00870591), and the only 4-byte
  * reference to it in the image is that fdiv's; the lifted object of 0x00441EF0 reads it from guest

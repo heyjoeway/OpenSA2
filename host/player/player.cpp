@@ -341,6 +341,7 @@
 #include "tweaks/camera-invert.h"
 #include "tweaks/deadzone.h"
 #include "tweaks/frametime-overlay.h"
+#include "tweaks/hold-toggle.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -4562,6 +4563,7 @@ void Player::service_pads() {
             if (s.pad) read_pad(&s);
         pads_dirty_ = true;
     }
+    if (sa2tw::hold_toggle::owed(win_ && (SDL_GetWindowFlags(win_) & SDL_WINDOW_INPUT_FOCUS))) pads_dirty_ = true;
     if (pads_dirty_) send_pads();
 }
 
@@ -4685,6 +4687,7 @@ void Player::send_pads() {
         set.slot[0] = shared_slot(set.slot[0], t);
     }
     sa2tw::camera_invert(&set);
+    sa2tw::hold_toggle::apply(&set, win_ && (SDL_GetWindowFlags(win_) & SDL_WINDOW_INPUT_FOCUS));
     ++pad_sets_;
     input_->send_pads(set);
 }

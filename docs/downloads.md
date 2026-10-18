@@ -94,6 +94,7 @@ Tweaks are optional changes to how the game looks or plays. Each one is off unti
 | `quiet-omochao` | Omochao, the hint robot, no longer appears in the stages, so it gives no hints. The Chao Garden is unchanged. |
 | `radar-all-pieces` | In treasure hunts (Knuckles and Rouge), the radar shows how near every piece still to find is, not only the first one. This makes hunts easier. Your save is not changed. |
 | `ring-loss-cap` | When you get hit, you lose at most 20 rings instead of all of them. The game scatters at most 20 rings on a hit, so you can pick every lost ring back up. Getting back to 100 rings this way gives no second extra life. Scores and ranks you earn with it on are higher than normal and are saved as usual. |
+| `rival-upgrades` | Shadow, Rouge, and Mech Tails get the upgrades Sonic, Knuckles, and Eggman have found: Shadow can use the Bounce Bracelet and Magic Gloves, Rouge never runs out of air underwater, and Mech Tails gets the Protective Armor's extra health. Your save is not changed. |
 | `skip-intro` | Starts the game at the title screen, skipping the company logos and the opening cutscene. Loading tips still appear. The opening still plays if you leave the title screen idle. |
 | `walker-cannon-fix` | Fixes a crash when a Chao Walker that has the Mech's cannon upgrade fires its cannon. Only a cheat gives a Chao Walker that upgrade, so without one this tweak changes nothing. |
 

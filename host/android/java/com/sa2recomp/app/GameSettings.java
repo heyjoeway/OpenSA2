@@ -95,6 +95,7 @@ final class GameSettings {
         new Tweak("quiet-omochao", "No Omochao hints", "Omochao, the hint robot, no longer appears in the stages, so it gives no hints."),
         new Tweak("radar-all-pieces", "Radar tracks all pieces", "In treasure hunts, every piece still to find shows on the radar how near it is, not only the first. Makes hunts easier."),
         new Tweak("ring-loss-cap", "Lose at most 20 rings", "A hit costs at most 20 rings, the ones that scatter, so you can pick them all back up. Getting back to 100 rings that way gives no second extra life. The higher ring counts, scores and ranks it brings are saved as usual."),
+        new Tweak("rival-upgrades", "Rival upgrades", "Shadow gets the Bounce Bracelet and Magic Gloves once Sonic has them, Rouge breathes underwater once Knuckles has the Air Necklace, and Mech Tails gets the Protective Armor once Eggman has it. Your save is not changed."),
         new Tweak("skip-intro", "Skip intro", "Starts the game at the title screen, without the company logos and the opening cutscene. The opening still plays if you leave the title screen idle."),
         new Tweak("walker-cannon-fix", "Fix the Chao Walker cannon crash", "Stops the crash when a Chao Walker has the cannon upgrade, which only a cheat can give it. Changes nothing else."),
     };

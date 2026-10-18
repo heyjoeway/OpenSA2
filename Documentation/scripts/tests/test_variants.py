@@ -156,10 +156,16 @@ def test_a_shipped_spec_is_its_registered_tweak_and_a_fixture_none():
 
 
 def test_the_bits_are_counted_with_the_lists():
-    full = world(builtin=frozenset(f"p{i}" for i in range(30)))      # 30 + ret-early: 31 listed
+    full = world(builtin=frozenset(f"p{i}" for i in range(62)))      # 62 + ret-early: 63 listed
     assert V.plan_all(full, [tweak((F + 4, "b8", "c3"))])
-    with pytest.raises(V.Refused, match="the 31 tweaks of runtime/sa2_tweaks.h and 2 unregistered"):
+    with pytest.raises(V.Refused, match="the 63 tweaks of runtime/sa2_tweaks.h and 2 unregistered"):
         V.plan_all(full, [tweak((F + 4, "b8", "c3")), tweak((G, "b8", "c3"), name="u", functions=(G,))])
+
+
+def test_the_tools_limit_is_the_runtimes_mask():
+    h = (ROOT / "runtime" / "sa2_tweaks.h").read_text()
+    assert f"#define SA2_TWEAK_MAX {V.MAX_TWEAKS}\n" in h
+    assert V.MAX_TWEAKS == 64
 
 
 def test_a_spec_in_the_tweaks_folder_is_a_shipped_one(tmp_path, monkeypatch):
@@ -230,7 +236,9 @@ int main() {
 @pytest.fixture(scope="module")
 def lifted(tmp_path_factory):
     """The synthetic function lifted, folded, legalised and compiled, original and variant,
-    linked with sa2_tweaks.c, the generated wraps and the driver."""
+    linked with sa2_tweaks.c, the generated wraps and the driver. And `wide`, the same link with
+    sa2_tweaks.c built against a copy of runtime/sa2_tweaks.h whose list has WIDE tweaks, so the
+    fixture `t` takes bit WIDE, past a 32-bit mask."""
     import common as C
     if not ZIG.is_file() or not (C.REMILL_PREFIX / "bin" / "remill-lift-14").is_file():
         pytest.fail(f"the pinned zig or remill is not present ({ZIG}, {C.REMILL_PREFIX})")
@@ -276,14 +284,44 @@ def lifted(tmp_path_factory):
     none_o = objs_c.pop()
     assert subprocess.run(["nm", "-g", "--defined-only", str(none_o)], capture_output=True, text=True,
                           check=True).stdout.split()[-1:] == ["sa2_tweak_patches_linked"]
-    exe = d / "run"
-    done = subprocess.run([str(ZIG), "c++", "-target", "x86_64-linux-musl", "-O2", "-std=c++17", *inc,
-                           "-Wl,-wrap=sub_401000", str(d / "driver.cpp"), *map(str, objs_c),
-                           str(d / "obj" / "orig.o"), str(d / "obj" / "variant.o"), "-o", str(exe)],
+    wide = d / "wide-rt"                 # sa2_tweaks.c includes its own directory's header
+    wide.mkdir()
+    (wide / "sa2_tweaks.c").write_text((ROOT / "runtime" / "sa2_tweaks.c").read_text())
+    (wide / "sa2_tweaks.h").write_text(wide_header())
+    wide_o = d / "obj" / "sa2_tweaks.wide.c.o"
+    done = subprocess.run([str(ZIG), "cc", "-target", "x86_64-linux-musl", "-O2", "-Wall", "-Wextra", "-Werror",
+                           "-I", str(wide), "-c", str(wide / "sa2_tweaks.c"), "-o", str(wide_o)],
                           capture_output=True, text=True, env=env)
     assert done.returncode == 0, done.stderr
-    return {"exe": exe, "row": row, "markers": (markers0, markers1), "text": (text0, text1),
-            "variant": d / "obj" / "variant.o"}
+    exes = {}
+    for name, tweaks_o in (("run", objs_c[0]), ("wide", wide_o)):
+        exes[name] = d / name
+        done = subprocess.run([str(ZIG), "c++", "-target", "x86_64-linux-musl", "-O2", "-std=c++17", *inc,
+                               "-Wl,-wrap=sub_401000", str(d / "driver.cpp"), str(tweaks_o), *map(str, objs_c[1:]),
+                               str(d / "obj" / "orig.o"), str(d / "obj" / "variant.o"), "-o", str(exes[name])],
+                              capture_output=True, text=True, env=env)
+        assert done.returncode == 0, done.stderr
+    return {"exe": exes["run"], "wide": exes["wide"], "row": row, "markers": (markers0, markers1),
+            "text": (text0, text1), "variant": d / "obj" / "variant.o"}
+
+
+WIDE = 45                                # the list's tweaks in the wide build; `t` takes bit 45
+
+
+def wide_names() -> list[str]:
+    """The wide build's list: the checkout's, then wide-NN up to WIDE tweaks."""
+    names = [r["name"] for r in TS.rows(ROOT / "runtime")]
+    assert len(names) < WIDE, f"the checkout's list has {len(names)} tweaks, the wide build's {WIDE}"
+    return names + [f"wide-{i:02d}" for i in range(len(names), WIDE)]
+
+
+def wide_header() -> str:
+    h = (ROOT / "runtime" / "sa2_tweaks.h").read_text()
+    end = "    /* the end of the list */"
+    at = h.index(end, h.index("#define SA2_TWEAK_LIST(X)"))
+    pad = "".join(f'    X(SA2_TWEAK_WIDE_{n[5:]}, "{n}", "{n} on", "a padding tweak") \\\n'
+                  for n in wide_names() if n.startswith("wide-"))
+    return h[:at] + pad + h[at:]
 
 
 def run(exe: Path, **env: str) -> tuple[str, str]:
@@ -321,6 +359,28 @@ def test_a_variant_tweak_is_listed_after_the_lists_tweaks_and_ignored_in_a_repla
     out, err = run(lifted["exe"], SA2_TWEAKS="t", SA2_REPLAY_TICKS="/dev/null")
     assert out == "eax 1 esp 18004 ret 404242\n"
     assert err.startswith("sa2 tweaks: SA2_TWEAKS=t ignored in a replay")
+
+
+def test_a_fixture_past_bit_32_runs_its_variant_and_no_other_bit_does(lifted):
+    names = wide_names()
+    assert run(lifted["wide"]) == ("eax 1 esp 18004 ret 404242\n", "")
+    out, err = run(lifted["wide"], SA2_TWEAKS="t")
+    assert out == "eax 2 esp 18004 ret 404242\n"
+    assert err.splitlines() == ["sa2 tweaks: test tweak (SA2_TWEAKS=t)",
+                                "sa2 tweaks: test tweak: the patched lift of 0x00401000 runs"]
+    # Bit 45 cut to 32 bits is bit 13; bits 32 and 33 are the first a 32-bit mask lacks. None of
+    # them, nor every other tweak at once, runs the variant.
+    for on in (names[WIDE - 32], names[32], names[33], ",".join(names)):
+        out, err = run(lifted["wide"], SA2_TWEAKS=on)
+        assert out == "eax 1 esp 18004 ret 404242\n", on
+        assert "the patched lift" not in err and "none on" not in err, (on, err)
+    _, err = run(lifted["wide"], SA2_TWEAKS=f"{names[33]},{names[44]},t")
+    assert err.splitlines()[0] == (f"sa2 tweaks: {names[33]} on, {names[44]} on, test tweak "
+                                   f"(SA2_TWEAKS={names[33]},{names[44]},t)")
+    _, err = run(lifted["wide"], SA2_TWEAKS="?")
+    unlinked = {r["name"] for r in TS.patches(ROOT / "runtime")}
+    assert err.rstrip("\n").endswith(f"; the tweaks: {', '.join([n for n in names if n not in unlinked] + ['t'])})")
+    assert run(lifted["wide"], SA2_TWEAKS="t", SA2_REPLAY_TICKS="/dev/null")[0] == "eax 1 esp 18004 ret 404242\n"
 
 
 # ---------------------------------------------------------------- the tracked specs

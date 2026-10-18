@@ -42,7 +42,8 @@
  *      says of it when on, and <summary> its line in the release's README.txt
  *      (tools/s7/release_build.py player_readme). The lines go in name order, each ending in a
  *      backslash. A tweak's bit is its place in the list, never stored or sent, so where a line
- *      goes changes nothing outside the process; there is room for 32.
+ *      goes changes nothing outside the process; there is room for SA2_TWEAK_MAX (64) in all, fixtures
+ *      included.
  *   2. runtime/tweaks/<name>.c: its wraps, and a header comment that says what they do and the
  *      reading of the image it rests on. One line of that comment names the lifted functions the
  *      file wraps, for example
@@ -133,10 +134,15 @@ enum {
 #undef SA2_TWEAK_INDEX
     SA2_TWEAK_COUNT
 };
-_Static_assert(SA2_TWEAK_COUNT <= 32, "SA2_TWEAK_LIST holds more tweaks than a 32-bit mask has bits");
 
+/* The bits the tweak mask has: the list's tweaks and the fixtures a game links, together. */
+#define SA2_TWEAK_MAX 64
+_Static_assert(SA2_TWEAK_COUNT <= SA2_TWEAK_MAX, "SA2_TWEAK_LIST holds more tweaks than the 64-bit mask has bits");
+
+/* A tweak's bit, a uint64_t: past bit 31 the enum is wider than int (a GNU C extension, which the
+ * runtime's compilers, clang and zig cc, take). */
 enum {
-#define SA2_TWEAK_BIT(bit, name, report, summary) bit = 1u << bit##_INDEX,
+#define SA2_TWEAK_BIT(bit, name, report, summary) bit = 1ull << bit##_INDEX,
     SA2_TWEAK_LIST(SA2_TWEAK_BIT)
 #undef SA2_TWEAK_BIT
 };
@@ -147,10 +153,10 @@ enum {
     /* the end of the list */
 
 #define SA2_TWEAK_PATCH_OR(bit) | bit
-#define SA2_TWEAK_PATCHES (0u SA2_TWEAK_PATCH_LIST(SA2_TWEAK_PATCH_OR))
+#define SA2_TWEAK_PATCHES ((uint64_t)0 SA2_TWEAK_PATCH_LIST(SA2_TWEAK_PATCH_OR))
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */
-int sa2_tweak_on(unsigned bit);
+int sa2_tweak_on(uint64_t bit);
 
 /* A code-patch tweak a game links: its SA2_TWEAKS name and what the report line says of it. */
 typedef struct {
@@ -169,6 +175,6 @@ int sa2_tweak_patch_on(unsigned row);
  * links); `line` gets the run's one report line, or "" when the value is unset or empty. The reader
  * calls it once at the start; exposed for the unit test
  * (Documentation/scripts/tests/test_tweaks.py). */
-uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n);
+uint64_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n);
 
 #endif

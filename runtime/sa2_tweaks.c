@@ -8,8 +8,8 @@
  *
  * The tweaks a game has, by bit: SA2_TWEAK_LIST's, then each code-patch tweak the game links
  * (sa2_tweak_patches_linked, from the file tools/s8/variants/variants.py generates) that the list
- * does not name, which is a test fixture; at most 32 in all. A code-patch tweak in the list
- * (SA2_TWEAK_PATCH_LIST) that the game does not link is one it was built without.
+ * does not name, which is a test fixture; at most SA2_TWEAK_MAX (64) in all. A code-patch tweak in
+ * the list (SA2_TWEAK_PATCH_LIST) that the game does not link is one it was built without.
  *
  * The value is split at commas, each name trimmed of spaces and tabs and matched exactly (case
  * counts); a name given twice is one, an empty one is skipped, and one that is no tweak is named in
@@ -31,6 +31,17 @@ static const struct { const char *name, *report; } g_tweak_rows[SA2_TWEAK_COUNT]
 #undef TWEAK_ROW
 };
 
+/* The report line's lists hold every tweak's name and report, SA2_TWEAK_MAX of them, each with its
+ * ", " (list_add): a name is at most TWEAK_NAME_MAX characters and a report at most
+ * TWEAK_REPORT_MAX, held here for the list and by tools/s8/variants/variants.py for a spec. */
+#define TWEAK_NAME_MAX 40
+#define TWEAK_REPORT_MAX 60
+#define TWEAK_FITS(bit, name, report, summary) \
+    _Static_assert(sizeof name - 1 <= TWEAK_NAME_MAX, "the tweak name " name " is longer than TWEAK_NAME_MAX"); \
+    _Static_assert(sizeof report - 1 <= TWEAK_REPORT_MAX, "the report of " name " is longer than TWEAK_REPORT_MAX");
+SA2_TWEAK_LIST(TWEAK_FITS)
+#undef TWEAK_FITS
+
 /* The code-patch tweaks a game built without tools/s8/variants/variants.py's file links: none. */
 __attribute__((weak)) const sa2_tweak_patch *sa2_tweak_patches_linked(unsigned *count) {
     *count = 0;
@@ -39,9 +50,9 @@ __attribute__((weak)) const sa2_tweak_patch *sa2_tweak_patches_linked(unsigned *
 
 /* Every tweak this game has, by bit (the header comment); `has` is 0 for a code-patch tweak in the
  * list that the game does not link. g_patch_bit[i] is the bit of sa2_tweak_patches_linked's row i. */
-static struct { const char *name, *report; int has; } g_known[32];
+static struct { const char *name, *report; int has; } g_known[SA2_TWEAK_MAX];
 static unsigned g_nknown, g_npatch;
-static uint32_t g_patch_bit[32];
+static uint64_t g_patch_bit[SA2_TWEAK_MAX];
 
 static void known_read(void) {
     static int done;
@@ -49,27 +60,27 @@ static void known_read(void) {
     for (unsigned i = 0; i < SA2_TWEAK_COUNT; i++) {
         g_known[i].name = g_tweak_rows[i].name;
         g_known[i].report = g_tweak_rows[i].report;
-        g_known[i].has = !(SA2_TWEAK_PATCHES & (1u << i));
+        g_known[i].has = !(SA2_TWEAK_PATCHES & (1ull << i));
     }
     g_nknown = SA2_TWEAK_COUNT;
     unsigned n = 0;
     const sa2_tweak_patch *rows = sa2_tweak_patches_linked(&n);
-    g_npatch = n < 32 ? n : 32;
+    g_npatch = n < SA2_TWEAK_MAX ? n : SA2_TWEAK_MAX;
     for (unsigned r = 0; r < g_npatch; r++) {
         unsigned i = 0;
         while (i < g_nknown && strcmp(g_known[i].name, rows[r].name) != 0) i++;
         if (i == g_nknown) {
-            if (g_nknown == 32) continue;      /* no bit left: variants.py refuses such a build */
+            if (g_nknown == SA2_TWEAK_MAX) continue;   /* no bit left: variants.py refuses such a build */
             g_known[g_nknown].name = rows[r].name;
             g_known[g_nknown++].report = rows[r].report;
         }
         g_known[i].has = 1;
-        g_patch_bit[r] = 1u << i;
+        g_patch_bit[r] = 1ull << i;
     }
 }
 
 /* SA2_TWEAK_EXCLUSIVE's pairs, by bit and by row, then an empty row that ends the table. */
-static const struct { uint32_t a, b; unsigned ia, ib; } g_tweak_clashes[] = {
+static const struct { uint64_t a, b; unsigned ia, ib; } g_tweak_clashes[] = {
 #define TWEAK_PAIR(a, b) {a, b, a##_INDEX, b##_INDEX},
     SA2_TWEAK_EXCLUSIVE(TWEAK_PAIR)
 #undef TWEAK_PAIR
@@ -84,7 +95,7 @@ static size_t list_add(char *buf, size_t cap, size_t len, const char *quote, con
     return w < 0 ? cap : len + (size_t)w;
 }
 
-uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
+uint64_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
     line[0] = 0;
     if (!value || !*value) return 0;
     if (replay) {
@@ -93,9 +104,9 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
         return 0;
     }
     known_read();
-    uint32_t on = 0, without = 0;
-    /* Room for every tweak there can be (32): the names, the reports and the line's tail. */
-    char unknown[256] = "", absent[512] = "", active[1536] = "", known[1024] = "";
+    uint64_t on = 0, without = 0;
+    char unknown[1024] = "", absent[1024] = "";
+    char active[SA2_TWEAK_MAX * (TWEAK_REPORT_MAX + 2)] = "", known[SA2_TWEAK_MAX * (TWEAK_NAME_MAX + 2)] = "";
     size_t ul = 0, bl = 0, al = 0, kl = 0;
     for (const char *p = value; *p;) {
         const char *end = strchr(p, ',');
@@ -106,9 +117,9 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
         unsigned i = 0;
         while (i < g_nknown && !(strlen(g_known[i].name) == (size_t)(b - a) &&
                                  memcmp(g_known[i].name, a, (size_t)(b - a)) == 0)) i++;
-        if (i < g_nknown && g_known[i].has) on |= 1u << i;
-        else if (i < g_nknown && !(without & (1u << i))) {
-            without |= 1u << i;
+        if (i < g_nknown && g_known[i].has) on |= 1ull << i;
+        else if (i < g_nknown && !(without & (1ull << i))) {
+            without |= 1ull << i;
             bl = list_add(absent, sizeof absent, bl, "\"", a, (size_t)(b - a));
         } else if (i == g_nknown && a < b) ul = list_add(unknown, sizeof unknown, ul, "\"", a, (size_t)(b - a));
         p = *end ? end + 1 : end;
@@ -116,7 +127,7 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
     char clash[256] = "";
     size_t cl = 0;
     for (size_t k = 0; k + 1 < sizeof g_tweak_clashes / sizeof g_tweak_clashes[0]; k++) {
-        const uint32_t pair = g_tweak_clashes[k].a | g_tweak_clashes[k].b;
+        const uint64_t pair = g_tweak_clashes[k].a | g_tweak_clashes[k].b;
         if ((on & pair) != pair) continue;
         on &= ~pair;
         if (cl < sizeof clash) {
@@ -126,11 +137,11 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
         }
     }
     for (unsigned i = 0; i < g_nknown; i++) {
-        if (on & (1u << i))
+        if (on & (1ull << i))
             al = list_add(active, sizeof active, al, "", g_known[i].report, strlen(g_known[i].report));
         if (g_known[i].has) kl = list_add(known, sizeof known, kl, "", g_known[i].name, strlen(g_known[i].name));
     }
-    char why[2048] = "";
+    char why[sizeof clash + sizeof absent + sizeof unknown + sizeof known + 160] = "";
     snprintf(why, sizeof why, "%s", clash);
     if (absent[0])
         snprintf(why + strlen(why), sizeof why - strlen(why),
@@ -142,9 +153,9 @@ uint32_t sa2_tweaks_parse(const char *value, int replay, char *line, size_t n) {
     return on;
 }
 
-static uint32_t g_tweaks;           /* the active tweaks, read once at the start */
+static uint64_t g_tweaks;           /* the active tweaks, read once at the start */
 
-int sa2_tweak_on(unsigned bit) {
+int sa2_tweak_on(uint64_t bit) {
     return (g_tweaks & bit) != 0;
 }
 
@@ -153,7 +164,7 @@ int sa2_tweak_patch_on(unsigned row) {
 }
 
 __attribute__((constructor)) static void sa2_tweaks_read(void) {
-    char line[4096];
+    char line[16384];
     const int replay = getenv("SA2_REPLAY_TICKS") != NULL || getenv("SA2_REPLAY_WORDS") != NULL;
     g_tweaks = sa2_tweaks_parse(getenv("SA2_TWEAKS"), replay, line, sizeof line);
     if (line[0]) fprintf(stderr, "%s\n", line);

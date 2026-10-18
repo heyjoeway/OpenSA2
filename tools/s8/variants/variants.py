@@ -71,7 +71,7 @@ EDGE_ROW = re.compile(r"\{0x([0-9a-f]+)u, 0x([0-9a-f]+)u, (\d+), (\d+),")
 DECLARE_SUB = re.compile(r"^declare[^\n]*@(sub_[0-9a-f]+)\(", re.M)
 NAME = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 REPORT = re.compile(r"[ -!#-\[\]-~]{1,60}")            # printable ASCII, no quote or backslash
-MAX_TWEAKS = 32                                       # runtime/sa2_tweaks.c: one bit per tweak
+MAX_TWEAKS = 64                                       # runtime/sa2_tweaks.h SA2_TWEAK_MAX: one bit per tweak
 
 
 @functools.cache
@@ -431,7 +431,8 @@ def plan_all(w: World, tweaks: list[Tweak]) -> list[dict]:
     extra = sum(1 for t in tweaks if t.name not in w.registered)
     if listed + extra > MAX_TWEAKS:
         raise Refused(f"the {listed} tweaks of runtime/sa2_tweaks.h and {extra} unregistered ones (test "
-                      f"fixtures) are more than the {MAX_TWEAKS} runtime/sa2_tweaks.c has bits for")
+                      f"fixtures) are more than the {MAX_TWEAKS} bits of the tweak mask "
+                      f"(runtime/sa2_tweaks.h SA2_TWEAK_MAX)")
     names = [t.name for t in tweaks]
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:

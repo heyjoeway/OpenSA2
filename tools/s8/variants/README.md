@@ -123,6 +123,9 @@ refuse a wrap they already have.
 
 ## Limits
 
+- At most 64 tweaks in a game, the `SA2_TWEAK_LIST` tweaks and the linked fixtures together: the
+  tweak mask has one bit each (`runtime/sa2_tweaks.h` `SA2_TWEAK_MAX`, `MAX_TWEAKS` here). A build
+  of more is refused.
 - One tweak per module. Two tweaks that patch the same module would need a variant holding both,
   which is not built.
 - A patch whose patched code leaves its module by an edge the runtime would not dispatch is refused.

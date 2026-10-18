@@ -167,6 +167,7 @@
 #define SA2_TWEAK_LIST(X) \
     X(SA2_TWEAK_2P_LAYOUT_IN_1P, "2p-layout-in-1p", "2p layout", "one-player stages load the leftover two-player object layout where it fits (not Hard Mode, Pumpkin Hill or Iron Gate); most upgrades and Chao keys are left out") \
     X(SA2_TWEAK_ALL_EVENTS_SKIPPABLE, "all-events-skippable", "every event skippable", "Start skips every cutscene, the Hero story ending and the Last story finale included") \
+    X(SA2_TWEAK_ALWAYS_RECAP, "always-recap", "recap before stages", "the story-so-far recap before every story stage that has one, not only on a resume") \
     X(SA2_TWEAK_ANALOG_FIX, "analog-fix", "analog full throw", "a gamepad stick gives full speed from about two thirds of a push, not before half, so half a push walks") \
     X(SA2_TWEAK_CHAO_KEY_ALWAYS, "chao-key-always", "chao key always", "a Chao World visit after every stage cleared in one-player play, as with the Chao Key found") \
     X(SA2_TWEAK_CHAO_STAT_X5, "chao-stat-x5", "chao stats x5", "Chao gain up to five times the stat points from Chaos Drives, small animals and fruit, at most 100 a stat for each animal or drive so no stat loses points (kept in the Chao save)") \

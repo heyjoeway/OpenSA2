@@ -215,6 +215,7 @@ enum {
     X(SA2_TWEAK_HOLD_TOGGLE, "hold-toggle", "B toggles", "B held by one tap and let go by the next (a mech's lock-on, the spin-dash charge)", "player") \
     X(SA2_TWEAK_MONO_AUDIO, "mono-audio", "mono audio", "the same sound from both speakers: left and right mixed to mono", "player") \
     X(SA2_TWEAK_PAUSE_UNFOCUSED, "pause-unfocused", "held while unfocused", "the game and its sound pause while the player's window is out of focus (in a paced session, the default)", "player") \
+    X(SA2_TWEAK_SLOW_MODE, "slow-mode", "game at 0.75 speed", "the game at three quarters of its speed, its sound slowed with it (and lower in pitch)", "player") \
     /* the end of the list */
 
 /* Whether the tweak with this bit is on in this run: SA2_TWEAKS names it and no replay is set. */

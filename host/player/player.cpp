@@ -344,6 +344,7 @@
 #include "tweaks/hold-toggle.h"
 #include "tweaks/mono-audio.h"
 #include "tweaks/pause-unfocused.h"
+#include "tweaks/slow-mode.h"
 #include "sa2_host_expectations.h"
 
 #ifdef _WIN32
@@ -5108,6 +5109,7 @@ void Player::finish_audio() {
     }
     audio_tap_.feeding.store(false, std::memory_order_relaxed);
     if (audio_stream_) {
+        sa2tw::slow_mode::finish(audio_stream_);
         audio_queued_at_end_ = SDL_GetAudioStreamQueued(audio_stream_);
         const double start = now_s();
         const double limit = double(std::max(audio_queued_at_end_, 0)) / (Sa2Mixer::kRate * 8.0) + 1.0;
@@ -5328,6 +5330,7 @@ int Player::run() {
         if (!validate_host_files() || !setup_sdl()) return finish();
     }
     if (o_.audio && sdl_up_) setup_audio();
+    sa2tw::slow_mode::start(pace_, audio_stream_, o_.speed, rd_.live() ? kAudioLeadMs / 1000.0 : -1.0);
     phase_ = "replay";
     Sa2Record r;
     for (;;) {

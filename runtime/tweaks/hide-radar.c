@@ -50,8 +50,9 @@
  * radar; and the beep is not that byte's, so the display's own switches cannot silence it.
  *
  * Risks: a hunt is harder with it on, so a time made with it is not comparable with one made
- * without. A radar-all-pieces run with this on shows nothing of that tweak: its wrap (0x00739FE0)
- * is reached only from this display. If a build moved the beep's calls, the return addresses would
+ * without. A radar-all-pieces run with this on shows nothing of that tweak: its wrap of 0x00739FE0
+ * is reached only from this display, and its wrap of the distance (0x0077FBD0) passes every call
+ * through while this tweak is on. If a build moved the beep's calls, the return addresses would
  * no longer match and the beep would play: the run names each site the first time it is silenced,
  * so a missing line shows a moved site. When the guest stack does not read, the call goes through
  * (the radar drawn, the sound played) and the run says so once.

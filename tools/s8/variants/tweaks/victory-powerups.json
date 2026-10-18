@@ -1,0 +1,21 @@
+{
+ "name": "victory-powerups",
+ "report": "powerups kept on the victory screen",
+ "functions": [
+  "0x0043eca0"
+ ],
+ "patches": [
+  {
+   "va": "0x0043ed8a",
+   "old": "66214810",
+   "new": "90909090"
+  },
+  {
+   "va": "0x0043eda5",
+   "old": "66215010",
+   "new": "90909090"
+  }
+ ],
+ "source": "SA2 Mod Loader's code list (Codes.lst), Patch \"Keep Powerups during Victory Screen\" by Sora (writenop 0043ED8A 4; writenop 0043EDA5 4)",
+ "why": "0x0043ECA0 starts a stage's results, with the winning player's index in ESI and the other player's (ESI == 0) in EBP. For each of the two it loads the player's CharObj2Base from the array at 0x01DE9600 (the Mod Loader's MainCharObj2) and, when the pointer is not null, does `and word [obj+0x10], 0x7FFC` (0x0043ED8A, 0x0043EDA5): Powerups at +0x10 loses Invincibility (0x8000), Barrier (0x1) and MagneticBarrier (0x2). Four NOPs in place of each store keep those bits, so a barrier or invincibility stays visible on the victory pose instead of vanishing. Nothing else changes: the masks loaded into ECX and EDX before each store are overwritten before any read (CX reloaded at 0x0043ED8E and 0x0043EDA9, EDX at 0x0043EDD9), and the flags each store set are redefined by the next test or cmp. Scores, saves and the rest of the function's control flow are untouched."
+}

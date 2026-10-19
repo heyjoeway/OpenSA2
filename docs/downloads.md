@@ -50,6 +50,8 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 
 The **Saves** card in **Game settings** manages the game's saves. **Import saves** takes save files, such as `SONIC2B__S01` for the story or `SONIC2B__ALF` for Chao World, or a ZIP of them. It replaces only the saves it brings, and it keeps a backup of your current saves first. The app keeps the last 10 backups. **Export saves** writes the saves the game uses to a ZIP in a place you choose. **Restore a backup** puts the saves back to one of the backups. The app refuses a file whose name or size is not a save's. It does not check a Chao World save's checksum, so import only saves you trust. The game reads the new saves the next time it starts.
 
+The **Debug** section at the end of **Game settings** has **Debug Export**. **Export the latest session** makes one ZIP of the last time you played and opens the share sheet, so you can attach it to a bug report or send it to your computer. **Export another session** picks one of the earlier sessions the app keeps. See [Export a session for a bug report](#export-a-session-for-a-bug-report) for what the ZIP holds.
+
 ### Report a crash on Android
 
 If the game stops, OpenSA2 returns to its setup screen and says so. Tap **Report on GitHub**. The app copies a crash report and opens the bug-report form with your device filled in. Paste the report into the **Crash report** box, then fill in the steps and what you expected. **Copy report** copies the whole report, **Copy summary** copies a shorter version that fits in a forum comment, and **Share report** sends it to another app. **Share OpenSA2** at the bottom of the screen sends a friend the download link. If the installer refuses your game files, the same buttons copy its output.
@@ -69,6 +71,20 @@ sudo apt install './OpenSA2-v0.1.0-alpha.5-linux-x86_64.deb'
 Open OpenSA2 from your application menu, or run `opensa2`. The first start finds a Steam copy or offers a game-folder picker. A controller is optional.
 
 Saves, settings, and logs use the port's per-user `sa2recomp` directories under your XDG data and configuration locations. The package does not write into your Steam installation.
+
+## Export a session for a bug report
+
+Each time you play, OpenSA2 keeps a session folder: the game's logs, your keyboard and controller input, the settings the game ran with, and copies of your saves and configuration from before and after the session. A Debug Export puts one session into a ZIP that a developer can read and replay.
+
+On Android, use **Debug Export** in the Debug section of **Game settings**. On Linux, run:
+
+```bash
+opensa2 --debug-export
+```
+
+On Windows, run `bin\sa2recomp.exe --debug-export` from the extracted folder (tested on Linux and Android only). With no other argument the newest session is exported to `exports/sa2-debug-<session>.zip` in the port's data folder, and the command prints the ZIP's path. Name another session folder (or give its path) to export it instead, and add `--out FILE.zip` to choose where the ZIP goes.
+
+The ZIP holds a `MANIFEST.txt` that lists every file with its size and purpose. Your home folder, game folder and data folder are written as `~`, `<game>` and `<data>` in its text files. It holds your saves and your game settings, but no game files, no pictures of the game, and no account details. Read the manifest before you share the ZIP.
 
 ## Tweaks
 

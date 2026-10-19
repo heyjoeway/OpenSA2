@@ -42,6 +42,10 @@ import java.util.Map;
  *
  * The Saves card imports, exports, backs up and restores the game's saves (SaveTools). It changes
  * no setting, and "Reset all" leaves the saves alone.
+ *
+ * The Debug section is last: Debug Export zips the latest play session, or one picked from the
+ * sessions the app keeps, with every log and the start and end saves (DebugExport), and opens the
+ * share sheet with it. Later debug rows go in debugRows.
  */
 public class Sa2SettingsActivity extends Activity {
     private static final int TEXT = Color.rgb(0xE8, 0xED, 0xF7), NOTE = Color.rgb(0x8A, 0x97, 0xB2);
@@ -57,6 +61,8 @@ public class Sa2SettingsActivity extends Activity {
     private SeekBar mSize, mOpacity, mPlace;
     private boolean mUpdating;
     private Button[] mFrameskip;
+    private TextView mDebugNote;
+    private Button mExportLatest, mExportPick;
 
     private static final String[] ORIENTATIONS = {GameSettings.LANDSCAPE, GameSettings.PORTRAIT, GameSettings.AUTO};
 
@@ -77,6 +83,7 @@ public class Sa2SettingsActivity extends Activity {
         // The layout editor saves its places itself.
         mS = GameSettings.load(this);
         update();
+        updateDebug();
     }
 
     private int dp(float v) {
@@ -335,7 +342,6 @@ public class Sa2SettingsActivity extends Activity {
                 })
                 .setNegativeButton("Cancel", null)
                 .show());
-
         // Saves: the game's own saves, imported, exported and restored (SaveTools).
         LinearLayout sv = card(col, "Saves");
         action(sv, "Import saves", v -> pickSaves());
@@ -345,6 +351,10 @@ public class Sa2SettingsActivity extends Activity {
                 + "or a ZIP of them. It replaces only the saves it brings, and backs up the current ones first (the "
                 + "last " + SaveTools.KEEP + " are kept). Export writes the saves the game sees to a ZIP you choose. "
                 + "Changes apply from the next session.");
+
+        // Debug, last
+        LinearLayout g = card(col, "Debug");
+        debugRows(g);
 
         Button reset = Ui.button(this, "Reset all settings", v -> new AlertDialog.Builder(this)
                 .setMessage("Put every game setting back to its default?")
@@ -653,5 +663,61 @@ public class Sa2SettingsActivity extends Activity {
                         }, "save-restore").start())
                         .setNegativeButton("Cancel", null).show())
                 .setNegativeButton("Cancel", null).show();
+    }
+
+    // ------------------------------------------------------------ debug
+
+    /** The Debug section's rows. */
+    private void debugRows(LinearLayout g) {
+        label(g, "Debug Export", true);
+        mDebugNote = note(g, "");
+        mExportLatest = action(g, "Export the latest session", v -> export(null));
+        mExportPick = action(g, "Export another session", v -> pickSession());
+        note(g, "Makes one ZIP of a play session's logs, its saves before and after, and what is needed to "
+                + "replay it, and shares it. It holds no pictures of the game.");
+    }
+
+    private void updateDebug() {
+        if (mDebugNote == null) return;
+        List<File> all = DebugExport.sessions(this);
+        mDebugNote.setText(all.isEmpty() ? "No session yet: play once first."
+                : "Latest session: " + all.get(0).getName() + " (" + all.size() + " kept)");
+        mExportLatest.setEnabled(!all.isEmpty());
+        mExportPick.setEnabled(all.size() > 1);
+    }
+
+    private void pickSession() {
+        List<File> all = DebugExport.sessions(this);
+        String[] names = new String[all.size()];
+        for (int i = 0; i < names.length; i++) names[i] = all.get(i).getName() + (i == 0 ? " (latest)" : "");
+        new AlertDialog.Builder(this)
+                .setTitle("Export which session?")
+                .setItems(names, (dlg, which) -> export(all.get(which)))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** The ZIP on a worker thread (it reads every log and logcat), then the share sheet. */
+    private void export(File session) {
+        mExportLatest.setEnabled(false);
+        mExportPick.setEnabled(false);
+        mDebugNote.setText("Exporting...");
+        new Thread(() -> {
+            DebugExport.Result r = DebugExport.export(this, session);
+            runOnUiThread(() -> {
+                updateDebug();
+                if (isFinishing() || isDestroyed()) return;
+                if (r.error != null) {
+                    Toast.makeText(this, r.error, Toast.LENGTH_LONG).show();
+                    return;
+                }
+                mDebugNote.setText("Exported " + r.session + ": " + r.entries + " files");
+                try {
+                    startActivity(DebugExport.shareIntent(this, r.zip));
+                } catch (android.content.ActivityNotFoundException e) {
+                    Toast.makeText(this, "No app can take the export.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "debug-export").start();
     }
 }

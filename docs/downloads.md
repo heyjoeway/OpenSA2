@@ -46,7 +46,9 @@ Tap **Game settings** on the setup screen. Changes apply the next time the game 
 - **Controller** changes the game button that each controller button sends. Buttons are named by position: the bottom face button is A, as on an Xbox controller.
 - **Tweaks** are optional changes to the game, each off by default. Turn on **Remove cutscene black bars** to remove the black bars that in-engine cutscenes draw at the sides of a wide picture. Movies keep their bars. See [Tweaks](#tweaks) for what to expect. **Turn every tweak off** turns all of them off at once.
 
-**Reset all settings** restores the defaults.
+**Reset all settings** restores the defaults. It does not change your saves.
+
+The **Saves** card in **Game settings** manages the game's saves. **Import saves** takes save files, such as `SONIC2B__S01` for the story or `SONIC2B__ALF` for Chao World, or a ZIP of them. It replaces only the saves it brings, and it keeps a backup of your current saves first. The app keeps the last 10 backups. **Export saves** writes the saves the game uses to a ZIP in a place you choose. **Restore a backup** puts the saves back to one of the backups. The app refuses a file whose name or size is not a save's. It does not check a Chao World save's checksum, so import only saves you trust. The game reads the new saves the next time it starts.
 
 ### Report a crash on Android
 

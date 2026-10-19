@@ -20,15 +20,15 @@ This is an experimental prerelease with incomplete stage coverage. On Android, t
 
 From v0.1.0-alpha.4, OpenSA2 has 53 optional tweaks: fixes, assists, and changes to how the game looks, sounds, and plays, many based on popular community mods and Mod Loader codes. Every tweak is off until you turn it on, and replays never use them. On Android, turn them on in the **Tweaks** card in **Game settings**. On Windows and Linux, list them in the release's `share/game.env`, for example `SA2_TWEAKS=skip-intro,no-loading-tips`.
 
-- **Gameplay and assists:** Infinite lives (`infinite-lives`), Show all stages in Stage Select (`stage-select-all`)*, Practice a stage (`practice-stage`), Faster spin dash (`spin-dash-fast`)*, Metal Sonic physics (`physics-preset`), No Omochao hints (`quiet-omochao`), Start with assists (`start-assists`), Forgiving restarts (`forgiving-restarts`), Radar tracks all pieces (`radar-all-pieces`), Lose at most 20 rings (`ring-loss-cap`), Hard Mode layouts (`force-hard-layout`), Two-player stage layouts (`2p-layout-in-1p`), Rank Mission 4 by time (`m4-time-rank`), Rival upgrades (`rival-upgrades`), Gold Beetles stay (`gold-beetle-stays`), Keep powerups on the victory screen (`victory-powerups`)*, No extra life at 100 rings (`no-lives-bonus`), Hide the emerald radar (`hide-radar`), No special attacks in 2P (`no-2p-specials`), Slow mode (`slow-mode`).
-- **Story and presentation:** Skip intro (`skip-intro`), Skip any cutscene (`all-events-skippable`), Remove cutscene black bars (`no-event-bars`), Story recap before every stage (`always-recap`), Faster stage loading (`fast-stage-load`), Skip loading tips (`no-loading-tips`), Wider field of view (`fov`), Double draw distance (`draw-distance`), Sharper textures (`tex-filter`), Reduce camera shake (`reduce-shake`), Hide the HUD (`hide-hud`), Frame-time overlay (`frametime-overlay`), Hide upgrade models (`hide-upgrade-models`), Vsync (`vsync`), Black bars on every cutscene (`event-bars-all`).
-- **Controls:** Analog stick fix (`analog-fix`), Round stick deadzone (`deadzone`), Invert camera (`camera-invert`), Tap to hold B (`hold-toggle`).
-- **Audio:** Turn off music (`no-music`)*, Mute character voices (`no-voices`)*, No power-up music (`no-powerup-music`), Mono audio (`mono-audio`), Swap left/right audio (`swap-audio`).
-- **Chao:** Chao stats x5 (`chao-stat-x5`), Chao Key always held (`chao-key-always`), Rings over time in Chao World (`garden-ring-trickle`), Chaos Drives become animals (`drives-to-minimals`).
-- **Fixes:** Fix Metal Sonic bounce crash (`metal-bounce-fix`), Fix the Chao Walker cannon crash (`walker-cannon-fix`).
-- **Desktop and window:** Pause when unfocused (`pause-unfocused`), plus two for Windows and Linux only: a speedrun timer feed for LiveSplit (`speedrun-timer`) and a vanilla profile that turns every other tweak off (`vanilla-profile`).
+- **Gameplay and assists:** Infinite lives, Show all stages in Stage Select\*, Practice a stage, Faster spin dash\*, Metal Sonic physics, No Omochao hints, Start with assists, Forgiving restarts, Radar tracks all pieces, Lose at most 20 rings, Hard Mode layouts, Two-player stage layouts, Rank Mission 4 by time, Rival upgrades, Gold Beetles stay, Keep powerups on the victory screen\*, No extra life at 100 rings, Hide the emerald radar, No special attacks in 2P, Slow mode.
+- **Story and presentation:** Skip intro, Skip any cutscene, Remove cutscene black bars, Story recap before every stage, Faster stage loading, Skip loading tips, Wider field of view, Double draw distance, Sharper textures, Reduce camera shake, Hide the HUD, Frame-time overlay, Hide upgrade models, Vsync, Black bars on every cutscene.
+- **Controls:** Analog stick fix, Round stick deadzone, Invert camera, Tap to hold B.
+- **Audio:** Turn off music\*, Mute character voices\*, No power-up music, Mono audio, Swap left/right audio.
+- **Chao:** Chao stats x5, Chao Key always held, Rings over time in Chao World, Chaos Drives become animals.
+- **Fixes:** Fix Metal Sonic bounce crash, Fix the Chao Walker cannon crash.
+- **Desktop and window:** Pause when unfocused, plus two for Windows and Linux only: a speedrun timer feed for LiveSplit and a vanilla profile that turns every other tweak off.
 
-Tweaks marked * patch the game's code and are available on Linux and Android only for now. Some tweaks change what your save keeps; the [Tweaks section of the setup guide](docs/downloads.md#tweaks) describes each one and says which.
+Tweaks marked \* patch the game's code and are available on Linux and Android only for now. The [Tweaks section of the setup guide](docs/downloads.md#tweaks) describes each one, gives the name to use in `game.env`, and says which ones change your save.
 
 ## Screenshots
 

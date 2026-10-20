@@ -9,7 +9,7 @@ tweaks turned on, in GameSettings.TWEAKS's order, otherwise. TWEAKS is the one p
 named on Android: the Tweaks card makes a switch of each line (test_tweaks.py holds the lines to
 runtime/sa2_tweaks.h's list), shown under GameSettings.TWEAK_GROUPS's headings with each group
 in the table's own order (GameSettings.tweakGroups), while SA2_TWEAKS and the preferences keep the names. A small Java driver runs GameSettings here against android.jar; the
-settings screen (Sa2SettingsActivity, with Ui and the layout editor it opens) is compiled beside
+settings screen (Sa2SettingsActivity, with Ui, the layout editor it opens and SaveTools) is compiled beside
 it, so a card that no longer builds fails here, not in the APK's build.
 
 Needs the pinned JDK (tools/pins.json java) and the Android SDK's android.jar; it is skipped
@@ -79,7 +79,7 @@ def java(tmp_path_factory):
     src = d / "java/com/sa2recomp/app"
     src.mkdir(parents=True)
     (src / "SettingsDriver.java").write_text(DRIVER)
-    for name in ("GameSettings", "Sa2SettingsActivity", "Ui", "Sa2LayoutActivity"):
+    for name in ("GameSettings", "Sa2SettingsActivity", "Ui", "Sa2LayoutActivity", "SaveTools"):
         shutil.copy(APP / f"{name}.java", src)
     done = subprocess.run([str(JDK / "bin/javac"), "--release", "11", "-nowarn", "-classpath", str(ANDROID_JAR),
                            "-d", str(d / "classes"), *map(str, src.glob("*.java"))], capture_output=True, text=True)

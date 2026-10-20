@@ -209,8 +209,15 @@ def read_pick(paths: list[Path]) -> tuple[dict[str, bytes], list[str]]:
 
 
 def backup(dirpath: Path, root: Path) -> Path:
-    b = root / dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S-%f")[:-3]
-    b.mkdir(parents=True)
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S-%f")[:-3]
+    root.mkdir(parents=True, exist_ok=True)
+    b, n = root / stamp, 1
+    while True:   # two backups in one millisecond get distinct folders, never one shared
+        try:
+            b.mkdir()
+            break
+        except FileExistsError:
+            b, n = root / f"{stamp}-{n}", n + 1
     for f in dirpath.iterdir():
         if f.is_file() and kind(f.name):
             shutil.copy2(f, b / f.name)
@@ -299,10 +306,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{d.name}\t{', '.join(sorted(f.name for f in d.iterdir())) or '(no saves)'}")
         elif a.cmd == "restore":
             src = a.backups / a.backup
+            if Path(a.backup).name != a.backup or a.backup in ("", ".", ".."):
+                raise Refused(f"{a.backup} is not a backup's name (see `backups`)")
             if not src.is_dir():
                 raise Refused(f"no backup {a.backup} (see `backups`)")
             # Read first: the backup made next can prune `src` when it is the oldest of KEEP.
-            restored = {f.name: f.read_bytes() for f in src.iterdir() if f.is_file()}
+            restored = {f.name: f.read_bytes() for f in src.iterdir() if f.is_file() and not not_a_save(f.name, f.stat().st_size)}
             b = backup(overlay, a.backups)
             for f in list(overlay.iterdir()):
                 if f.is_file() and kind(f.name):

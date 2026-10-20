@@ -171,7 +171,7 @@ final class SaveTools {
         // Read first: the backup made next can prune `from` when it is the oldest of KEEP.
         Map<String, byte[]> restored = new TreeMap<>();
         File[] fs = from.listFiles(File::isFile);
-        if (fs != null) for (File f : fs) restored.put(f.getName(), readAll(new java.io.FileInputStream(f)));
+        if (fs != null) for (File f : fs) if (notASave(f.getName(), f.length()) == null) restored.put(f.getName(), readAll(new java.io.FileInputStream(f)));
         File backup = backup(c, dir);
         File[] now = dir.listFiles(File::isFile);
         if (now != null) for (File f : now) if (isSaveName(f.getName())) f.delete();
@@ -211,8 +211,15 @@ final class SaveTools {
     private static File backupRoot(Context c) { return new File(c.getFilesDir(), "save-backups"); }
 
     private static File backup(Context c, File dir) throws Exception {
-        File root = backupRoot(c), b = new File(root, stamp());
-        if (!b.mkdirs() && !b.isDirectory()) throw new Exception("Could not make backup " + b.getName());
+        File root = backupRoot(c);
+        if (!root.isDirectory() && !root.mkdirs()) throw new Exception("Could not make " + root.getName());
+        String stamp = stamp();
+        File b = new File(root, stamp);
+        // Two backups in one millisecond get distinct folders: mkdir fails on an existing one.
+        for (int n = 1; !b.mkdir(); n++) {
+            if (n > 1000) throw new Exception("Could not make backup " + b.getName());
+            b = new File(root, stamp + "-" + n);
+        }
         File[] fs = dir.listFiles(File::isFile);
         if (fs != null) for (File f : fs)
             if (isSaveName(f.getName()))
@@ -256,7 +263,7 @@ final class SaveTools {
             byte[] b = new byte[65536];
             for (int n; (n = i.read(b)) > 0; ) {
                 o.write(b, 0, n);
-                if (o.size() > 512 << 20) throw new Exception("larger than 512 MB");
+                if (o.size() > 64 << 20) throw new Exception("larger than 64 MB");
             }
             return o.toByteArray();
         }

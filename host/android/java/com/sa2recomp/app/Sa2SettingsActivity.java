@@ -22,7 +22,9 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,6 +39,9 @@ import java.util.Map;
  * switch for each line of GameSettings.TWEAKS, under GameSettings.TWEAK_GROUPS's headings). Each
  * change is saved at once (GameSettings) and applies from the next session.
  * Every setting starts at today's behaviour, and "Reset all" puts them back.
+ *
+ * The Saves card imports, exports, backs up and restores the game's saves (SaveTools). It changes
+ * no setting, and "Reset all" leaves the saves alone.
  */
 public class Sa2SettingsActivity extends Activity {
     private static final int TEXT = Color.rgb(0xE8, 0xED, 0xF7), NOTE = Color.rgb(0x8A, 0x97, 0xB2);
@@ -331,6 +336,16 @@ public class Sa2SettingsActivity extends Activity {
                 .setNegativeButton("Cancel", null)
                 .show());
 
+        // Saves: the game's own saves, imported, exported and restored (SaveTools).
+        LinearLayout sv = card(col, "Saves");
+        action(sv, "Import saves", v -> pickSaves());
+        action(sv, "Export saves", v -> pickExport());
+        action(sv, "Restore a backup", v -> pickBackup());
+        note(sv, "Import takes save files (SONIC2B__S01 and the like for the story, SONIC2B__ALF for Chao World) "
+                + "or a ZIP of them. It replaces only the saves it brings, and backs up the current ones first (the "
+                + "last " + SaveTools.KEEP + " are kept). Export writes the saves the game sees to a ZIP you choose. "
+                + "Changes apply from the next session.");
+
         Button reset = Ui.button(this, "Reset all settings", v -> new AlertDialog.Builder(this)
                 .setMessage("Put every game setting back to its default?")
                 .setPositiveButton("Reset", (dlg, w) -> {
@@ -520,5 +535,123 @@ public class Sa2SettingsActivity extends Activity {
                 })
                 .setNegativeButton("Back", (dlg, w) -> pickMap(touch, -1))
                 .show();
+    }
+
+    // ------------------------------------------------------------ saves
+
+    private static final int PICK_SAVES = 41, PICK_EXPORT = 42;
+
+    /** The system's document picker: one or more save files, or one ZIP. */
+    private void pickSaves() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(i, PICK_SAVES);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No app can pick files.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** The system's "create document" picker: where the saves' ZIP goes. */
+    private void pickExport() {
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/zip").putExtra(Intent.EXTRA_TITLE, SaveTools.exportName());
+        try {
+            startActivityForResult(i, PICK_EXPORT);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No app can save files.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (result != RESULT_OK || data == null) return;
+        if (request == PICK_EXPORT && data.getData() != null) {
+            exportSaves(data.getData());
+            return;
+        }
+        if (request != PICK_SAVES) return;
+        List<android.net.Uri> uris = new ArrayList<>();
+        if (data.getClipData() != null)
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
+        else if (data.getData() != null) uris.add(data.getData());
+        if (uris.isEmpty()) return;
+        new Thread(() -> {
+            SaveTools.Picked p = SaveTools.read(this, uris);
+            runOnUiThread(() -> confirmImport(p));
+        }, "save-import-read").start();
+    }
+
+    /** Shows what the pick holds and imports on OK. */
+    private void confirmImport(SaveTools.Picked p) {
+        if (isFinishing() || isDestroyed()) return;
+        if (p.error != null) {
+            new AlertDialog.Builder(this).setTitle("Nothing imported").setMessage(p.error)
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        String msg = "Import " + names(p.saves) + "?";
+        if (!p.refused.isEmpty()) msg += "\n\nSkipped:\n" + String.join("\n", p.refused);
+        new AlertDialog.Builder(this).setTitle("Import saves").setMessage(msg)
+                .setPositiveButton("Import", (dlg, w) -> doImport(p.saves))
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private static String names(List<SaveTools.Found> fs) {
+        List<String> n = new ArrayList<>();
+        for (SaveTools.Found f : fs) n.add(f.name);
+        return String.join(", ", n);
+    }
+
+    private void doImport(List<SaveTools.Found> saves) {
+        new Thread(() -> {
+            String msg;
+            try {
+                msg = SaveTools.importSaves(this, saves);
+            } catch (Exception e) {
+                msg = "Import failed: " + e.getMessage();
+            }
+            final String m = msg;
+            runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_LONG).show());
+        }, "save-import").start();
+    }
+
+    private void exportSaves(android.net.Uri out) {
+        new Thread(() -> {
+            String msg;
+            try {
+                msg = "Exported " + String.join(", ", SaveTools.exportSaves(this, out)) + ".";
+            } catch (Exception e) {
+                msg = "Export failed: " + e.getMessage();
+            }
+            final String m = msg;
+            runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_LONG).show());
+        }, "save-export").start();
+    }
+
+    private void pickBackup() {
+        List<File> all = SaveTools.backups(this);
+        if (all.isEmpty()) { Toast.makeText(this, "No backups yet: one is made at every import.", Toast.LENGTH_LONG).show(); return; }
+        String[] rows = new String[all.size()];
+        for (int i = 0; i < rows.length; i++) {
+            File[] fs = all.get(i).listFiles();
+            rows[i] = all.get(i).getName() + " (" + (fs == null ? 0 : fs.length) + " saves)";
+        }
+        new AlertDialog.Builder(this).setTitle("Restore which backup?")
+                .setItems(rows, (dlg, which) -> new AlertDialog.Builder(this).setTitle("Restore " + all.get(which).getName())
+                        .setMessage("The saves will become exactly this backup's. The current saves are backed up first.")
+                        .setPositiveButton("Restore", (d2, w2) -> new Thread(() -> {
+                            String msg;
+                            try {
+                                msg = SaveTools.restore(this, all.get(which));
+                            } catch (Exception e) {
+                                msg = "Restore failed: " + e.getMessage();
+                            }
+                            final String m = msg;
+                            runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_LONG).show());
+                        }, "save-restore").start())
+                        .setNegativeButton("Cancel", null).show())
+                .setNegativeButton("Cancel", null).show();
     }
 }

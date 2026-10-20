@@ -348,7 +348,7 @@ public class Sa2SettingsActivity extends Activity {
         action(sv, "Export saves", v -> pickExport());
         action(sv, "Restore a backup", v -> pickBackup());
         note(sv, "Import takes save files (SONIC2B__S01 and the like for the story, SONIC2B__ALF for Chao World) "
-                + "or a ZIP of them. It replaces only the saves it brings, and backs up the current ones first (the "
+                + "or a ZIP of them, or a Debug Export's saves. It replaces only the saves it brings, and backs up the current ones first (the "
                 + "last " + SaveTools.KEEP + " are kept). Export writes the saves the game sees to a ZIP you choose. "
                 + "Changes apply from the next session.");
 
@@ -593,12 +593,22 @@ public class Sa2SettingsActivity extends Activity {
         }, "save-import-read").start();
     }
 
-    /** Shows what the pick holds and imports on OK. */
+    /** Shows what the pick holds (a Debug Export asks which of its two sets) and imports on OK. */
     private void confirmImport(SaveTools.Picked p) {
         if (isFinishing() || isDestroyed()) return;
         if (p.error != null) {
             new AlertDialog.Builder(this).setTitle("Nothing imported").setMessage(p.error)
                     .setPositiveButton("OK", null).show();
+            return;
+        }
+        if (p.isExport()) {
+            List<String> rows = new ArrayList<>();
+            List<List<SaveTools.Found>> sets = new ArrayList<>();
+            if (!p.end.isEmpty()) { rows.add("The saves at the session's end (" + names(p.end) + ")"); sets.add(p.end); }
+            if (!p.start.isEmpty()) { rows.add("The saves at the session's start (" + names(p.start) + ")"); sets.add(p.start); }
+            new AlertDialog.Builder(this).setTitle("Import from this Debug Export")
+                    .setItems(rows.toArray(new String[0]), (dlg, which) -> doImport(sets.get(which)))
+                    .setNegativeButton("Cancel", null).show();
             return;
         }
         String msg = "Import " + names(p.saves) + "?";

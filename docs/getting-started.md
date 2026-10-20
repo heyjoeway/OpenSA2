@@ -165,6 +165,8 @@ Each launch keeps a session folder under the data folder's `sessions/`. `bin/sa2
 .venv/bin/python tools/s7/replay_export.py sa2-debug-SESSION.zip
 ```
 
+To put a session's saves in place instead, `tools/saves.py import sa2-debug-SESSION.zip` imports the saves the session ended with, and `--from start` the ones it started from; the Android **Saves** card asks which.
+
 It replays the keyboard from the session's `input.log` and the controllers from its `pad.log`. The game logs controller changes to the file `SA2_INPUT_PAD_LOG` names and replays a log given by `SA2_INPUT_PAD_SCRIPT`; with both unset, it does neither. `runtime/sa2_dinput.h` describes the format.
 
 To try the low-FPS speed fix in a development build, add `SA2_PLAY_FRAMESKIP=2`, `3`, or `auto` to the build's `share/game.env`. The live-play tool `tools/s5/play_live.py` takes `--frameskip 2|3|auto` instead, and it removes a `SA2_PLAY_FRAMESKIP` left in your shell. Registered replays and test runs never use the setting. The game's log reports what the fix did; `runtime/sa2_frameskip.c` describes the mechanism.

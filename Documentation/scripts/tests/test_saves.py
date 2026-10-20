@@ -147,6 +147,25 @@ def test_zips_and_refusals(setup, capsys):
     assert run("import", str(z), str(tmp / "saves.zip")) == 2
 
 
+def test_an_oversized_entry_or_file_is_refused_unread(setup, monkeypatch, capsys):
+    """A save-named ZIP entry that would decompress far past a save's size (a ZIP bomb) and a
+    save-named file of the wrong size are refused by their declared and on-disk sizes, unread."""
+    tmp, run, saves, _, _ = setup
+    bomb = tmp / "bomb.zip"
+    with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as w:
+        w.writestr("SAVEDATA/SONIC2B__ALF", bytes(32 << 20))   # 32 MB of zeros, a few KB compressed
+    read = []
+    real_read = zipfile.ZipFile.read
+    monkeypatch.setattr(zipfile.ZipFile, "read", lambda self, name, *a: read.append(name) or real_read(self, name, *a))
+    assert run("import", str(bomb)) == 2
+    assert read == [] and "33554432 bytes" in capsys.readouterr().out
+    big = tmp / "SONIC2B__S01"
+    big.write_bytes(bytes(MAIN + 1))
+    monkeypatch.setattr(type(big), "read_bytes", lambda self: pytest.fail(f"{self} was read"))
+    assert run("import", str(big)) == 2
+    assert not (saves / "SONIC2B__S01").exists()
+
+
 def test_export_then_restore_the_oldest_backup(setup):
     tmp, run, saves, backups, game = setup
     (tmp / "SONIC2B__S02").write_bytes(b"\2" * MAIN)

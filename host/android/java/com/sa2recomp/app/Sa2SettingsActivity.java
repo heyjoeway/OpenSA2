@@ -53,7 +53,7 @@ public class Sa2SettingsActivity extends Activity {
     private GameSettings mS;
     private int mLong, mShort;
     private Button[] mOrientation, mAspect;
-    private Switch mWidescreen, mHud;
+    private Switch mWidescreen, mHud, mRecord;
     private final Map<String, Switch> mTweaks = new HashMap<>();   // each GameSettings.TWEAKS name's switch
     private Button mTweaksOff;                 // every tweak off at once (GameSettings.tweaksOff)
     private Button mResolution, mLayoutLandscape, mLayoutPortrait;
@@ -439,6 +439,7 @@ public class Sa2SettingsActivity extends Activity {
         mResolution.setText(resolutionName(shownResolution()));
         mResolution.setEnabled(fixed || wide);
         mHud.setChecked(mS.hud43);
+        if (mRecord != null) mRecord.setChecked(mS.recordSessions);
         for (Map.Entry<String, Switch> e : mTweaks.entrySet()) e.getValue().setChecked(mS.tweaksOn.contains(e.getKey()));
         mTweaksOff.setEnabled(!mS.tweaksOn.isEmpty());
         int[] pic = mS.picture(mLong, mShort);
@@ -679,12 +680,19 @@ public class Sa2SettingsActivity extends Activity {
 
     /** The Debug section's rows. */
     private void debugRows(LinearLayout g) {
-        label(g, "Debug Export", true);
+        mRecord = toggle(g, "Record sessions", (b, on) -> {
+            mS.recordSessions = on;
+            save();
+        });
+        note(g, "Keeps each session's saves and settings from before and after it, and the controller's "
+                + "input, so an export can be replayed. Off, a session keeps only its logs. Applies from the "
+                + "next session.");
+        label(g, "Debug Export", false);
         mDebugNote = note(g, "");
         mExportLatest = action(g, "Export the latest session", v -> export(null));
         mExportPick = action(g, "Export another session", v -> pickSession());
-        note(g, "Makes one ZIP of a play session's logs, its saves before and after, and what is needed to "
-                + "replay it, and shares it. It holds no pictures of the game.");
+        note(g, "Makes one ZIP of a play session's logs and saves, with what is needed to replay it when the "
+                + "session was recorded, and shares it. It holds no pictures of the game.");
     }
 
     private void updateDebug() {

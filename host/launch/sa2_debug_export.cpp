@@ -346,6 +346,7 @@ Result debug_export(const Request& r) {
     std::vector<std::string> files;
     walk(dir, "", files);
     bool has_end_saves = false;
+    bool has_start_saves = false;
     for (const std::string& rel : files) {
         std::string why;
         sa2p::Stat fs;
@@ -359,8 +360,14 @@ Result debug_export(const Request& r) {
             continue;
         }
         has_end_saves |= rel.compare(0, 10, "end-saves/") == 0;
+        has_start_saves |= rel.compare(0, 12, "start-saves/") == 0;
         add("session/" + rel, data, describe(rel));
     }
+    // A session the recorder did not record (it is off unless asked for) keeps no start state.
+    if (!has_start_saves)
+        notes += "# not replayable: the session recorder was off (--record-session, or SA2_RECORD_SESSION=1 in "
+                 "share/game.env; Android: Game settings > Debug > Record sessions), so there is no "
+                 "session/start-saves/ or pad.log\n";
     // end-saves/ at export time, for a session that has none.
     if (!has_end_saves && !r.overlay.empty()) {
         std::string index = "# resource/gd_PC/SAVEDATA as the game sees it, taken at export time: name, source, bytes, "

@@ -128,8 +128,10 @@ def seed_overlay(session: Path, overlay: Path) -> list[str]:
     for src, rel in (("start-saves", SAVE_DIR), ("start-config", "Config")):
         folder = session / src
         if not folder.is_dir():
-            raise Refused(f"the export has no session/{src}/: it comes from before the session recorder, "
-                          "so the state the session started from is unknown")
+            raise Refused(f"the export has no session/{src}/: the session was not recorded (the session "
+                          "recorder is off unless asked for: --record-session or SA2_RECORD_SESSION=1 in "
+                          "share/game.env, or Game settings > Debug > Record sessions on Android), so the state "
+                          "it started from is unknown")
         dest = overlay / rel
         dest.mkdir(parents=True, exist_ok=True)
         for f in sorted(folder.iterdir()):

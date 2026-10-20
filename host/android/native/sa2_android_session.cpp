@@ -1071,7 +1071,6 @@ int play_game(const Args& a) {
     env_set(genv, "SA2_REC_COUNTS", session + "/counts.runrec");
     env_set(genv, "SA2_INPUT_DI_SOURCE", input_fifo);
     env_set(genv, "SA2_INPUT_DI_LOG", session + "/input.log");
-    env_set(genv, "SA2_INPUT_PAD_LOG", session + "/pad.log");
     env_set(genv, "SA2_LAUNCH_TICKS", session + "/ticks.tsv");
     if (pace_r != sa2l::kNoFd) env_set(genv, "SA2_REC_PACE_FD", std::to_string(kPaceFd));
     else genv.erase(std::remove_if(genv.begin(), genv.end(), [](auto& e) { return e.first == "SA2_REC_PACE_FD"; }),
@@ -1082,14 +1081,23 @@ int play_game(const Args& a) {
     // Android the touch overlay is slot 0's pad from the start, so the pad drives player 1.
     env_set(genv, "SA2_GUEST_CMDLINE", "-r");
     env_set(genv, "SA2_INPUT_PAD_WAIT_MS", "10000");
-    // The session recorder (the header): what the game will see, before it starts.
+    // The session recorder (the header): what the game will see, before it starts. Off unless the
+    // settings screen's Debug card asks for it (SA2_RECORD_SESSION=1, a --setting the session reads
+    // and does not hand to the game), so a session writes what it always has; on, the pads by
+    // XInput call too (pad.log).
+    const std::string* record_asked = env_find(genv, "SA2_RECORD_SESSION");
+    const bool recording = record_asked && *record_asked == "1";
+    genv.erase(std::remove_if(genv.begin(), genv.end(), [](auto& e) { return e.first == "SA2_RECORD_SESSION"; }),
+               genv.end());
+    say("session recorder: %s", recording ? "on (Debug > Record sessions)" : "off");
+    if (recording) env_set(genv, "SA2_INPUT_PAD_LOG", session + "/pad.log");
     const sa2s::KV subs = {{session, "<session>"}, {cfg.read_root, "<game>"}, {cfg.overlay, "<overlay>"},
                            {a.libdir, "<apk>/lib"}, {a.external, "<ext>"}, {a.files, "<files>"}};
     sa2s::KV run = {{"runner", "host/android"}, {"mode", "play"}, {"host", "sdl3-gpu"}, {"started", sa2p::now_utc_iso8601()},
                     {"screen", a.screen}, {"orientation", a.orientation.empty() ? "landscape" : a.orientation},
                     {"paced", a.pace ? "true" : "false"}, {"sound", a.audio ? "true" : "false"}};
     for (const auto& kv : a.settings) run.push_back({"setting " + kv.first, kv.second});
-    record_start(session, cfg, genv, subs, run);
+    if (recording) record_start(session, cfg, genv, subs, run);
     sa2l::Spawn gs;
     gs.exe = game_bin;
     gs.argv = {game_bin, cfg.exe, "--json", session + "/game.runrec", "--timeout", "0"};
@@ -1275,7 +1283,7 @@ int play_game(const Args& a) {
             st.find(" records, ") != std::string::npos)
             closed = "; the game had closed its records";
     }
-    record_end(session, cfg, run, game_bin, a.libdir + "/libmain.so");
+    if (recording) record_end(session, cfg, run, game_bin, a.libdir + "/libmain.so");
     say("ended: %s; the game stopped by %s (status %d); the player exited %d%s", ended_by.c_str(), stop_how.c_str(),
         game.status, rc, closed.c_str());
     say("relay: %llu frames in, %llu out, %llu bytes%s", (unsigned long long)rs.frames_in,

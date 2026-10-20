@@ -279,6 +279,7 @@ final class DebugExport {
             List<String> files = new ArrayList<>();
             walk(session, "", files);
             boolean endSaves = false;
+            boolean startSaves = false;
             for (String rel : files) {
                 File f = new File(session, rel);
                 String why = leftOutByName(rel);
@@ -298,8 +299,13 @@ final class DebugExport {
                     continue;
                 }
                 endSaves |= rel.startsWith("end-saves/");
+                startSaves |= rel.startsWith("start-saves/");
                 a.add("session/" + rel, data, describe(rel));
             }
+            // A session the recorder did not record (it is off unless asked for) keeps no start state.
+            if (!startSaves)
+                notes.append("# not replayable: the session recorder was off (Game settings > Debug > Record "
+                             + "sessions), so there is no session/start-saves/ or pad.log\n");
             if (!endSaves) {
                 // The saves the game would see now: the overlay's over the game folder's.
                 java.util.TreeMap<String, File> seen = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);

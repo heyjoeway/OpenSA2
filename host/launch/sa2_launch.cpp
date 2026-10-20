@@ -242,6 +242,7 @@ struct Options {
     double timeout_s = 900;
     std::vector<std::string> player_args;   // --player-arg: play only
     bool debug_export = false;              // --debug-export [SESSION] (--out: the ZIP)
+    bool record_session = false;            // --record-session: the session recorder for this launch
     std::string export_session;
 };
 
@@ -313,7 +314,7 @@ constexpr const char* kChooseFolder = "Choose your Sonic Adventure 2 folder (the
 int usage() {
     std::fprintf(stderr,
                  "usage: sa2recomp [--host sdl3-gpu|dxvk-native] [--no-pace] [--no-sound] [--no-verify]"
-                 " [--out DIR] [--no-widescreen | --play-res WxH] [--player-arg ARG ...]\n"
+                 " [--out DIR] [--no-widescreen | --play-res WxH] [--player-arg ARG ...] [--record-session]\n"
                  "       sa2recomp --selftest [--frames N] [--record R.runrec] [--host H] [--out DIR]"
                  " [--timeout S] [--video-driver NAME] [--pace] [--no-sound] [--no-verify]\n"
                  "       sa2recomp --debug-export [SESSION] [--out FILE.zip]\n");
@@ -1143,6 +1144,14 @@ std::string first_run_json(const FirstRun& fr) {
 
 // ---------------------------------------------------------------- the session recorder
 
+// The recorder is off unless asked for, so a launch writes what it always has: --record-session
+// turns it on for one launch, and SA2_RECORD_SESSION=1 in share/game.env for every launch (a
+// launch from a desktop menu takes no flag). The launcher reads that line and does not hand it to
+// the game. On, the session folder also keeps the saves and the config before and after the game,
+// session-info.json and the pads by XInput call (pad.log), which a Debug Export carries and
+// tools/s7/replay_export.py replays from; off, a Debug Export still holds the session's logs and
+// the saves at export time, and says the session cannot be replayed.
+
 // What the recorder's text and Debug Export write in place of a person's paths: the session folder
 // as <session>, the game folder <game>, the write root <overlay>, the data folder <data> and the
 // home folder ~ (the longest match first, sa2s::redact).
@@ -1251,6 +1260,7 @@ int launch(int argc, char** argv) {
             }
             o.player_args.push_back(args[++i]);
         }
+        else if (a == "--record-session") o.record_session = true;
         else if (a == "--debug-export") {
             o.debug_export = true;
             if (i + 1 < args.size() && args[i + 1].compare(0, 2, "--") != 0) o.export_session = args[++i];
@@ -1654,9 +1664,14 @@ int launch(int argc, char** argv) {
     // folder (tools/s7/replay_export.py); and the pads it is given, by XInput call
     // (SA2_INPUT_PAD_LOG, runtime/sa2_dinput.h "Gamepad replay"). The selftest's game hides the
     // game folder's saves, so its snapshot does too.
-    genv.set("SA2_INPUT_PAD_LOG", session + "/pad.log");
+    const std::string* record_asked = genv.find("SA2_RECORD_SESSION");
+    const bool recording = o.record_session || (record_asked && *record_asked == "1");
+    genv.drop("SA2_RECORD_SESSION");
+    say("session recorder: %s", recording ? (o.record_session ? "on (--record-session)" : "on (SA2_RECORD_SESSION=1)")
+                                          : "off (--record-session or SA2_RECORD_SESSION=1 in share/game.env records)");
     const sa2s::KV subs = recorder_subs(session, cfg.read_root, write_root);
-    record_session_start(session, cfg.read_root, write_root, o.selftest, genv.kv, subs,
+    if (recording) genv.set("SA2_INPUT_PAD_LOG", session + "/pad.log");
+    if (recording) record_session_start(session, cfg.read_root, write_root, o.selftest, genv.kv, subs,
                          {{"runner", "host/launch"},
                           {"mode", o.selftest ? "selftest" : "play"},
                           {"host", host->id},
@@ -1862,7 +1877,7 @@ int launch(int argc, char** argv) {
         said_line(line);
     }
     // The saves and config after the game (the recorder), now that nothing writes them.
-    record_session_end(session, cfg.read_root, write_root, o.selftest);
+    if (recording) record_session_end(session, cfg.read_root, write_root, o.selftest);
     // The player reads the stream to its END; cancelled only if it has not finished.
     bool player_cancelled = false;
     if (!wait_or_cancel(player, o.selftest ? kSelftestFeedGrace : kFeedGrace)) {
@@ -1992,6 +2007,7 @@ int launch(int argc, char** argv) {
     j.raw("first_run", first_run_json(first));
     j.s("console", console);
     j.s("widescreen", widescreen);
+    j.b("session_recorder", recording);
     j.s("tweaks", tweaks);
     {
         Json g;

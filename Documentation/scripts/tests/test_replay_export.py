@@ -97,7 +97,7 @@ def test_an_empty_pad_log_gives_no_pad_script(tmp_path):
 
 
 def test_an_export_it_cannot_replay_is_refused(tmp_path):
-    with pytest.raises(RE.Refused, match="before the session recorder"):
+    with pytest.raises(RE.Refused, match="the session was not recorded"):
         RE.seed_overlay(RE.extract(export(tmp_path, drop=("session/start-saves/SONIC2B__ALF",
                                                           "session/start-saves/index.tsv")), tmp_path / "w1"),
                         tmp_path / "w1/overlay")

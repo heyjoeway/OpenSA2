@@ -189,6 +189,12 @@ def read_pick(paths: list[Path]) -> tuple[dict[str, bytes], list[str]]:
             entries = [i for i in z.infolist() if not i.is_dir() and kind(i.filename.rsplit("/", 1)[-1])]
             for i in entries:
                 name = i.filename.rsplit("/", 1)[-1]
+                # The size the entry declares first: zipfile reads an entry only up to it, so a
+                # save-named entry that would decompress to gigabytes is refused unread.
+                why = not_a_save(name, i.file_size)
+                if why:
+                    skipped.append(f"{i.filename}: {why}")
+                    continue
                 data = z.read(i)
                 why = not_a_save(name, len(data))
                 if why:
@@ -199,6 +205,10 @@ def read_pick(paths: list[Path]) -> tuple[dict[str, bytes], list[str]]:
                     saves[name.upper()] = data
         return saves, skipped
     for p in paths:
+        why = not_a_save(p.name, p.stat().st_size)   # a file of the wrong size is not read
+        if why:
+            skipped.append(why)
+            continue
         data = p.read_bytes()
         why = not_a_save(p.name, len(data))
         if why:
